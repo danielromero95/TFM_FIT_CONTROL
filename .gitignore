@@ -1,0 +1,27 @@
+# Ignorar entorno virtual
+.venv/
+gym_performance_env/
+
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Notebooks checkpoints
+*.ipynb_checkpoints
+
+# Datos grandes
+data/raw/
+data/processed/
+
+# Modelos entrenados
+*.h5
+*.keras
+*.pt
+
+# Logs
+*.log
+*.logs
+
+# Otros
+.DS_Store

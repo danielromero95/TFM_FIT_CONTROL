@@ -1,0 +1,19 @@
+name: gym_performance_env
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - opencv          # Nota: en conda se instala como "opencv" en lugar de "opencv-python"
+  - pandas>=1.3
+  - numpy>=1.21
+  - scikit-learn>=1.0
+  - tensorflow>=2.7
+  - pytorch>=1.10  # Instalado desde el canal "pytorch"
+  - pytest>=6.2
+  - pip            # Necesario para que funcione el apartado pip:
+  - pip:
+    - mediapipe>=0.9
+    - mlflow>=1.26
+    - streamlit>=1.10
