@@ -2,7 +2,7 @@
 
 **Repository:** `TFM_FIT_CONTROL`  
 **Author:** Daniel Romero  
-**Last Update:** 15 de Octubre de 2025
+**Version:** 1.1 (2025-10-15)
 
 ---
 
@@ -22,9 +22,22 @@ The general workflow includes:
 - Pose estimation: MediaPipe Pose to extract landmarks and calculate angles, angular velocities, symmetry, etc.
 
 
-Modeling:
-- Repeat counting by peak detection in angle series.
-- Fault detection (still to be decided how to do it)
+## What’s new in 1.1
 
+**Parity achieved between Streamlit and Desktop UI.** Both front-ends now call the same unified pipeline and config:
 
-This repository contains the basic structure to begin developing each of the modules in a modular and traceable manner using Git.
+- Unified `Config` (dataclasses) with SHA1 **fingerprint** for reproducibility
+- Single entry point `run_pipeline(video_path, cfg)` returning a rich `Report`
+- Robust FPS detection with fallbacks + guardrails (`min_frames`, `min_fps`)
+- One *single* resize stage (documented in config) before pose estimation
+- Rep counting based on valleys with **prominence / min distance / refractory**
+- Streamlit & GUI surface **run stats**, warnings and `skip_reason`
+- CLI ↔ Streamlit parity test added
+- Pinned OpenCV/SciPy in `environment.yml` for stability
+
+## Installation
+
+```bash
+# 1) Create conda env
+conda env create -f environment.yml
+conda activate gym_env
