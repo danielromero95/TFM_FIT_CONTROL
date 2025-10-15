@@ -1,27 +1,78 @@
-# Ignorar entorno virtual
-.venv/
-gym_performance_env/
+# --- Project-specific ---
+data/
+project_tree.txt
 
-
-# Archivos compilados de Python
+# --- Python bytecode & build artifacts ---
 __pycache__/
-*.pyc
+*.py[cod]
+*.$py.class
+.build/
+build/
+dist/
+.eggs/
+*.egg-info/
 
-# Notebooks checkpoints
-*.ipynb_checkpoints
+# --- Testing, coverage, type-checking, linters ---
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pytype/
+.ruff_cache/
 
-# Datos grandes
-data/raw/
-data/processed/
+# --- Environments ---
+.venv/
+venv/
+env/
+.env
+.env.*
 
-# Modelos entrenados
-*.h5
-*.keras
-*.pt
+# --- Editors/IDE ---
+.vscode/
+.idea/
 
-# Logs
+# --- OS clutter ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- Logs ---
+logs/
 *.log
 *.logs
+*.log.*
+*.bak
+!logs/.gitkeep
 
-# Otros
-.DS_Store
+# --- Data policy ---
+# Keep examples tracked
+!data/examples/**
+# Ignore raw and heavy intermediates
+data/raw/**
+data/processed/**/frames/**
+data/processed/**/tmp*/**
+data/processed/**/*.mp4
+data/processed/**/*.avi
+data/processed/**/*.mov
+data/processed/**/*.mkv
+# Keep lightweight summaries
+!data/processed/**/*_metrics.csv
+!data/processed/**/*metrics.csv
+!data/processed/**/*_count.txt
+
+# --- Models & artifacts ---
+models/**
+!models/README.md
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- App/runtime caches ---
+.cache/
+.streamlit/
+.streamlit/secrets.toml
