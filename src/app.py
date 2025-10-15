@@ -1,80 +1,115 @@
-# app.py
+"""Streamlit front-end for the analysis pipeline."""
+
+from __future__ import annotations
+
 import sys
 import tempfile
 from pathlib import Path
 
 import streamlit as st
 
-
 # Ensure the project root is available on the import path when Streamlit executes the app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
 from src import config
-from src.pipeline import run_full_pipeline_in_memory
-from src.run_pipeline import DEFAULT_COUNTS_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_POSES_DIR
+from src.pipeline import Report, run_pipeline
 
 st.title("Gym Performance Analysis")
 
-uploaded = st.file_uploader("Sube un vídeo de sentadilla", type=["mp4","mov"])
-low = st.slider("Umbral bajo (°)",  0, 180, 80)
+uploaded = st.file_uploader("Sube un vídeo de sentadilla", type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"])
+low = st.slider("Umbral bajo (°)", 0, 180, 80)
 high = st.slider("Umbral alto (°)", 0, 180, 150)
-fps = st.number_input("FPS del vídeo", 1.0, 120.0, 28.57)
 
 if uploaded is not None:
-    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mov")
+    suffix = Path(uploaded.name).suffix or ".mp4"
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     tmp_file.write(uploaded.read())
     tmp_file.flush()
     tmp_file.close()
-    video_path = tmp_file.name
-    st.video(video_path)
+    video_path = Path(tmp_file.name)
+
+    st.video(str(video_path))
+
+    cfg = config.load_default()
+    cfg.faults.low_thresh = float(low)
+    cfg.faults.high_thresh = float(high)
+
+    st.markdown(f"**CONFIG_SHA1:** `{cfg.fingerprint()}`")
 
     if st.button("Empezar análisis"):
-        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        DEFAULT_COUNTS_DIR.mkdir(parents=True, exist_ok=True)
-        DEFAULT_POSES_DIR.mkdir(parents=True, exist_ok=True)
-
-        settings = {
-            "output_dir": str(DEFAULT_OUTPUT_DIR),
-            "sample_rate": 1,
-            "rotate": None,
-            "target_width": config.DEFAULT_TARGET_WIDTH,
-            "target_height": config.DEFAULT_TARGET_HEIGHT,
-            "use_crop": True,
-            "generate_debug_video": False,
-            "debug_mode": False,
-            "low_thresh": low,
-            "high_thresh": high,
-            "fps_override": fps,
-        }
-
         with st.spinner("Procesando vídeo…"):
             try:
-                results = run_full_pipeline_in_memory(video_path, settings)
+                report: Report = run_pipeline(str(video_path), cfg)
             except Exception as exc:  # pragma: no cover - surfaced to the UI user
                 st.error("Ha ocurrido un error durante el análisis")
                 st.code(str(exc))
-                results = None
+                report = None
 
-        if results is not None:
-            repetitions = results.get("repeticiones_contadas", 0)
-            metrics_df = results.get("dataframe_metricas")
+        if report is not None:
+            stats = report.stats
+            repetitions = report.repetitions
+            metrics_df = report.metrics
 
-            video_stem = Path(video_path).stem
-            count_path = DEFAULT_COUNTS_DIR / f"{video_stem}_count.txt"
+            counts_dir = Path(cfg.output.counts_dir)
+            poses_dir = Path(cfg.output.poses_dir)
+            counts_dir.mkdir(parents=True, exist_ok=True)
+            poses_dir.mkdir(parents=True, exist_ok=True)
+
+            video_stem = video_path.stem
+            count_path = counts_dir / f"{video_stem}_count.txt"
             count_path.write_text(f"{repetitions}\n", encoding="utf-8")
 
-            st.success(f"Análisis completado ✅ | Repeticiones detectadas: {repetitions}")
+            if metrics_df is not None:
+                metrics_path = poses_dir / f"{video_stem}_metrics.csv"
+                metrics_df.to_csv(metrics_path, index=False)
+            else:
+                metrics_path = None
+
+            st.success(
+                "Análisis completado ✅" if stats.skip_reason is None else "Análisis completado con avisos ⚠️"
+            )
+            st.markdown(f"### Repeticiones detectadas: **{repetitions}**")
+
+            st.markdown("### Estadísticas de la ejecución")
+            stats_rows = [
+                {"Campo": "CONFIG_SHA1", "Valor": stats.config_sha1},
+                {"Campo": "fps_original", "Valor": f"{stats.fps_original:.2f}"},
+                {"Campo": "fps_effective", "Valor": f"{stats.fps_effective:.2f}"},
+                {"Campo": "frames", "Valor": stats.frames},
+                {"Campo": "exercise_detected", "Valor": stats.exercise_detected},
+                {"Campo": "primary_angle", "Valor": stats.primary_angle or "N/D"},
+                {"Campo": "angle_range_deg", "Valor": f"{stats.angle_range_deg:.2f}"},
+                {"Campo": "min_prominence", "Valor": f"{stats.min_prominence:.2f}"},
+                {"Campo": "min_distance_sec", "Valor": f"{stats.min_distance_sec:.2f}"},
+                {"Campo": "refractory_sec", "Valor": f"{stats.refractory_sec:.2f}"},
+            ]
+            st.table(stats_rows)
+
+            if stats.config_path:
+                st.info(f"Configuración utilizada guardada en: `{stats.config_path}`")
+
+            if stats.warnings:
+                st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
+
+            if stats.skip_reason:
+                st.error(f"Conteo de repeticiones omitido: {stats.skip_reason}")
+
             st.markdown("### Recuento de repeticiones")
             st.code(f"{repetitions}")
 
             if metrics_df is not None:
-                metrics_path = DEFAULT_POSES_DIR / f"{video_stem}_metrics.csv"
-                metrics_df.to_csv(metrics_path, index=False)
                 st.markdown("### Métricas calculadas")
                 st.dataframe(metrics_df)
+
+            if metrics_path is not None:
+                st.download_button(
+                    "Descargar métricas",
+                    data=metrics_path.read_text(encoding="utf-8"),
+                    file_name=f"{video_stem}_metrics.csv",
+                    mime="text/csv",
+                )
 
             st.download_button(
                 "Descargar recuento",
@@ -82,3 +117,7 @@ if uploaded is not None:
                 file_name=f"{video_stem}_count.txt",
                 mime="text/plain",
             )
+
+            if report.debug_video_path:
+                st.markdown("### Vídeo de depuración")
+                st.video(str(report.debug_video_path))

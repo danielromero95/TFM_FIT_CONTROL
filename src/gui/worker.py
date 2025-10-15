@@ -1,29 +1,36 @@
-# src/gui/worker.py
+"""Worker thread used by the Qt GUI to execute the pipeline."""
+
+from __future__ import annotations
+
 import logging
 from PyQt5.QtCore import QThread, pyqtSignal
-from src.pipeline import run_full_pipeline_in_memory
+
+from src import config
+from src.pipeline import Report, run_pipeline
 
 logger = logging.getLogger(__name__)
 
+
 class AnalysisWorker(QThread):
     """Ejecuta el pipeline de análisis en un hilo separado."""
+
     progress = pyqtSignal(int)
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, video_path, settings, parent=None):
+    def __init__(self, video_path: str, cfg: config.Config, parent=None):
         super().__init__(parent)
         self.video_path = video_path
-        self.settings = settings
+        self.cfg = cfg.copy()
 
     def run(self):
         try:
-            results = run_full_pipeline_in_memory(
+            report: Report = run_pipeline(
                 video_path=self.video_path,
-                settings=self.settings,
-                progress_callback=self.progress.emit
+                cfg=self.cfg,
+                progress_callback=self.progress.emit,
             )
-            self.finished.emit(results)
-        except Exception as e:
+            self.finished.emit(report.to_legacy_dict())
+        except Exception as exc:  # pragma: no cover - surfaced to the GUI user
             logger.exception("Error durante la ejecución del pipeline en el WorkerThread")
-            self.error.emit(str(e))
+            self.error.emit(str(exc))

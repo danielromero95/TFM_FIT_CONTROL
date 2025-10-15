@@ -3,6 +3,7 @@
 import os
 import cv2
 import logging
+from pathlib import Path
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QTabWidget, QVBoxLayout, QFormLayout, 
                              QHBoxLayout, QPushButton, QProgressBar, QLabel, QSpinBox, 
                              QComboBox, QCheckBox, QLineEdit, QFileDialog, QMessageBox, QApplication)
@@ -164,18 +165,20 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "No se ha seleccionado ningún vídeo.")
             return
 
-        settings = {
-            'output_dir': self.output_dir_edit.text().strip(),
-            'sample_rate': self.sample_rate_spin.value(),
-            'rotate': self.current_rotation,
-            'target_width': self.width_spin.value(),
-            'target_height': self.height_spin.value(),
-            'use_crop': self.use_crop_check.isChecked(),
-            'generate_debug_video': self.generate_video_check.isChecked(),
-            'debug_mode': self.debug_mode_check.isChecked()
-        }
-        
-        self.worker = AnalysisWorker(self.video_path, settings)
+        cfg = config.load_default()
+        base_dir = Path(self.output_dir_edit.text().strip()).expanduser()
+        cfg.output.base_dir = base_dir
+        cfg.output.counts_dir = base_dir / 'counts'
+        cfg.output.poses_dir = base_dir / 'poses'
+        cfg.video.manual_sample_rate = int(self.sample_rate_spin.value())
+        cfg.pose.rotate = self.current_rotation
+        cfg.pose.target_width = int(self.width_spin.value())
+        cfg.pose.target_height = int(self.height_spin.value())
+        cfg.pose.use_crop = self.use_crop_check.isChecked()
+        cfg.debug.generate_debug_video = self.generate_video_check.isChecked()
+        cfg.debug.debug_mode = self.debug_mode_check.isChecked()
+
+        self.worker = AnalysisWorker(self.video_path, cfg)
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.error.connect(self._on_processing_error)
         self.worker.finished.connect(self._on_processing_finished)
