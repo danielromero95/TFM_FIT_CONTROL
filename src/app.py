@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["GLOG_minloglevel"] = "2"
 
 # Ensure the project root is available on the import path when Streamlit executes the app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -85,7 +90,12 @@ if uploaded is not None:
                 {"Campo": "min_distance_sec", "Valor": f"{stats.min_distance_sec:.2f}"},
                 {"Campo": "refractory_sec", "Valor": f"{stats.refractory_sec:.2f}"},
             ]
-            st.table(stats_rows)
+            stats_df = pd.DataFrame(stats_rows, columns=["Campo", "Valor"])
+            stats_df = stats_df.astype({"Valor": "string"})
+            try:
+                st.dataframe(stats_df, use_container_width=True)
+            except Exception:
+                st.json({row["Campo"]: row["Valor"] for row in stats_rows})
 
             if stats.config_path:
                 st.info(f"Configuración utilizada guardada en: `{stats.config_path}`")
