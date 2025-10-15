@@ -1,7 +1,12 @@
 # app.py
+import tempfile
+from pathlib import Path
+
 import streamlit as st
-import tempfile, os
-from subprocess import run
+
+from src import config
+from src.pipeline import run_full_pipeline_in_memory
+from src.run_pipeline import DEFAULT_COUNTS_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_POSES_DIR
 
 st.title("Gym Performance Analysis")
 
@@ -11,33 +16,61 @@ high = st.slider("Umbral alto (°)", 0, 180, 150)
 fps = st.number_input("FPS del vídeo", 1.0, 120.0, 28.57)
 
 if uploaded is not None:
-    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mov")
-    tfile.write(uploaded.read())
-    video_path = tfile.name
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mov")
+    tmp_file.write(uploaded.read())
+    tmp_file.flush()
+    tmp_file.close()
+    video_path = tmp_file.name
     st.video(video_path)
 
     if st.button("Empezar análisis"):
-        # Creamos un directorio de salida temporal
-        outdir = tempfile.mkdtemp(prefix="gym_out_")
-        # Llamamos al pipeline (igual que hicimos en consola)
-        cmd = [
-          "python", "-m", "src.run_pipeline",
-          "--video", video_path,
-          "--fps", str(fps),
-          "--sample_rate", "1",
-          "--low_thresh", str(low),
-          "--high_thresh", str(high)
-        ]
+        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        DEFAULT_COUNTS_DIR.mkdir(parents=True, exist_ok=True)
+        DEFAULT_POSES_DIR.mkdir(parents=True, exist_ok=True)
+
+        settings = {
+            "output_dir": str(DEFAULT_OUTPUT_DIR),
+            "sample_rate": 1,
+            "rotate": None,
+            "target_width": config.DEFAULT_TARGET_WIDTH,
+            "target_height": config.DEFAULT_TARGET_HEIGHT,
+            "use_crop": True,
+            "generate_debug_video": False,
+            "debug_mode": False,
+            "low_thresh": low,
+            "high_thresh": high,
+            "fps_override": fps,
+        }
+
         with st.spinner("Procesando vídeo…"):
-            res = run(cmd, capture_output=True, text=True)
-        if res.returncode == 0:
-            st.success("Análisis completado ✅")
-            st.text(res.stdout)
-            # Mostrar el TXT de repeticiones
-            count_txt = os.path.join("data/processed/counts", os.path.basename(video_path).split(".")[0] + "_count.txt")
-            if os.path.exists(count_txt):
-                st.markdown("### Recuento de repeticiones:")
-                st.code(open(count_txt).read())
-        else:
-            st.error("Ha ocurrido un error:")
-            st.code(res.stderr)
+            try:
+                results = run_full_pipeline_in_memory(video_path, settings)
+            except Exception as exc:  # pragma: no cover - surfaced to the UI user
+                st.error("Ha ocurrido un error durante el análisis")
+                st.code(str(exc))
+                results = None
+
+        if results is not None:
+            repetitions = results.get("repeticiones_contadas", 0)
+            metrics_df = results.get("dataframe_metricas")
+
+            video_stem = Path(video_path).stem
+            count_path = DEFAULT_COUNTS_DIR / f"{video_stem}_count.txt"
+            count_path.write_text(f"{repetitions}\n", encoding="utf-8")
+
+            st.success(f"Análisis completado ✅ | Repeticiones detectadas: {repetitions}")
+            st.markdown("### Recuento de repeticiones")
+            st.code(f"{repetitions}")
+
+            if metrics_df is not None:
+                metrics_path = DEFAULT_POSES_DIR / f"{video_stem}_metrics.csv"
+                metrics_df.to_csv(metrics_path, index=False)
+                st.markdown("### Métricas calculadas")
+                st.dataframe(metrics_df)
+
+            st.download_button(
+                "Descargar recuento",
+                data=count_path.read_text(encoding="utf-8"),
+                file_name=f"{video_stem}_count.txt",
+                mime="text/plain",
+            )
