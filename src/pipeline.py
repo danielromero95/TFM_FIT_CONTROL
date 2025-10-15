@@ -33,12 +33,17 @@ def run_full_pipeline_in_memory(video_path: str, settings: dict, progress_callba
     notify(5, "FASE 1: Extrayendo y rotando fotogramas...")
     original_frames, fps = extract_and_preprocess_frames(
         video_path=video_path,
-        rotate=settings.get('rotate', None), 
+        rotate=settings.get('rotate', None),
         sample_rate=settings.get('sample_rate', 1)
     )
     if not original_frames:
         raise ValueError("No se pudieron extraer fotogramas del vídeo.")
-    
+
+    fps_override = settings.get('fps_override')
+    if fps_override is not None:
+        logger.info("Anulando FPS detectado por el proporcionado manualmente (%s).", fps_override)
+        fps = fps_override
+
     # Preprocesamiento (Redimensionado) para el modelo
     target_size = (settings.get('target_width'), settings.get('target_height'))
     processed_frames = [cv2.resize(f, target_size) for f in original_frames]
