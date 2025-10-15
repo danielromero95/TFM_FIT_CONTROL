@@ -1,3 +1,4 @@
+# src/app.py
 """Streamlit front-end for the analysis pipeline."""
 
 from __future__ import annotations
@@ -10,8 +11,21 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+# --- Ensure Windows loads codec DLLs from the active conda env first -----------
+if sys.platform.startswith("win"):
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        dll_dir = Path(conda_prefix) / "Library" / "bin"
+        os.environ["PATH"] = str(dll_dir) + os.pathsep + os.environ.get("PATH", "")
+
+# --- Tame noisy logs from TF/MediaPipe -----------------------------------------
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["GLOG_minloglevel"] = "2"
+try:
+    from absl import logging as absl_logging
+    absl_logging.set_verbosity(absl_logging.ERROR)
+except Exception:
+    pass
 
 # Ensure the project root is available on the import path when Streamlit executes the app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +37,10 @@ from src.pipeline import Report, run_pipeline
 
 st.title("Gym Performance Analysis")
 
-uploaded = st.file_uploader("Sube un vídeo de sentadilla", type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"])
+uploaded = st.file_uploader(
+    "Sube un vídeo de sentadilla",
+    type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"],
+)
 low = st.slider("Umbral bajo (°)", 0, 180, 80)
 high = st.slider("Umbral alto (°)", 0, 180, 150)
 
@@ -40,6 +57,8 @@ if uploaded is not None:
     cfg = config.load_default()
     cfg.faults.low_thresh = float(low)
     cfg.faults.high_thresh = float(high)
+    # Reduce MediaPipe warning noise; resizing still happens before pose estimation
+    cfg.pose.use_crop = False
 
     st.markdown(f"**CONFIG_SHA1:** `{cfg.fingerprint()}`")
 
@@ -90,10 +109,9 @@ if uploaded is not None:
                 {"Campo": "min_distance_sec", "Valor": f"{stats.min_distance_sec:.2f}"},
                 {"Campo": "refractory_sec", "Valor": f"{stats.refractory_sec:.2f}"},
             ]
-            stats_df = pd.DataFrame(stats_rows, columns=["Campo", "Valor"])
-            stats_df = stats_df.astype({"Valor": "string"})
+            stats_df = pd.DataFrame(stats_rows, columns=["Campo", "Valor"]).astype({"Valor": "string"})
             try:
-                st.dataframe(stats_df, use_container_width=True)
+                st.dataframe(stats_df, width="stretch")
             except Exception:
                 st.json({row["Campo"]: row["Valor"] for row in stats_rows})
 
@@ -111,7 +129,7 @@ if uploaded is not None:
 
             if metrics_df is not None:
                 st.markdown("### Métricas calculadas")
-                st.dataframe(metrics_df)
+                st.dataframe(metrics_df, use_container_width=True)
 
             if metrics_path is not None:
                 st.download_button(

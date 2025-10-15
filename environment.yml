@@ -1,4 +1,4 @@
-name: gym_performance_env
+name: gym_env
 channels:
   - pytorch
   - conda-forge
@@ -6,6 +6,7 @@ channels:
 dependencies:
   - python=3.10
   - opencv=4.7.*          # Nota: en conda se instala como "opencv" en lugar de "opencv-python"
+  - ffmpeg
   - scipy=1.10.*
   - pandas>=1.3
   - numpy>=1.21
