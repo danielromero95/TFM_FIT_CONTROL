@@ -1,83 +1,139 @@
-# src/D_modeling/count_reps.py
-"""
-Contiene la lógica para el conteo de repeticiones a partir de series
-temporales de métricas (ej. ángulos).
-"""
-import pandas as pd
-import numpy as np
-from scipy.signal import find_peaks
-import logging
+"""Utilities for counting repetitions from biomechanical metrics."""
 
-# Importamos la configuración centralizada
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import List, Sequence, Tuple
+
+import numpy as np
+import pandas as pd
+from scipy.signal import find_peaks
+
 from src import config
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class CountingDebugInfo:
+    """Debug payload returned by the repetition counter."""
+
+    valley_indices: List[int]
+    prominences: List[float]
+
+
+def count_reps_from_angles(
+    angle_sequence: Sequence[float],
+    *,
+    low_thresh: float,
+    high_thresh: float,
+) -> int:
+    """Simple state-machine counter used by legacy unit tests."""
+    if not angle_sequence:
+        return 0
+
+    state = "up" if angle_sequence[0] >= high_thresh else "down"
+    reps = 0
+    has_reached_bottom = False
+
+    for angle in angle_sequence:
+        if state == "up":
+            if angle < low_thresh:
+                state = "down"
+                has_reached_bottom = True
+        else:  # state == "down"
+            if angle >= high_thresh and has_reached_bottom:
+                reps += 1
+                state = "up"
+                has_reached_bottom = False
+    return reps
+
+
 def count_reps_by_valleys(
-        angle_sequence: list, 
-        peak_height_thresh: float, 
-        prominence: float = 10, 
-        distance: int = 15
-    ) -> int:
-    """
-    Cuenta repeticiones detectando los valles (puntos más bajos) en una
-    secuencia de ángulos. Este método es más robusto ante el ruido.
+    angle_sequence: Sequence[float],
+    *,
+    prominence: float,
+    distance: int,
+) -> Tuple[int, CountingDebugInfo]:
+    """Count repetitions by detecting valleys in the angle sequence."""
+    if not angle_sequence:
+        return 0, CountingDebugInfo([], [])
 
-    Args:
-        angle_sequence (list): Serie temporal de ángulos (en grados).
-        peak_height_thresh (float): El umbral que el ángulo debe cruzar (hacia abajo)
-                                    para ser considerado un valle válido. Corresponde
-                                    al 'low_thresh' de una sentadilla.
-        prominence (float): La prominencia mínima de un pico. Filtra valles poco profundos.
-        distance (int): La distancia mínima (en número de frames) entre valles.
-                        Evita contar dobles fondos en una misma repetición.
-
-    Returns:
-        int: Número de repeticiones detectadas.
-    """
-    # Invertimos la señal para que los valles se conviertan en picos
-    inverted_angles = -np.array(angle_sequence)
-    
-    # El umbral de altura también se invierte. Buscamos picos por encima de este valor.
-    inverted_threshold = -peak_height_thresh
-    
-    # Usamos find_peaks de SciPy para encontrar los valles
+    inverted_angles = -np.asarray(angle_sequence)
     valleys, properties = find_peaks(
-        inverted_angles, 
-        height=inverted_threshold, 
-        prominence=prominence, 
-        distance=distance
+        inverted_angles,
+        prominence=prominence,
+        distance=distance,
     )
-    
-    logger.info(f"Detección de picos encontró {len(valleys)} valles válidos.")
-    
-    return len(valleys)
+
+    prominences = properties.get("prominences", [])
+    debug = CountingDebugInfo(valley_indices=[int(idx) for idx in valleys], prominences=list(map(float, prominences)))
+    logger.info("Detección de picos encontró %s valles válidos.", len(debug.valley_indices))
+    return len(debug.valley_indices), debug
+
+
+def count_repetitions_with_config(
+    df_metrics: pd.DataFrame,
+    counting_cfg: config.CountingConfig,
+    fps: float,
+) -> Tuple[int, CountingDebugInfo]:
+    """Count repetitions using the configuration-driven parameters."""
+    angle_column = counting_cfg.primary_angle
+
+    if df_metrics.empty or angle_column not in df_metrics.columns:
+        logger.warning(
+            "La columna '%s' no se encontró o el DataFrame está vacío. Se devuelven 0 repeticiones.",
+            angle_column,
+        )
+        return 0, CountingDebugInfo([], [])
+
+    angles = df_metrics[angle_column].ffill().bfill().dropna().tolist()
+    if not angles:
+        return 0, CountingDebugInfo([], [])
+
+    fps = fps if fps > 0 else 1.0
+    distance_frames = max(1, int(round(counting_cfg.min_distance_sec * fps)))
+
+    reps, debug = count_reps_by_valleys(
+        angle_sequence=angles,
+        prominence=float(counting_cfg.min_prominence),
+        distance=distance_frames,
+    )
+
+    if counting_cfg.refractory_sec > 0 and debug.valley_indices:
+        refractory_frames = max(1, int(round(counting_cfg.refractory_sec * fps)))
+        filtered: List[int] = []
+        for idx in debug.valley_indices:
+            if filtered and idx - filtered[-1] < refractory_frames:
+                continue
+            filtered.append(idx)
+        debug = CountingDebugInfo(valley_indices=filtered, prominences=debug.prominences[: len(filtered)])
+        reps = len(filtered)
+
+    return reps, debug
 
 
 def count_repetitions_from_df(
-        df_metrics: pd.DataFrame, 
-        angle_column: str = 'rodilla_izq', 
-        low_thresh: float = config.SQUAT_LOW_THRESH
-    ) -> int:
-    """
-    Toma un DataFrame de métricas, extrae la columna de ángulo indicada,
-    y devuelve el número de repeticiones contadas usando el método de detección de valles.
-    """
+    df_metrics: pd.DataFrame,
+    angle_column: str = "rodilla_izq",
+    low_thresh: float = config.SQUAT_LOW_THRESH,
+) -> int:
+    """Legacy helper preserved for backwards compatibility."""
     if df_metrics.empty or angle_column not in df_metrics.columns:
-        logger.warning(f"La columna '{angle_column}' no se encontró o el DataFrame está vacío. Se devuelven 0 repeticiones.")
+        logger.warning(
+            "La columna '%s' no se encontró o el DataFrame está vacío. Se devuelven 0 repeticiones.",
+            angle_column,
+        )
         return 0
 
-    # Rellenamos valores nulos para que no interrumpan el análisis
-    # Usamos forward-fill y luego backward-fill para asegurar que no queden NaNs
     angles = df_metrics[angle_column].ffill().bfill().tolist()
-
     if not angles:
         return 0
 
-    # Llamamos a nuestro nuevo y más robusto algoritmo de conteo
-    n_reps = count_reps_by_valleys(
+    reps, _ = count_reps_by_valleys(
         angle_sequence=angles,
-        peak_height_thresh=low_thresh
+        prominence=float(config.PEAK_PROMINENCE),
+        distance=int(config.PEAK_DISTANCE),
     )
-    
-    return n_reps
+    return reps
