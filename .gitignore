@@ -74,5 +74,6 @@ models/**
 
 # --- App/runtime caches ---
 .cache/
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 .streamlit/secrets.toml

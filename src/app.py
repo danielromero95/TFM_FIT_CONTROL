@@ -55,7 +55,24 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
 }
 
 
+def _inject_css() -> None:
+    st.markdown(
+        """
+    <style>
+      .btn-danger > button {background:#dc2626 !important;color:white !important;border:0;}
+      .chip {display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
+             margin-right:.25rem}
+      .chip.ok {background:#065f46;color:#ecfdf5;}      /* green */
+      .chip.warn {background:#7c2d12;color:#ffedd5;}    /* amber/brown */
+      .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
+
 def _init_session_state() -> None:
+    _inject_css()
     if "step" not in st.session_state:
         st.session_state.step = "upload"
     if "upload_data" not in st.session_state:
