@@ -1,3 +1,4 @@
+# src/pipeline.py
 """High-level orchestration of the video analysis pipeline."""
 
 from __future__ import annotations
