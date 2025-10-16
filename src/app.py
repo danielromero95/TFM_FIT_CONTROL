@@ -35,6 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import config
+from src.detect.exercise_detector import detect_exercise
 from src.pipeline import Report, run_pipeline
 
 EXERCISE_OPTIONS = ["Auto (MVP)", "Sentadilla"]
@@ -63,6 +64,8 @@ def _init_session_state() -> None:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
         st.session_state.exercise = EXERCISE_OPTIONS[0]
+    if "detect_result" not in st.session_state:
+        st.session_state.detect_result = None
     if "configure_values" not in st.session_state:
         st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     if "report" not in st.session_state:
@@ -102,6 +105,7 @@ def _reset_app() -> None:
     if "upload_data" in st.session_state:
         st.session_state.upload_data = None
     st.session_state.exercise = EXERCISE_OPTIONS[0]
+    st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
     try:
@@ -132,6 +136,7 @@ def _ensure_video_path() -> None:
     tmp_file.flush()
     tmp_file.close()
     st.session_state.video_path = tmp_file.name
+    st.session_state.detect_result = None
     # Free large byte payload from session to reduce memory usage once persisted
     st.session_state.upload_data = None
 
@@ -170,8 +175,22 @@ def _run_pipeline(progress_cb=None) -> None:
     exercise_label = st.session_state.get("exercise", EXERCISE_OPTIONS[0])
     cfg.counting.exercise = EXERCISE_TO_CONFIG.get(exercise_label, "squat")
 
+    det = st.session_state.get("detect_result")
+    prefetched_detection = None
+    if det:
+        prefetched_detection = (
+            det.get("label", "unknown"),
+            det.get("view", "unknown"),
+            float(det.get("confidence", 0.0)),
+        )
+
     try:
-        report: Report = run_pipeline(str(video_path), cfg, progress_callback=progress_cb)
+        report: Report = run_pipeline(
+            str(video_path),
+            cfg,
+            progress_callback=progress_cb,
+            prefetched_detection=prefetched_detection,
+        )
     except Exception as exc:  # pragma: no cover - surfaced to the UI user
         st.session_state.pipeline_error = str(exc)
         return
@@ -225,7 +244,41 @@ def _detect_step() -> None:
     if st.session_state.video_path:
         st.video(str(st.session_state.video_path))
 
-    st.button("Detectar ejercicio (beta)")
+    detect_disabled = st.session_state.video_path is None
+    if st.button("Detectar ejercicio (beta)", disabled=detect_disabled):
+        video_path = st.session_state.get("video_path")
+        if not video_path:
+            st.warning("Sube un vídeo antes de detectar el ejercicio.")
+        else:
+            with st.spinner("Analizando el vídeo para detectar el ejercicio…"):
+                label, view, confidence = detect_exercise(str(video_path))
+            if label == "unknown" and view == "unknown" and confidence <= 0.0:
+                st.session_state.detect_result = None
+                st.warning(
+                    "No se pudo determinar el ejercicio automáticamente. "
+                    "Revisa la grabación o selecciona el ejercicio manualmente."
+                )
+            else:
+                st.session_state.detect_result = {
+                    "label": label,
+                    "view": view,
+                    "confidence": float(confidence),
+                }
+                if label == "squat":
+                    st.session_state.exercise = "Sentadilla"
+                else:
+                    st.session_state.exercise = EXERCISE_OPTIONS[0]
+
+    detect_result = st.session_state.get("detect_result")
+    if detect_result:
+        label = detect_result["label"]
+        view = detect_result["view"]
+        confidence_pct = int(round(detect_result["confidence"] * 100))
+        st.info(
+            f"Ejercicio detectado: {label} · Vista: {view} · "
+            f"Confianza: {confidence_pct}%"
+        )
+
     st.selectbox(
         "Selecciona el ejercicio",
         options=EXERCISE_OPTIONS,
@@ -432,7 +485,16 @@ def _results_step() -> None:
             {"Campo": "fps_original", "Valor": f"{stats.fps_original:.2f}"},
             {"Campo": "fps_effective", "Valor": f"{stats.fps_effective:.2f}"},
             {"Campo": "frames", "Valor": stats.frames},
+            {
+                "Campo": "exercise_selected",
+                "Valor": stats.exercise_selected or "N/D",
+            },
             {"Campo": "exercise_detected", "Valor": stats.exercise_detected},
+            {"Campo": "view_detected", "Valor": stats.view_detected},
+            {
+                "Campo": "detection_confidence",
+                "Valor": f"{stats.detection_confidence:.0%}",
+            },
             {"Campo": "primary_angle", "Valor": stats.primary_angle or "N/D"},
             {"Campo": "angle_range_deg", "Valor": f"{stats.angle_range_deg:.2f}"},
             {"Campo": "min_prominence", "Valor": f"{stats.min_prominence:.2f}"},

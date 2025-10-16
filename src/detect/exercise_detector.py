@@ -1,0 +1,431 @@
+"""Heuristic exercise detection based on MediaPipe pose landmarks."""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+from typing import Any, Dict, Tuple
+
+import cv2
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+# --- Tunable thresholds -------------------------------------------------------
+
+MIN_VALID_FRAMES = 20
+SQUAT_KNEE_ROM_THRESHOLD_DEG = 50.0
+SQUAT_HIP_ROM_THRESHOLD_DEG = 35.0
+SQUAT_PELVIS_DISPLACEMENT_THRESHOLD = 0.08
+
+BENCH_ELBOW_ROM_THRESHOLD_DEG = 60.0
+BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.12
+BENCH_TORSO_TILT_THRESHOLD_DEG = 45.0  # degrees away from vertical
+
+DEADLIFT_HIP_ROM_THRESHOLD_DEG = 40.0
+DEADLIFT_WRIST_VERTICAL_THRESHOLD = 0.15
+DEADLIFT_TORSO_UPRIGHT_TARGET_DEG = 35.0
+
+VIEW_FRONT_WIDTH_THRESHOLD = 1.5
+VIEW_WIDTH_STD_THRESHOLD = 0.2
+
+CLASSIFICATION_MARGIN = 0.25
+MIN_CONFIDENCE_SCORE = 0.6
+
+DEFAULT_SAMPLING_RATE = 30.0
+
+
+@dataclass
+class FeatureSeries:
+    """Container for the extracted time-series and metadata."""
+
+    data: Dict[str, np.ndarray]
+    sampling_rate: float
+    valid_frames: int
+    total_frames: int
+
+
+# --- Public API ----------------------------------------------------------------
+
+
+def detect_exercise(video_path: str, max_frames: int = 300) -> Tuple[str, str, float]:
+    """Detect the exercise label, view and confidence for ``video_path``.
+
+    Any failure during extraction or classification returns ``("unknown", "unknown", 0.0)``.
+    """
+
+    try:
+        features = extract_features(video_path, max_frames=max_frames)
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.exception("Fallo al extraer características para la detección de ejercicio")
+        return "unknown", "unknown", 0.0
+
+    if features.total_frames == 0 or features.valid_frames < MIN_VALID_FRAMES:
+        logger.info(
+            "Detección no concluyente: fotogramas válidos %d de %d",
+            features.valid_frames,
+            features.total_frames,
+        )
+        return "unknown", "unknown", 0.0
+
+    try:
+        label, view, confidence = classify_features(features)
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.exception("Fallo al clasificar las características extraídas")
+        return "unknown", "unknown", 0.0
+
+    logger.info(
+        "Ejercicio detectado: label=%s view=%s confidence=%.2f (frames=%d/%d)",
+        label,
+        view,
+        confidence,
+        features.valid_frames,
+        features.total_frames,
+    )
+    return label, view, confidence
+
+
+# --- Feature extraction --------------------------------------------------------
+
+
+def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
+    """Extract pose-derived time series required for exercise classification."""
+
+    capture = cv2.VideoCapture(video_path)
+    if not capture.isOpened():
+        capture.release()
+        raise IOError(f"No se pudo abrir el vídeo para la detección: {video_path}")
+
+    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    max_frames = max(1, int(max_frames))
+
+    if frame_count > 0:
+        sample_count = min(frame_count, max_frames)
+        sample_indices = np.linspace(0, frame_count - 1, num=sample_count, dtype=int)
+    else:
+        sample_indices = None
+        sample_count = max_frames
+
+    try:
+        from mediapipe.python.solutions import pose as mp_pose_module
+    except ImportError as exc:  # pragma: no cover - environment safeguard
+        capture.release()
+        raise RuntimeError("MediaPipe no está disponible en el entorno de ejecución") from exc
+
+    pose_landmark = mp_pose_module.PoseLandmark
+
+    pose_kwargs = dict(
+        static_image_mode=False,
+        model_complexity=1,
+        smooth_landmarks=True,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+
+    feature_lists: Dict[str, list[float]] = {
+        "knee_angle_left": [],
+        "knee_angle_right": [],
+        "hip_angle_left": [],
+        "hip_angle_right": [],
+        "elbow_angle_left": [],
+        "elbow_angle_right": [],
+        "shoulder_angle_left": [],
+        "shoulder_angle_right": [],
+        "pelvis_y": [],
+        "wrist_left_x": [],
+        "wrist_left_y": [],
+        "wrist_right_x": [],
+        "wrist_right_y": [],
+        "shoulder_width_norm": [],
+        "torso_tilt_deg": [],
+    }
+
+    total_processed = 0
+    valid_frames = 0
+
+    with mp_pose_module.Pose(**pose_kwargs) as pose:
+        if sample_indices is not None:
+            for idx in sample_indices:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+                success, frame = capture.read()
+                total_processed += 1
+                if not success:
+                    _append_nan(feature_lists)
+                    continue
+                valid = _process_frame(frame, pose, pose_landmark, feature_lists)
+                if valid:
+                    valid_frames += 1
+        else:
+            while total_processed < sample_count:
+                success, frame = capture.read()
+                if not success:
+                    break
+                total_processed += 1
+                valid = _process_frame(frame, pose, pose_landmark, feature_lists)
+                if valid:
+                    valid_frames += 1
+            # Fill the remainder with NaNs if the video was shorter than expected
+            while total_processed < sample_count:
+                _append_nan(feature_lists)
+                total_processed += 1
+
+    capture.release()
+
+    data = {key: np.asarray(values, dtype=float) for key, values in feature_lists.items()}
+
+    sampling_rate = _estimate_sampling_rate(fps, frame_count, total_processed)
+
+    percent_valid = (valid_frames / total_processed * 100.0) if total_processed else 0.0
+    logger.info(
+        "Extracción detección ejercicio: frames=%d válidos=%d (%.1f%%) sample_rate=%.2f",
+        total_processed,
+        valid_frames,
+        percent_valid,
+        sampling_rate,
+    )
+
+    return FeatureSeries(
+        data=data,
+        sampling_rate=float(sampling_rate),
+        valid_frames=int(valid_frames),
+        total_frames=int(total_processed),
+    )
+
+
+def _process_frame(
+    frame: np.ndarray,
+    pose: Any,
+    pose_landmark: Any,
+    feature_lists: Dict[str, list[float]],
+) -> bool:
+    """Run pose detection on a frame and append measurements to ``feature_lists``."""
+
+    image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(image_rgb)
+
+    if not results.pose_landmarks:
+        _append_nan(feature_lists)
+        return False
+
+    landmarks = results.pose_landmarks.landmark
+
+    def pt(index: int) -> np.ndarray:
+        landmark = landmarks[index]
+        return np.array([landmark.x, landmark.y, landmark.z], dtype=float)
+
+    left_hip = pt(pose_landmark.LEFT_HIP.value)
+    right_hip = pt(pose_landmark.RIGHT_HIP.value)
+    left_knee = pt(pose_landmark.LEFT_KNEE.value)
+    right_knee = pt(pose_landmark.RIGHT_KNEE.value)
+    left_ankle = pt(pose_landmark.LEFT_ANKLE.value)
+    right_ankle = pt(pose_landmark.RIGHT_ANKLE.value)
+    left_shoulder = pt(pose_landmark.LEFT_SHOULDER.value)
+    right_shoulder = pt(pose_landmark.RIGHT_SHOULDER.value)
+    left_elbow = pt(pose_landmark.LEFT_ELBOW.value)
+    right_elbow = pt(pose_landmark.RIGHT_ELBOW.value)
+    left_wrist = pt(pose_landmark.LEFT_WRIST.value)
+    right_wrist = pt(pose_landmark.RIGHT_WRIST.value)
+
+    hip_mid = (left_hip + right_hip) / 2.0
+    shoulder_mid = (left_shoulder + right_shoulder) / 2.0
+
+    feature_lists["knee_angle_left"].append(
+        _angle_degrees(left_hip, left_knee, left_ankle)
+    )
+    feature_lists["knee_angle_right"].append(
+        _angle_degrees(right_hip, right_knee, right_ankle)
+    )
+    feature_lists["hip_angle_left"].append(
+        _angle_degrees(left_shoulder, left_hip, left_knee)
+    )
+    feature_lists["hip_angle_right"].append(
+        _angle_degrees(right_shoulder, right_hip, right_knee)
+    )
+    feature_lists["elbow_angle_left"].append(
+        _angle_degrees(left_shoulder, left_elbow, left_wrist)
+    )
+    feature_lists["elbow_angle_right"].append(
+        _angle_degrees(right_shoulder, right_elbow, right_wrist)
+    )
+    feature_lists["shoulder_angle_left"].append(
+        _angle_degrees(left_hip, left_shoulder, left_elbow)
+    )
+    feature_lists["shoulder_angle_right"].append(
+        _angle_degrees(right_hip, right_shoulder, right_elbow)
+    )
+
+    pelvis_y = float((left_hip[1] + right_hip[1]) / 2.0)
+    feature_lists["pelvis_y"].append(pelvis_y)
+
+    feature_lists["wrist_left_x"].append(float(left_wrist[0]))
+    feature_lists["wrist_left_y"].append(float(left_wrist[1]))
+    feature_lists["wrist_right_x"].append(float(right_wrist[0]))
+    feature_lists["wrist_right_y"].append(float(right_wrist[1]))
+
+    shoulder_width = float(np.linalg.norm(left_shoulder[:2] - right_shoulder[:2]))
+    torso_left = float(np.linalg.norm(left_shoulder[:2] - left_hip[:2]))
+    torso_right = float(np.linalg.norm(right_shoulder[:2] - right_hip[:2]))
+    torso_length = (torso_left + torso_right) / 2.0
+    norm_width = shoulder_width / (torso_length + 1e-6)
+    feature_lists["shoulder_width_norm"].append(norm_width)
+
+    torso_vec = shoulder_mid - hip_mid
+    tilt = math.degrees(math.atan2(abs(torso_vec[0]), abs(torso_vec[1]) + 1e-6))
+    feature_lists["torso_tilt_deg"].append(float(tilt))
+
+    return True
+
+
+def _append_nan(feature_lists: Dict[str, list[float]]) -> None:
+    for values in feature_lists.values():
+        values.append(float("nan"))
+
+
+def _angle_degrees(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+    """Return the planar angle ABC in degrees using the XY plane."""
+
+    ba = a[:2] - b[:2]
+    bc = c[:2] - b[:2]
+    norm_ba = np.linalg.norm(ba)
+    norm_bc = np.linalg.norm(bc)
+    if norm_ba == 0 or norm_bc == 0:
+        return float("nan")
+    cos_angle = float(np.dot(ba, bc) / (norm_ba * norm_bc))
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    return float(math.degrees(math.acos(cos_angle)))
+
+
+def _estimate_sampling_rate(fps: float, frame_count: int, samples: int) -> float:
+    if samples <= 0:
+        return DEFAULT_SAMPLING_RATE
+    if fps > 0 and frame_count > 0:
+        duration = frame_count / fps
+        if duration > 0:
+            return float(samples / duration)
+    if fps > 0:
+        return float(fps)
+    return DEFAULT_SAMPLING_RATE
+
+
+# --- Classification ------------------------------------------------------------
+
+
+def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
+    """Classify the exercise based on the extracted feature series."""
+
+    if features.valid_frames < MIN_VALID_FRAMES:
+        return "unknown", "unknown", 0.0
+
+    data = features.data
+
+    knee_rom = _max_range(data.get("knee_angle_left"), data.get("knee_angle_right"))
+    hip_rom = _max_range(data.get("hip_angle_left"), data.get("hip_angle_right"))
+    elbow_rom = _max_range(data.get("elbow_angle_left"), data.get("elbow_angle_right"))
+    shoulder_rom = _max_range(
+        data.get("shoulder_angle_left"), data.get("shoulder_angle_right")
+    )
+    pelvis_disp = _range_of(data.get("pelvis_y"))
+    wrist_vertical = _max_range(
+        data.get("wrist_left_y"), data.get("wrist_right_y")
+    )
+    wrist_horizontal = _max_range(
+        data.get("wrist_left_x"), data.get("wrist_right_x")
+    )
+
+    torso_tilt_series = data.get("torso_tilt_deg", np.empty(0))
+    torso_tilt_mean = float(np.nanmean(torso_tilt_series)) if torso_tilt_series.size else 0.0
+
+    shoulder_width_series = data.get("shoulder_width_norm", np.empty(0))
+    view = _classify_view(shoulder_width_series)
+
+    squat_score = (
+        _score(knee_rom, SQUAT_KNEE_ROM_THRESHOLD_DEG)
+        + 0.8 * _score(pelvis_disp, SQUAT_PELVIS_DISPLACEMENT_THRESHOLD)
+        + 0.4 * _score(hip_rom, SQUAT_HIP_ROM_THRESHOLD_DEG)
+    )
+
+    bench_score = (
+        _score(elbow_rom, BENCH_ELBOW_ROM_THRESHOLD_DEG)
+        + 0.7 * _score(wrist_horizontal, BENCH_WRIST_HORIZONTAL_THRESHOLD)
+        + 0.6 * _score(torso_tilt_mean, BENCH_TORSO_TILT_THRESHOLD_DEG, scale=1.0)
+    )
+
+    deadlift_upright_bonus = max(0.0, DEADLIFT_TORSO_UPRIGHT_TARGET_DEG - torso_tilt_mean)
+    deadlift_score = (
+        _score(hip_rom, DEADLIFT_HIP_ROM_THRESHOLD_DEG)
+        + 0.7 * _score(wrist_vertical, DEADLIFT_WRIST_VERTICAL_THRESHOLD)
+        + 0.5 * _score(deadlift_upright_bonus, DEADLIFT_TORSO_UPRIGHT_TARGET_DEG, scale=1.0)
+        + 0.2 * _score(shoulder_rom, SQUAT_HIP_ROM_THRESHOLD_DEG)
+    )
+
+    scores = {
+        "squat": float(squat_score),
+        "bench": float(bench_score),
+        "deadlift": float(deadlift_score),
+    }
+
+    label, confidence = _pick_label(scores)
+    if label == "unknown":
+        return "unknown", view, confidence
+
+    return label, view, confidence
+
+
+def _max_range(*series: np.ndarray | None) -> float:
+    ranges = [_range_of(s) for s in series if s is not None]
+    return max(ranges) if ranges else 0.0
+
+
+def _range_of(series: np.ndarray | None) -> float:
+    if series is None or series.size == 0:
+        return 0.0
+    valid = series[~np.isnan(series)]
+    if valid.size == 0:
+        return 0.0
+    return float(valid.max() - valid.min())
+
+
+def _score(value: float, threshold: float, scale: float = 1.5) -> float:
+    if threshold <= 0:
+        return 0.0
+    if value <= 0:
+        return 0.0
+    ratio = value / threshold
+    ratio = max(0.0, min(ratio, scale * 2.0))
+    return ratio
+
+
+def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:
+    values = np.array(list(scores.values()), dtype=float)
+    labels = list(scores.keys())
+    max_index = int(np.argmax(values))
+    max_value = float(values[max_index])
+    sorted_indices = np.argsort(values)
+    second_best = float(values[sorted_indices[-2]]) if values.size > 1 else 0.0
+
+    if max_value < MIN_CONFIDENCE_SCORE or (max_value - second_best) < CLASSIFICATION_MARGIN:
+        return "unknown", 0.0
+
+    exp_scores = np.exp(values - np.max(values))
+    probs = exp_scores / exp_scores.sum()
+    confidence = float(probs[max_index])
+    return labels[max_index], confidence
+
+
+def _classify_view(shoulder_width_series: np.ndarray | None) -> str:
+    if shoulder_width_series is None or shoulder_width_series.size == 0:
+        return "unknown"
+    valid = shoulder_width_series[~np.isnan(shoulder_width_series)]
+    if valid.size == 0:
+        return "unknown"
+    mean_width = float(np.mean(valid))
+    std_width = float(np.std(valid))
+    if mean_width >= VIEW_FRONT_WIDTH_THRESHOLD and std_width <= VIEW_WIDTH_STD_THRESHOLD:
+        return "front"
+    if mean_width > 0:
+        return "side"
+    return "unknown"
