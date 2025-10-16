@@ -479,8 +479,11 @@ def _running_step() -> None:
         st.experimental_rerun()
 
 
-def _results_step() -> None:
+def _results_panel() -> Dict[str, bool]:
     st.markdown("### Resultados")
+
+    actions: Dict[str, bool] = {"adjust": False, "reset": False}
+
     if st.session_state.pipeline_error:
         st.error("Ha ocurrido un error durante el análisis")
         st.code(str(st.session_state.pipeline_error))
@@ -602,29 +605,52 @@ def _results_step() -> None:
         st.markdown("### Vídeo original")
         st.video(str(st.session_state.video_path))
 
-    # Fast path to adjust thresholds and re-run with the same video
-    if st.button("Ajustar configuración y reanalizar"):
+    if st.button("Ajustar configuración y reanalizar", key="results_adjust"):
+        actions["adjust"] = True
+
+    if st.button("Volver a inicio", key="results_reset"):
+        actions["reset"] = True
+
+    return actions
+
+
+def main() -> None:
+    _init_session_state()
+    st.markdown("# Gym Performance Analysis")
+
+    col_left, col_mid, col_right = st.columns([1, 1, 1])
+
+    with col_left:
+        _upload_step()
+        _detect_step()
+
+    results_actions: Dict[str, bool] = {"adjust": False, "reset": False}
+
+    with col_mid:
+        if st.session_state.step in ("configure", "running"):
+            if st.session_state.step == "configure":
+                _configure_step()
+            else:
+                _running_step()
+        else:
+            st.markdown("### 3. Configura el análisis")
+            st.info(
+                "Configura el análisis una vez hayas subido el vídeo y detectado el ejercicio."
+            )
+
+    with col_right:
+        results_actions = _results_panel()
+
+    if results_actions.get("adjust"):
         st.session_state.step = "configure"
         try:
             st.rerun()
         except Exception:
             st.experimental_rerun()
 
-    if st.button("Volver a inicio"):
+    if results_actions.get("reset"):
         _reset_app()
 
 
-st.title("Gym Performance Analysis")
-_init_session_state()
-
-step = st.session_state.step
-if step == "upload":
-    _upload_step()
-elif step == "detect":
-    _detect_step()
-elif step == "configure":
-    _configure_step()
-elif step == "running":
-    _running_step()
-else:
-    _results_step()
+if __name__ == "__main__":
+    main()
