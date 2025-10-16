@@ -15,23 +15,23 @@ logger = logging.getLogger(__name__)
 # --- Tunable thresholds -------------------------------------------------------
 
 MIN_VALID_FRAMES = 20
-SQUAT_KNEE_ROM_THRESHOLD_DEG = 50.0
-SQUAT_HIP_ROM_THRESHOLD_DEG = 35.0
-SQUAT_PELVIS_DISPLACEMENT_THRESHOLD = 0.08
+SQUAT_KNEE_ROM_THRESHOLD_DEG = 40.0
+SQUAT_HIP_ROM_THRESHOLD_DEG = 30.0
+SQUAT_PELVIS_DISPLACEMENT_THRESHOLD = 0.06
 
-BENCH_ELBOW_ROM_THRESHOLD_DEG = 60.0
-BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.12
-BENCH_TORSO_TILT_THRESHOLD_DEG = 45.0  # degrees away from vertical
+BENCH_ELBOW_ROM_THRESHOLD_DEG = 55.0
+BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.08
+BENCH_TORSO_TILT_THRESHOLD_DEG = 40.0  # degrees away from vertical
 
-DEADLIFT_HIP_ROM_THRESHOLD_DEG = 40.0
-DEADLIFT_WRIST_VERTICAL_THRESHOLD = 0.15
+DEADLIFT_HIP_ROM_THRESHOLD_DEG = 35.0
+DEADLIFT_WRIST_VERTICAL_THRESHOLD = 0.12
 DEADLIFT_TORSO_UPRIGHT_TARGET_DEG = 35.0
 
-VIEW_FRONT_WIDTH_THRESHOLD = 1.5
-VIEW_WIDTH_STD_THRESHOLD = 0.2
+VIEW_FRONT_WIDTH_THRESHOLD = 0.55      # normalized shoulder width / torso length
+VIEW_WIDTH_STD_THRESHOLD = 0.12
 
-CLASSIFICATION_MARGIN = 0.25
-MIN_CONFIDENCE_SCORE = 0.6
+CLASSIFICATION_MARGIN = 0.15
+MIN_CONFIDENCE_SCORE = 0.50
 
 DEFAULT_SAMPLING_RATE = 30.0
 
@@ -341,6 +341,29 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     shoulder_width_series = data.get("shoulder_width_norm", np.empty(0))
     view = _classify_view(shoulder_width_series)
+    shoulder_mean = (
+        float(np.nanmean(shoulder_width_series))
+        if shoulder_width_series.size
+        else float("nan")
+    )
+    shoulder_std = (
+        float(np.nanstd(shoulder_width_series))
+        if shoulder_width_series.size
+        else float("nan")
+    )
+    logger.info(
+        "DET DEBUG — knee_rom=%.2f hip_rom=%.2f elbow_rom=%.2f pelvis=%.3f "
+        "wristV=%.3f wristH=%.3f tiltMean=%.1f viewMean=%.2f viewStd=%.2f",
+        knee_rom,
+        hip_rom,
+        elbow_rom,
+        pelvis_disp,
+        wrist_vertical,
+        wrist_horizontal,
+        torso_tilt_mean,
+        shoulder_mean,
+        shoulder_std,
+    )
 
     squat_score = (
         _score(knee_rom, SQUAT_KNEE_ROM_THRESHOLD_DEG)
@@ -419,13 +442,11 @@ def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:
 def _classify_view(shoulder_width_series: np.ndarray | None) -> str:
     if shoulder_width_series is None or shoulder_width_series.size == 0:
         return "unknown"
-    valid = shoulder_width_series[~np.isnan(shoulder_width_series)]
-    if valid.size == 0:
+    finite = shoulder_width_series[np.isfinite(shoulder_width_series)]
+    if not finite.size:
         return "unknown"
-    mean_width = float(np.mean(valid))
-    std_width = float(np.std(valid))
+    mean_width = float(np.mean(finite))
+    std_width = float(np.std(finite))
     if mean_width >= VIEW_FRONT_WIDTH_THRESHOLD and std_width <= VIEW_WIDTH_STD_THRESHOLD:
         return "front"
-    if mean_width > 0:
-        return "side"
-    return "unknown"
+    return "side" if np.isfinite(mean_width) else "unknown"
