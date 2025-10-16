@@ -7,7 +7,7 @@ import logging
 import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import cv2
 import pandas as pd
@@ -22,6 +22,7 @@ from src.B_pose_estimation.processing import (
 )
 from src.D_modeling.count_reps import count_repetitions_with_config
 from src.F_visualization.video_renderer import render_landmarks_on_video_hq
+from src.detect.exercise_detector import detect_exercise
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,10 @@ class RunStats:
     fps_original: float
     fps_effective: float
     frames: int
+    exercise_selected: Optional[str]
     exercise_detected: str
+    view_detected: str
+    detection_confidence: float
     primary_angle: Optional[str]
     angle_range_deg: float
     min_prominence: float
@@ -83,6 +87,8 @@ def run_pipeline(
     video_path: str,
     cfg: config.Config,
     progress_callback: Optional[Callable[[int], None]] = None,
+    *,
+    prefetched_detection: Optional[Tuple[str, str, float]] = None,
 ) -> Report:
     """Execute the full analysis pipeline using ``cfg`` as the single source of truth."""
 
@@ -140,6 +146,17 @@ def run_pipeline(
 
     fps_effective = fps_original / sample_rate if sample_rate > 0 else fps_original
     frames_processed = len(frames)
+
+    detected_label = "unknown"
+    detected_view = "unknown"
+    detected_confidence = 0.0
+    if prefetched_detection is not None:
+        detected_label, detected_view, detected_confidence = prefetched_detection
+    else:
+        try:
+            detected_label, detected_view, detected_confidence = detect_exercise(video_path)
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.exception("Fallo al detectar el ejercicio automáticamente")
 
     if fps_warning:
         message = f"{fps_warning} FPS final utilizado: {fps_original:.2f}."
@@ -234,7 +251,10 @@ def run_pipeline(
         fps_original=float(fps_original),
         fps_effective=float(fps_effective),
         frames=frames_processed,
-        exercise_detected=cfg.counting.exercise,
+        exercise_selected=cfg.counting.exercise,
+        exercise_detected=detected_label,
+        view_detected=detected_view,
+        detection_confidence=float(detected_confidence),
         primary_angle=primary_angle if primary_angle in df_metrics.columns else None,
         angle_range_deg=float(angle_range),
         min_prominence=float(cfg.counting.min_prominence),
