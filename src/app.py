@@ -62,12 +62,100 @@ def _inject_css() -> None:
     st.markdown(
         """
     <style>
-      .btn-danger > button {background:#dc2626 !important;color:white !important;border:0;}
+      /* --- Top header with inline title --- */
+      header[data-testid="stHeader"] {
+        background: #0f172a;
+        border-bottom: 1px solid #1f2937;
+        height: 56px;
+        padding-right: 160px;
+        position: relative;
+      }
+      header[data-testid="stHeader"]::before {
+        content: "Gym Performance Analysis";
+        position: absolute;
+        left: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #e5e7eb;
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: .2px;
+        pointer-events: none;
+        max-width: calc(100% - 180px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .btn-danger > button, .btn-success > button {
+        border-radius: 12px !important;
+        border-width: 1px !important;
+        background: transparent !important;
+        transition: background .15s ease, border-color .15s ease;
+      }
+      .btn-danger > button {
+        color: #ef4444 !important;
+        border-color: rgba(239,68,68,.6) !important;
+      }
+      .btn-danger > button:hover {
+        background: rgba(239,68,68,.10) !important;
+        border-color: rgba(239,68,68,.9) !important;
+      }
+
+      .btn-success > button {
+        color: #22c55e !important;
+        border-color: rgba(34,197,94,.6) !important;
+      }
+      .btn-success > button:hover {
+        background: rgba(34,197,94,.10) !important;
+        border-color: rgba(34,197,94,.9) !important;
+      }
+
+      .btn-danger > button[disabled], .btn-success > button[disabled] {
+        opacity: .6 !important;
+        cursor: not-allowed !important;
+      }
+
       .chip {display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
              margin-right:.25rem}
       .chip.ok {background:#065f46;color:#ecfdf5;}      /* green */
       .chip.warn {background:#7c2d12;color:#ffedd5;}    /* amber/brown */
       .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
+
+      .spacer-sm { height: .5rem; }
+
+      /* Step 2: fix preview width, keep aspect and black bars when needed */
+      .step-detect [data-testid="stVideo"] {
+        max-width: 720px;
+        margin: 0 auto .5rem auto;
+      }
+      .step-detect [data-testid="stVideo"] video {
+        width: min(720px, 100%) !important;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        object-fit: contain;
+      }
+
+      .step-detect .readonly-hint {
+        color: #94a3b8;
+        font-size: .85rem;
+      }
+
+      /* Keep title above content and safe on very narrow viewports */
+      header[data-testid="stHeader"] { z-index: 1000; }
+      @media (max-width: 520px) {
+        header[data-testid="stHeader"]::before { font-size: 16px; }
+      }
+      @media (max-width: 420px) {
+        header[data-testid="stHeader"]::before { display: none; }
+      }
+
+      /* Make the select a little wider than the button for visual balance */
+      .step-detect .row-detect { display: grid; grid-template-columns: 1fr 2.25fr; gap: 1rem; }
+      .step-detect .stSelect { margin-top: .25rem; }
+
+      /* Slightly larger click targets for nav buttons */
+      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
     </style>
     """,
         unsafe_allow_html=True,
@@ -250,6 +338,7 @@ def _upload_step() -> None:
         "Sube un vídeo",
         type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"],
         key="video_uploader",
+        label_visibility="collapsed",
     )
     previous_token = st.session_state.get("active_upload_token")
     if uploaded is not None:
@@ -276,39 +365,60 @@ def _upload_step() -> None:
 
 def _detect_step() -> None:
     st.markdown("### 2. Detecta el ejercicio")
-    if st.session_state.video_path:
-        st.video(str(st.session_state.video_path))
+    st.markdown('<div class="step step-detect">', unsafe_allow_html=True)
+    video_path = st.session_state.get("video_path")
+    if video_path:
+        st.video(str(video_path))
 
     detect_readonly = (
-        st.session_state.step != "detect" or st.session_state.video_path is None
+        st.session_state.step != "detect" or video_path is None
     )
-    if st.button(
-        "Detectar ejercicio (beta)",
-        disabled=detect_readonly,
-        key="detect_run",
-    ):
-        video_path = st.session_state.get("video_path")
-        if not video_path:
-            st.warning("Sube un vídeo antes de detectar el ejercicio.")
-        else:
-            with st.spinner("Analizando el vídeo para detectar el ejercicio…"):
-                label, view, confidence = detect_exercise(str(video_path))
-            if label == "unknown" and view == "unknown" and confidence <= 0.0:
-                st.session_state.detect_result = None
-                st.warning(
-                    "No se pudo determinar el ejercicio automáticamente. "
-                    "Revisa la grabación o selecciona el ejercicio manualmente."
-                )
+
+    st.markdown('<div class="row-detect">', unsafe_allow_html=True)
+    col_detect, col_select = st.columns([1, 2])
+
+    with col_detect:
+        st.markdown('<div class="btn-success">', unsafe_allow_html=True)
+        if st.button(
+            "Detectar ejercicio (beta)",
+            disabled=detect_readonly,
+            key="detect_run",
+        ):
+            video_path = st.session_state.get("video_path")
+            if not video_path:
+                st.warning("Sube un vídeo antes de detectar el ejercicio.")
             else:
-                st.session_state.detect_result = {
-                    "label": label,
-                    "view": view,
-                    "confidence": float(confidence),
-                }
-                if label == "squat":
-                    st.session_state.exercise = "Sentadilla"
+                with st.spinner("Analizando el vídeo para detectar el ejercicio…"):
+                    label, view, confidence = detect_exercise(str(video_path))
+                if label == "unknown" and view == "unknown" and confidence <= 0.0:
+                    st.session_state.detect_result = None
+                    st.warning(
+                        "No se pudo determinar el ejercicio automáticamente. "
+                        "Revisa la grabación o selecciona el ejercicio manualmente."
+                    )
                 else:
-                    st.session_state.exercise = EXERCISE_OPTIONS[0]
+                    st.session_state.detect_result = {
+                        "label": label,
+                        "view": view,
+                        "confidence": float(confidence),
+                    }
+                    if label == "squat":
+                        st.session_state.exercise = "Sentadilla"
+                    else:
+                        st.session_state.exercise = EXERCISE_OPTIONS[0]
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_select:
+        st.caption("Selecciona el ejercicio")
+        st.selectbox(
+            "",
+            options=EXERCISE_OPTIONS,
+            key="exercise",
+            label_visibility="collapsed",
+            disabled=detect_readonly,
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
     detect_result = st.session_state.get("detect_result")
     if detect_result:
@@ -320,24 +430,28 @@ def _detect_step() -> None:
             f"Confianza: {confidence_pct}%"
         )
 
-    st.selectbox(
-        "Selecciona el ejercicio",
-        options=EXERCISE_OPTIONS,
-        key="exercise",
-        disabled=detect_readonly,
-    )
-
     if detect_readonly:
-        st.caption("Los controles de detección están en modo lectura en esta fase.")
+        st.markdown(
+            '<div class="readonly-hint">Los controles de detección están en modo lectura en esta fase.</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="spacer-sm"></div>', unsafe_allow_html=True)
 
     if st.session_state.step == "detect":
         col_back, col_forward = st.columns(2)
         with col_back:
+            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
             if st.button("Atrás", key="detect_back"):
                 st.session_state.step = "upload"
+            st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
+            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button("Continuar", key="detect_continue"):
                 st.session_state.step = "configure"
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
@@ -456,15 +570,19 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
     if show_actions and not disabled:
         col_back, col_forward = st.columns(2)
         with col_back:
+            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
             if st.button("Atrás", key="configure_back"):
                 st.session_state.step = "detect"
+            st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
+            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button("Continuar", key="configure_continue"):
                 if target_fps_error:
                     st.warning("Corrige el valor de FPS objetivo antes de continuar.")
                 else:
                     st.session_state.configure_values = current_values
                     st.session_state.step = "running"
+            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _running_step() -> None:
@@ -660,7 +778,6 @@ def _results_panel() -> Dict[str, bool]:
 
 def main() -> None:
     _init_session_state()
-    st.markdown("# Gym Performance Analysis")
 
     col_left, col_mid, col_right = st.columns(3)
 
