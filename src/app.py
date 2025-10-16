@@ -622,7 +622,8 @@ def main() -> None:
 
     with col_left:
         _upload_step()
-        _detect_step()
+        if st.session_state.get("video_path"):
+            _detect_step()
 
     results_actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
