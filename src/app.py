@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -11,6 +12,8 @@ from typing import Dict
 
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(layout="wide", page_title="Gym Performance Analysis")
 
 # --- Ensure Windows loads codec DLLs from the active conda env first -----------
 if sys.platform.startswith("win"):
@@ -77,6 +80,10 @@ def _init_session_state() -> None:
         st.session_state.step = "upload"
     if "upload_data" not in st.session_state:
         st.session_state.upload_data = None
+    if "upload_token" not in st.session_state:
+        st.session_state.upload_token = None
+    if "active_upload_token" not in st.session_state:
+        st.session_state.active_upload_token = None
     if "video_path" not in st.session_state:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
@@ -97,7 +104,7 @@ def _init_session_state() -> None:
         st.session_state.cfg_fingerprint = None
 
 
-def _reset_app() -> None:
+def _reset_state(*, preserve_upload: bool = False) -> None:
     video_path = st.session_state.get("video_path")
     if video_path:
         try:
@@ -110,21 +117,24 @@ def _reset_app() -> None:
                 pass
         except OSError:
             pass
-    for key in [
-        "video_path",
-        "report",
-        "pipeline_error",
-        "count_path",
-        "metrics_path",
-        "cfg_fingerprint",
-    ]:
-        st.session_state.pop(key, None)
-    if "upload_data" in st.session_state:
-        st.session_state.upload_data = None
+    st.session_state.video_path = None
+    st.session_state.report = None
+    st.session_state.pipeline_error = None
+    st.session_state.count_path = None
+    st.session_state.metrics_path = None
+    st.session_state.cfg_fingerprint = None
     st.session_state.exercise = EXERCISE_OPTIONS[0]
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
+    if not preserve_upload:
+        st.session_state.upload_data = None
+        st.session_state.upload_token = None
+    st.session_state.active_upload_token = None
+
+
+def _reset_app() -> None:
+    _reset_state()
     try:
         st.rerun()
     except Exception:
@@ -239,21 +249,29 @@ def _upload_step() -> None:
     uploaded = st.file_uploader(
         "Sube un vídeo",
         type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"],
+        key="video_uploader",
     )
+    previous_token = st.session_state.get("active_upload_token")
     if uploaded is not None:
-        st.session_state.upload_data = {
-            "name": uploaded.name,
-            "bytes": uploaded.getvalue(),
-        }
-    can_continue = st.session_state.upload_data is not None
-    if st.button("Continuar", disabled=not can_continue):
-        if can_continue:
+        data_bytes = uploaded.getvalue()
+        new_token = (
+            uploaded.name,
+            len(data_bytes),
+            hashlib.md5(data_bytes).hexdigest(),
+        )
+        if previous_token != new_token:
+            _reset_state(preserve_upload=True)
+            st.session_state.upload_data = {
+                "name": uploaded.name,
+                "bytes": data_bytes,
+            }
+            st.session_state.upload_token = new_token
+            st.session_state.active_upload_token = new_token
             _ensure_video_path()
-            st.session_state.step = "detect"
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            if st.session_state.video_path:
+                st.session_state.step = "detect"
+        else:
+            st.session_state.active_upload_token = new_token
 
 
 def _detect_step() -> None:
@@ -261,8 +279,14 @@ def _detect_step() -> None:
     if st.session_state.video_path:
         st.video(str(st.session_state.video_path))
 
-    detect_disabled = st.session_state.video_path is None
-    if st.button("Detectar ejercicio (beta)", disabled=detect_disabled):
+    detect_readonly = (
+        st.session_state.step != "detect" or st.session_state.video_path is None
+    )
+    if st.button(
+        "Detectar ejercicio (beta)",
+        disabled=detect_readonly,
+        key="detect_run",
+    ):
         video_path = st.session_state.get("video_path")
         if not video_path:
             st.warning("Sube un vídeo antes de detectar el ejercicio.")
@@ -300,28 +324,28 @@ def _detect_step() -> None:
         "Selecciona el ejercicio",
         options=EXERCISE_OPTIONS,
         key="exercise",
+        disabled=detect_readonly,
     )
 
-    col_back, col_forward = st.columns(2)
-    with col_back:
-        if st.button("Atrás", key="detect_back"):
-            st.session_state.step = "upload"
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
-    with col_forward:
-        if st.button("Continuar", key="detect_continue"):
-            st.session_state.step = "configure"
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+    if detect_readonly:
+        st.caption("Los controles de detección están en modo lectura en esta fase.")
+
+    if st.session_state.step == "detect":
+        col_back, col_forward = st.columns(2)
+        with col_back:
+            if st.button("Atrás", key="detect_back"):
+                st.session_state.step = "upload"
+        with col_forward:
+            if st.button("Continuar", key="detect_continue"):
+                st.session_state.step = "configure"
 
 
-def _configure_step() -> None:
+def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     st.markdown("### 3. Configura el análisis")
     cfg_values = st.session_state.get("configure_values", CONFIG_DEFAULTS.copy())
+
+    if disabled:
+        st.info("La configuración se muestra solo para consulta mientras se procesa el análisis.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -330,6 +354,8 @@ def _configure_step() -> None:
             min_value=0,
             max_value=180,
             value=int(cfg_values.get("low", CONFIG_DEFAULTS["low"])),
+            disabled=disabled,
+            key="cfg_low",
         )
     with col2:
         high = st.number_input(
@@ -337,11 +363,15 @@ def _configure_step() -> None:
             min_value=0,
             max_value=180,
             value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
+            disabled=disabled,
+            key="cfg_high",
         )
 
     primary_angle = st.text_input(
         "Ángulo primario",
         value=str(cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"])),
+        disabled=disabled,
+        key="cfg_primary_angle",
     )
 
     col3, col4 = st.columns(2)
@@ -351,6 +381,8 @@ def _configure_step() -> None:
             min_value=0.0,
             value=float(cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])),
             step=0.5,
+            disabled=disabled,
+            key="cfg_min_prominence",
         )
     with col4:
         min_distance_sec = st.number_input(
@@ -358,15 +390,21 @@ def _configure_step() -> None:
             min_value=0.0,
             value=float(cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])),
             step=0.1,
+            disabled=disabled,
+            key="cfg_min_distance",
         )
 
     debug_video = st.checkbox(
         "Generar vídeo de depuración",
         value=bool(cfg_values.get("debug_video", CONFIG_DEFAULTS["debug_video"])),
+        disabled=disabled,
+        key="cfg_debug_video",
     )
     use_crop = st.checkbox(
         "Usar recorte automático (MediaPipe)",
         value=bool(cfg_values.get("use_crop", CONFIG_DEFAULTS["use_crop"])),
+        disabled=disabled,
+        key="cfg_use_crop",
     )
 
     target_fps_current = cfg_values.get("target_fps", CONFIG_DEFAULTS.get("target_fps"))
@@ -374,10 +412,23 @@ def _configure_step() -> None:
     target_fps_raw = st.text_input(
         "FPS objetivo tras muestreo",
         value=target_fps_default,
-        help="Déjalo vacío para desactivar el remuestreo."
+        help="Déjalo vacío para desactivar el remuestreo.",
+        disabled=disabled,
+        key="cfg_target_fps",
     )
     target_fps_error = False
-    if target_fps_raw.strip():
+    if disabled:
+        raw_value = cfg_values.get("target_fps", None)
+        if isinstance(raw_value, str):
+            raw_value = raw_value.strip()
+        if raw_value in (None, "", 0):
+            target_fps_value = None
+        else:
+            try:
+                target_fps_value = float(raw_value)
+            except (TypeError, ValueError):
+                target_fps_value = None
+    elif target_fps_raw.strip():
         try:
             parsed_target_fps = float(target_fps_raw)
         except ValueError:
@@ -399,28 +450,21 @@ def _configure_step() -> None:
         "use_crop": bool(use_crop),
         "target_fps": target_fps_value,
     }
-    if not target_fps_error:
+    if not disabled and not target_fps_error:
         st.session_state.configure_values = current_values
 
-    col_back, col_forward = st.columns(2)
-    with col_back:
-        if st.button("Atrás", key="configure_back"):
-            st.session_state.step = "detect"
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
-    with col_forward:
-        if st.button("Analizar"):
-            if target_fps_error:
-                st.warning("Corrige el valor de FPS objetivo antes de continuar.")
-            else:
-                st.session_state.configure_values = current_values
-                st.session_state.step = "running"
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+    if show_actions and not disabled:
+        col_back, col_forward = st.columns(2)
+        with col_back:
+            if st.button("Atrás", key="configure_back"):
+                st.session_state.step = "detect"
+        with col_forward:
+            if st.button("Continuar", key="configure_continue"):
+                if target_fps_error:
+                    st.warning("Corrige el valor de FPS objetivo antes de continuar.")
+                else:
+                    st.session_state.configure_values = current_values
+                    st.session_state.step = "running"
 
 
 def _running_step() -> None:
@@ -480,7 +524,7 @@ def _running_step() -> None:
 
 
 def _results_panel() -> Dict[str, bool]:
-    st.markdown("### Resultados")
+    st.markdown("### 5. Resultados")
 
     actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
@@ -618,29 +662,34 @@ def main() -> None:
     _init_session_state()
     st.markdown("# Gym Performance Analysis")
 
-    col_left, col_mid, col_right = st.columns([1, 1, 1])
+    col_left, col_mid, col_right = st.columns(3)
 
     with col_left:
         _upload_step()
-        if st.session_state.get("video_path"):
+        if (
+            st.session_state.step in ("detect", "configure", "running", "results")
+            and st.session_state.video_path
+        ):
             _detect_step()
 
     results_actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
     with col_mid:
-        if st.session_state.step in ("configure", "running"):
-            if st.session_state.step == "configure":
-                _configure_step()
-            else:
+        step = st.session_state.step
+        if step in ("configure", "running", "results"):
+            disabled = step != "configure"
+            show_actions = step == "configure"
+            _configure_step(disabled=disabled, show_actions=show_actions)
+            if step == "running":
                 _running_step()
         else:
-            st.markdown("### 3. Configura el análisis")
-            st.info(
-                "Configura el análisis una vez hayas subido el vídeo y detectado el ejercicio."
-            )
+            st.empty()
 
     with col_right:
-        results_actions = _results_panel()
+        if st.session_state.step == "results":
+            results_actions = _results_panel()
+        else:
+            st.empty()
 
     if results_actions.get("adjust"):
         st.session_state.step = "configure"
