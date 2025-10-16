@@ -29,9 +29,9 @@ DEADLIFT_TORSO_UPRIGHT_TARGET_DEG = 35.0
 
 VIEW_FRONT_WIDTH_THRESHOLD = 0.55      # normalized shoulder width / torso length
 VIEW_WIDTH_STD_THRESHOLD = 0.12
-YAW_FRONT_MAX_DEG = 15.0
+YAW_FRONT_MAX_DEG = 20.0
 YAW_SIDE_MIN_DEG = 25.0
-Z_DELTA_FRONT_MAX = 0.06               # normalized MediaPipe units (smaller is more front)
+Z_DELTA_FRONT_MAX = 0.08               # normalized MediaPipe units (smaller is more front)
 SIDE_WIDTH_MAX = 0.50                  # if width_norm mean ≤ this, likely side
 
 CLASSIFICATION_MARGIN = 0.15
