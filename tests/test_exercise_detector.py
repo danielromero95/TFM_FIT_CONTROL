@@ -1,3 +1,4 @@
+# tests/test_exercise_detector.py
 """Unit tests for the heuristic exercise classifier."""
 
 from __future__ import annotations
