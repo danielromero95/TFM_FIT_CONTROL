@@ -29,6 +29,10 @@ DEADLIFT_TORSO_UPRIGHT_TARGET_DEG = 35.0
 
 VIEW_FRONT_WIDTH_THRESHOLD = 0.55      # normalized shoulder width / torso length
 VIEW_WIDTH_STD_THRESHOLD = 0.12
+YAW_FRONT_MAX_DEG = 15.0
+YAW_SIDE_MIN_DEG = 25.0
+Z_DELTA_FRONT_MAX = 0.06               # normalized MediaPipe units (smaller is more front)
+SIDE_WIDTH_MAX = 0.50                  # if width_norm mean ≤ this, likely side
 
 CLASSIFICATION_MARGIN = 0.15
 MIN_CONFIDENCE_SCORE = 0.50
@@ -141,6 +145,8 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         "wrist_right_x": [],
         "wrist_right_y": [],
         "shoulder_width_norm": [],
+        "shoulder_yaw_deg": [],
+        "shoulder_z_delta_abs": [],
         "torso_tilt_deg": [],
     }
 
@@ -273,6 +279,12 @@ def _process_frame(
     norm_width = shoulder_width / (torso_length + 1e-6)
     feature_lists["shoulder_width_norm"].append(norm_width)
 
+    dx = abs(float(left_shoulder[0] - right_shoulder[0]))
+    dz = abs(float(left_shoulder[2] - right_shoulder[2]))
+    yaw_deg = math.degrees(math.atan2(dz, dx + 1e-6))
+    feature_lists["shoulder_yaw_deg"].append(float(yaw_deg))
+    feature_lists["shoulder_z_delta_abs"].append(float(dz))
+
     torso_vec = shoulder_mid - hip_mid
     tilt = math.degrees(math.atan2(abs(torso_vec[0]), abs(torso_vec[1]) + 1e-6))
     feature_lists["torso_tilt_deg"].append(float(tilt))
@@ -340,20 +352,22 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     torso_tilt_mean = float(np.nanmean(torso_tilt_series)) if torso_tilt_series.size else 0.0
 
     shoulder_width_series = data.get("shoulder_width_norm", np.empty(0))
-    view = _classify_view(shoulder_width_series)
-    shoulder_mean = (
-        float(np.nanmean(shoulder_width_series))
-        if shoulder_width_series.size
-        else float("nan")
+    shoulder_yaw_series = data.get("shoulder_yaw_deg", np.empty(0))
+    shoulder_z_delta_series = data.get("shoulder_z_delta_abs", np.empty(0))
+
+    view = _classify_view(
+        shoulder_width_series=shoulder_width_series,
+        shoulder_yaw_series=shoulder_yaw_series,
+        shoulder_z_delta_series=shoulder_z_delta_series,
     )
-    shoulder_std = (
-        float(np.nanstd(shoulder_width_series))
-        if shoulder_width_series.size
-        else float("nan")
-    )
+
+    width_mean = _finite_stat(shoulder_width_series, np.mean)
+    width_std = _finite_stat(shoulder_width_series, np.std)
+    yaw_med = _finite_stat(shoulder_yaw_series, np.median)
+    z_med = _finite_stat(shoulder_z_delta_series, np.median)
     logger.info(
-        "DET DEBUG — knee_rom=%.2f hip_rom=%.2f elbow_rom=%.2f pelvis=%.3f "
-        "wristV=%.3f wristH=%.3f tiltMean=%.1f viewMean=%.2f viewStd=%.2f",
+        "DET DEBUG — knee=%.1f hip=%.1f elbow=%.1f pelvis=%.3f "
+        "wV=%.3f wH=%.3f tilt=%.1f widthMean=%.2f widthStd=%.2f yawMed=%.1f zMed=%.3f",
         knee_rom,
         hip_rom,
         elbow_rom,
@@ -361,8 +375,10 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         wrist_vertical,
         wrist_horizontal,
         torso_tilt_mean,
-        shoulder_mean,
-        shoulder_std,
+        width_mean,
+        width_std,
+        yaw_med,
+        z_med,
     )
 
     squat_score = (
@@ -412,6 +428,15 @@ def _range_of(series: np.ndarray | None) -> float:
     return float(valid.max() - valid.min())
 
 
+def _finite_stat(series: np.ndarray | None, reducer) -> float:
+    if series is None or series.size == 0:
+        return float("nan")
+    finite = series[np.isfinite(series)]
+    if finite.size == 0:
+        return float("nan")
+    return float(reducer(finite))
+
+
 def _score(value: float, threshold: float, scale: float = 1.5) -> float:
     if threshold <= 0:
         return 0.0
@@ -439,14 +464,31 @@ def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:
     return labels[max_index], confidence
 
 
-def _classify_view(shoulder_width_series: np.ndarray | None) -> str:
-    if shoulder_width_series is None or shoulder_width_series.size == 0:
-        return "unknown"
-    finite = shoulder_width_series[np.isfinite(shoulder_width_series)]
-    if not finite.size:
-        return "unknown"
-    mean_width = float(np.mean(finite))
-    std_width = float(np.std(finite))
-    if mean_width >= VIEW_FRONT_WIDTH_THRESHOLD and std_width <= VIEW_WIDTH_STD_THRESHOLD:
-        return "front"
-    return "side" if np.isfinite(mean_width) else "unknown"
+def _classify_view(
+    shoulder_width_series: np.ndarray | None,
+    shoulder_yaw_series: np.ndarray | None = None,
+    shoulder_z_delta_series: np.ndarray | None = None,
+) -> str:
+    yaw_med = _finite_stat(shoulder_yaw_series, np.median)
+    z_med = _finite_stat(shoulder_z_delta_series, np.median)
+    width_mean = _finite_stat(shoulder_width_series, np.mean)
+    width_std = _finite_stat(shoulder_width_series, np.std)
+
+    yaw_available = np.isfinite(yaw_med) and np.isfinite(z_med)
+
+    if yaw_available:
+        if yaw_med <= YAW_FRONT_MAX_DEG and z_med <= Z_DELTA_FRONT_MAX:
+            return "front"
+        if yaw_med >= YAW_SIDE_MIN_DEG:
+            return "side"
+        if np.isfinite(width_mean) and width_mean <= SIDE_WIDTH_MAX:
+            return "side"
+
+    if np.isfinite(width_mean) and np.isfinite(width_std):
+        if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD and width_std <= VIEW_WIDTH_STD_THRESHOLD:
+            return "front"
+
+    if np.isfinite(width_mean):
+        return "side"
+
+    return "unknown"
