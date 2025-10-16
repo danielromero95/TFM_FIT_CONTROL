@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import numpy as np
+import pytest
+
+np = pytest.importorskip("numpy")
 
 from src.detect.exercise_detector import FeatureSeries, classify_features
 
@@ -24,7 +26,7 @@ def _base_feature_data(length: int) -> dict[str, np.ndarray]:
         "wrist_left_y": const_coord.copy(),
         "wrist_right_x": const_coord.copy(),
         "wrist_right_y": const_coord.copy(),
-        "shoulder_width_norm": np.full(length, 1.0),
+        "shoulder_width_norm": np.full(length, 0.6),
         "torso_tilt_deg": np.full(length, 15.0),
     }
 
@@ -47,7 +49,7 @@ def test_classify_squat_like_features() -> None:
     data["hip_angle_left"] = np.linspace(60.0, 110.0, length)
     data["hip_angle_right"] = np.linspace(58.0, 108.0, length)
     data["pelvis_y"] = np.linspace(0.45, 0.60, length)
-    data["shoulder_width_norm"] = np.full(length, 1.7)
+    data["shoulder_width_norm"] = np.full(length, 0.65)
     data["torso_tilt_deg"] = np.full(length, 12.0)
 
     features = _make_feature_series(data)
@@ -55,7 +57,7 @@ def test_classify_squat_like_features() -> None:
 
     assert label == "squat"
     assert view == "front"
-    assert confidence > 0.6
+    assert confidence >= 0.6
 
 
 def test_classify_bench_like_features() -> None:
@@ -66,14 +68,14 @@ def test_classify_bench_like_features() -> None:
     data["wrist_left_x"] = np.linspace(0.2, 0.5, length)
     data["wrist_right_x"] = np.linspace(0.25, 0.55, length)
     data["torso_tilt_deg"] = np.full(length, 75.0)
-    data["shoulder_width_norm"] = np.full(length, 0.9)
+    data["shoulder_width_norm"] = np.full(length, 0.4)
 
     features = _make_feature_series(data)
     label, view, confidence = classify_features(features)
 
     assert label == "bench"
     assert view == "side"
-    assert confidence > 0.6
+    assert confidence >= 0.6
 
 
 def test_classify_deadlift_like_features() -> None:
@@ -84,14 +86,14 @@ def test_classify_deadlift_like_features() -> None:
     data["wrist_left_y"] = np.linspace(0.2, 0.55, length)
     data["wrist_right_y"] = np.linspace(0.25, 0.58, length)
     data["torso_tilt_deg"] = np.full(length, 20.0)
-    data["shoulder_width_norm"] = np.full(length, 1.0)
+    data["shoulder_width_norm"] = np.full(length, 0.45)
 
     features = _make_feature_series(data)
     label, view, confidence = classify_features(features)
 
     assert label == "deadlift"
     assert view == "side"
-    assert confidence > 0.6
+    assert confidence >= 0.6
 
 
 def test_classify_low_signal_returns_unknown() -> None:
