@@ -66,8 +66,8 @@ def _inject_css() -> None:
       header[data-testid="stHeader"] {
         background: #0f172a;
         border-bottom: 1px solid #1f2937;
-        height: 56px;
-        padding-right: 160px;
+        height: 48px;
+        padding-right: 140px;
         position: relative;
       }
       header[data-testid="stHeader"]::before {
@@ -156,6 +156,9 @@ def _inject_css() -> None:
 
       /* Slightly larger click targets for nav buttons */
       .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
+
+      /* Pull content closer to the toolbar */
+      main .block-container { padding-top: 0.25rem !important; }
     </style>
     """,
         unsafe_allow_html=True,
@@ -634,6 +637,7 @@ def _running_step() -> None:
     with st.spinner("Procesando vídeo…"):
         _run_pipeline(progress_cb=_cb)
 
+    st.session_state.last_run_success = True
     st.session_state.step = "results"
     try:
         st.rerun()
@@ -643,6 +647,8 @@ def _running_step() -> None:
 
 def _results_panel() -> Dict[str, bool]:
     st.markdown("### 5. Resultados")
+    if st.session_state.pop("last_run_success", False):
+        st.caption("✅ Análisis completado")
 
     actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
@@ -655,10 +661,6 @@ def _results_panel() -> Dict[str, bool]:
         repetitions = report.repetitions
         metrics_df = report.metrics
 
-        st.success(
-            "Análisis completado ✅" if stats.skip_reason is None else "Análisis completado con avisos ⚠️"
-        )
-        st.markdown(f"**CONFIG_SHA1:** `{st.session_state.cfg_fingerprint}`")
         st.markdown(f"### Repeticiones detectadas: **{repetitions}**")
 
         st.markdown("### Estadísticas de la ejecución")
@@ -689,17 +691,11 @@ def _results_panel() -> Dict[str, bool]:
         except Exception:
             st.json({row["Campo"]: row["Valor"] for row in stats_rows})
 
-        if stats.config_path:
-            st.info(f"Configuración utilizada guardada en: `{stats.config_path}`")
-
         if stats.warnings:
             st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
 
         if stats.skip_reason:
             st.error(f"Conteo de repeticiones omitido: {stats.skip_reason}")
-
-        st.markdown("### Recuento de repeticiones")
-        st.code(f"{repetitions}")
 
         if metrics_df is not None:
             st.markdown("### Métricas calculadas")
