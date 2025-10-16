@@ -158,7 +158,52 @@ def _inject_css() -> None:
       .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
 
       /* Pull content closer to the toolbar */
-      main .block-container { padding-top: 0.25rem !important; }
+      main .block-container {
+        padding-top: 0 !important;
+      }
+      main .block-container > div:first-child {
+        margin-top: 0 !important;
+      }
+      main [data-testid="stVerticalBlock"] {
+        padding-top: 0 !important;
+      }
+      main [data-testid="stVerticalBlock"] > div:first-child {
+        margin-top: 0 !important;
+      }
+      main [data-testid="stHorizontalBlock"] {
+        margin-top: 0 !important;
+        align-items: flex-start !important;
+      }
+      main [data-testid="column"] {
+        padding-top: 0 !important;
+      }
+      main [data-testid="column"] > div {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+      }
+
+      /* Ensure the results column aligns with step 4 content */
+      .results-panel {
+        margin-top: 0 !important;
+        display: flex;
+        flex-direction: column;
+        gap: .75rem;
+      }
+      .results-panel h3:first-child {
+        margin-top: 0 !important;
+      }
+      .results-panel .stDataFrame {
+        margin-bottom: .25rem;
+      }
+      .results-panel video {
+        border-radius: 12px;
+      }
+      .results-panel [data-testid="stHorizontalBlock"] {
+        gap: .5rem !important;
+      }
+      .results-panel [data-testid="column"] .stButton > button {
+        width: 100%;
+      }
     </style>
     """,
         unsafe_allow_html=True,
@@ -193,6 +238,8 @@ def _init_session_state() -> None:
         st.session_state.metrics_path = None
     if "cfg_fingerprint" not in st.session_state:
         st.session_state.cfg_fingerprint = None
+    if "last_run_success" not in st.session_state:
+        st.session_state.last_run_success = False
 
 
 def _reset_state(*, preserve_upload: bool = False) -> None:
@@ -214,6 +261,7 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.count_path = None
     st.session_state.metrics_path = None
     st.session_state.cfg_fingerprint = None
+    st.session_state.last_run_success = False
     st.session_state.exercise = EXERCISE_OPTIONS[0]
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
@@ -596,6 +644,8 @@ def _running_step() -> None:
         st.session_state.get("configure_values", {}).get("debug_video", True)
     )
 
+    st.session_state.last_run_success = False
+
     def _phase_for(p: int) -> str:
         if p < 10:
             return "Preparando…"
@@ -637,7 +687,10 @@ def _running_step() -> None:
     with st.spinner("Procesando vídeo…"):
         _run_pipeline(progress_cb=_cb)
 
-    st.session_state.last_run_success = True
+    st.session_state.last_run_success = (
+        st.session_state.pipeline_error is None
+        and st.session_state.report is not None
+    )
     st.session_state.step = "results"
     try:
         st.rerun()
@@ -646,9 +699,8 @@ def _running_step() -> None:
 
 
 def _results_panel() -> Dict[str, bool]:
+    st.markdown('<div class="results-panel">', unsafe_allow_html=True)
     st.markdown("### 5. Resultados")
-    if st.session_state.pop("last_run_success", False):
-        st.caption("✅ Análisis completado")
 
     actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
@@ -661,9 +713,14 @@ def _results_panel() -> Dict[str, bool]:
         repetitions = report.repetitions
         metrics_df = report.metrics
 
-        st.markdown(f"### Repeticiones detectadas: **{repetitions}**")
+        st.markdown(f"**Repeticiones detectadas:** {repetitions}")
 
-        st.markdown("### Estadísticas de la ejecución")
+        if report.debug_video_path and bool(
+            st.session_state.get("configure_values", {}).get("debug_video", True)
+        ):
+            st.video(str(report.debug_video_path))
+            st.caption("Vídeo con landmarks")
+
         stats_rows = [
             {"Campo": "CONFIG_SHA1", "Valor": stats.config_sha1},
             {"Campo": "fps_original", "Valor": f"{stats.fps_original:.2f}"},
@@ -686,19 +743,9 @@ def _results_panel() -> Dict[str, bool]:
             {"Campo": "refractory_sec", "Valor": f"{stats.refractory_sec:.2f}"},
         ]
         stats_df = pd.DataFrame(stats_rows, columns=["Campo", "Valor"]).astype({"Valor": "string"})
-        try:
-            st.dataframe(stats_df, use_container_width=True)
-        except Exception:
-            st.json({row["Campo"]: row["Valor"] for row in stats_rows})
-
-        if stats.warnings:
-            st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
-
-        if stats.skip_reason:
-            st.error(f"Conteo de repeticiones omitido: {stats.skip_reason}")
 
         if metrics_df is not None:
-            st.markdown("### Métricas calculadas")
+            st.markdown("#### Métricas calculadas")
             st.dataframe(metrics_df, use_container_width=True)
             numeric_columns = [
                 col
@@ -714,6 +761,22 @@ def _results_panel() -> Dict[str, bool]:
                 )
                 if selected_metrics:
                     st.line_chart(metrics_df[selected_metrics])
+
+        if stats.warnings:
+            st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
+
+        if stats.skip_reason:
+            st.error(f"Conteo de repeticiones omitido: {stats.skip_reason}")
+
+        with st.expander("Estadísticas de la ejecución (opcional)", expanded=False):
+            try:
+                st.dataframe(stats_df, use_container_width=True)
+            except Exception:
+                st.json({row["Campo"]: row["Valor"] for row in stats_rows})
+
+            if st.session_state.video_path:
+                st.markdown("### Vídeo original")
+                st.video(str(st.session_state.video_path))
 
         if st.session_state.metrics_path is not None:
             metrics_data = None
@@ -751,25 +814,26 @@ def _results_panel() -> Dict[str, bool]:
                     mime="text/plain",
                 )
 
-        if report.debug_video_path and bool(
-            st.session_state.get("configure_values", {}).get("debug_video", True)
-        ):
-            st.markdown("### Vídeo de depuración")
-            st.video(str(report.debug_video_path))
     else:
         st.info("No se encontraron resultados para mostrar.")
 
-    if st.session_state.video_path:
-        st.markdown("### Vídeo original")
-        st.video(str(st.session_state.video_path))
+    adjust_col, reset_col = st.columns(2)
+    with adjust_col:
+        if st.button("Ajustar configuración y reanalizar", key="results_adjust"):
+            actions["adjust"] = True
+    with reset_col:
+        if st.button("Volver a inicio", key="results_reset"):
+            actions["reset"] = True
 
-    if st.button("Ajustar configuración y reanalizar", key="results_adjust"):
-        actions["adjust"] = True
-
-    if st.button("Volver a inicio", key="results_reset"):
-        actions["reset"] = True
+    st.markdown("</div>", unsafe_allow_html=True)
 
     return actions
+
+
+def _results_summary() -> None:
+    st.markdown("### 4. Ejecuta el análisis")
+    if st.session_state.get("last_run_success"):
+        st.success("Análisis completado ✅")
 
 
 def main() -> None:
@@ -789,12 +853,14 @@ def main() -> None:
 
     with col_mid:
         step = st.session_state.step
-        if step in ("configure", "running", "results"):
+        if step in ("configure", "running"):
             disabled = step != "configure"
             show_actions = step == "configure"
             _configure_step(disabled=disabled, show_actions=show_actions)
             if step == "running":
                 _running_step()
+        elif step == "results":
+            _results_summary()
         else:
             st.empty()
 
