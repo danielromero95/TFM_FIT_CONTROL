@@ -1,10 +1,11 @@
-# tests/conftest.py
+"""Test configuration helpers."""
 
-import sys, os
+import os
+import sys
 
-# Obtener la ruta al directorio padre de 'tests', que es la raíz del proyecto
+# Locate the project root (parent directory of ``tests``).
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
-# Añadir la carpeta raíz al PYTHONPATH
+# Ensure the project root is on PYTHONPATH for imports.
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)

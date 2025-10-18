@@ -22,9 +22,9 @@ def _positive_int(value: str) -> int:
     try:
         number = int(value)
     except ValueError as exc:  # pragma: no cover - defensive guard
-        raise argparse.ArgumentTypeError(f"{value!r} no es un entero válido") from exc
+        raise argparse.ArgumentTypeError(f"{value!r} is not a valid integer") from exc
     if number <= 0:
-        raise argparse.ArgumentTypeError("El valor debe ser un entero positivo")
+        raise argparse.ArgumentTypeError("Value must be a positive integer")
     return number
 
 
@@ -32,71 +32,71 @@ def _positive_float(value: str) -> float:
     try:
         number = float(value)
     except ValueError as exc:  # pragma: no cover - defensive guard
-        raise argparse.ArgumentTypeError(f"{value!r} no es un número válido") from exc
+        raise argparse.ArgumentTypeError(f"{value!r} is not a valid number") from exc
     if number <= 0:
-        raise argparse.ArgumentTypeError("El valor debe ser mayor que 0")
+        raise argparse.ArgumentTypeError("Value must be greater than 0")
     return number
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Ejecuta el pipeline completo de análisis sobre un vídeo.",
+        description="Run the full analysis pipeline on a video.",
     )
-    parser.add_argument("--video", required=True, help="Ruta al archivo de vídeo a procesar")
+    parser.add_argument("--video", required=True, help="Path to the video file to analyse")
     parser.add_argument(
         "--output_dir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Carpeta base donde guardar resultados (por defecto data/processed).",
+        help="Base folder where results are stored (defaults to data/processed).",
     )
     parser.add_argument(
         "--target_fps",
         type=_positive_float,
         default=None,
-        help="FPS objetivo tras el muestreo. Si se omite se usa la configuración por defecto.",
+        help="Target FPS after resampling. Falls back to the default configuration when omitted.",
     )
     parser.add_argument(
         "--sample_rate",
         type=_positive_int,
         default=None,
-        help="Compatibilidad: procesa 1 de cada N frames (sobrescribe target_fps si se usa).",
+        help="Compatibility option: process 1 of every N frames (overrides target_fps when provided).",
     )
     parser.add_argument(
         "--rotate",
         type=int,
         default=None,
-        help="Rotación manual en grados (0, 90, 180 o 270). Si se omite se auto-detecta.",
+        help="Manual rotation in degrees (0, 90, 180 or 270). Auto-detected when omitted.",
     )
     parser.add_argument(
         "--low_thresh",
         type=float,
         default=config.SQUAT_LOW_THRESH,
-        help="Umbral bajo (en grados) usado para la evaluación de profundidad.",
+        help="Lower threshold (degrees) used for depth evaluation.",
     )
     parser.add_argument(
         "--high_thresh",
         type=float,
         default=config.SQUAT_HIGH_THRESH,
-        help="Umbral alto para la evaluación de profundidad.",
+        help="Upper threshold used for depth evaluation.",
     )
     parser.add_argument(
         "--disable_crop",
         action="store_true",
-        help="Desactiva el recorte automático del estimador de pose.",
+        help="Disable the pose estimator automatic crop.",
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Activa el modo depuración y guarda CSVs intermedios en la sesión.",
+        help="Enable debug mode and persist intermediate CSVs.",
     )
     parser.add_argument(
         "--generate_debug_video",
         action="store_true",
-        help="Genera un vídeo MP4 con el esqueleto renderizado.",
+        help="Generate an MP4 video with the rendered skeleton.",
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Muestra mensajes de log detallados durante la ejecución.",
+        help="Show verbose log messages during execution.",
     )
     return parser
 
@@ -114,11 +114,11 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     video_path = Path(args.video).expanduser()
     if not video_path.is_file():
-        parser.error(f"No se encontró el vídeo: {video_path}")
+        parser.error(f"Video not found: {video_path}")
 
     output_dir = Path(args.output_dir).expanduser()
     if args.sample_rate is not None and args.sample_rate <= 0:
-        parser.error("sample_rate debe ser mayor que 0")
+        parser.error("sample_rate must be greater than 0")
 
     cfg = config.load_default()
     cfg.output.base_dir = output_dir
@@ -139,12 +139,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     try:
         report: Report = run_pipeline(str(video_path), cfg)
     except Exception as exc:  # pragma: no cover - surfaced to the CLI user
-        LOGGER.exception("Fallo ejecutando el pipeline")
+        LOGGER.exception("Pipeline execution failed")
         return 1
 
     repetitions = report.repetitions
     if report.stats.skip_reason:
-        LOGGER.warning("Conteo omitido: %s", report.stats.skip_reason)
+        LOGGER.warning("Counting skipped: %s", report.stats.skip_reason)
         repetitions = 0
 
     metrics_df = report.metrics
@@ -163,15 +163,15 @@ def main(argv: Iterable[str] | None = None) -> int:
         metrics_path = poses_dir / f"{video_name}_metrics.csv"
         metrics_df.to_csv(metrics_path, index=False)
     else:  # pragma: no cover - run_pipeline siempre devuelve un DataFrame
-        LOGGER.warning("No se recibió DataFrame de métricas; se omite la exportación")
+        LOGGER.warning("No metrics DataFrame received; skipping export")
 
-    print(f"Repeticiones detectadas: {repetitions}")
+    print(f"Detected repetitions: {repetitions}")
     if metrics_path is not None:
-        print(f"CSV de métricas: {metrics_path}")
-    print(f"Archivo de conteo: {count_path}")
+        print(f"Metrics CSV: {metrics_path}")
+    print(f"Count file: {count_path}")
     print(f"CONFIG_SHA1: {report.stats.config_sha1}")
     if report.stats.skip_reason:
-        print(f"AVISO: {report.stats.skip_reason}")
+        print(f"WARNING: {report.stats.skip_reason}")
 
     return 0
 
