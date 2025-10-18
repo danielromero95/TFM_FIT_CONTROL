@@ -41,11 +41,18 @@ from src import config
 from src.detect.exercise_detector import detect_exercise
 from src.pipeline import Report, run_pipeline
 
-EXERCISE_OPTIONS = ["Auto (MVP)", "Squat"]
-EXERCISE_TO_CONFIG = {
-    "Auto (MVP)": "auto",
-    "Squat": "squat",
-}
+EXERCISE_CHOICES = [
+    ("Auto Detect", "auto", True),
+    ("Squat", "squat", True),
+    ("Deadlift", "deadlift", False),
+    ("Bench Press", "benchpress", False),
+]
+
+DEFAULT_EXERCISE_LABEL = next(label for label, _, enabled in EXERCISE_CHOICES if enabled)
+ENABLED_EXERCISE_LABELS = [label for label, _, enabled in EXERCISE_CHOICES if enabled]
+EXERCISE_LABELS = [label for label, _, _ in EXERCISE_CHOICES]
+EXERCISE_TO_CONFIG = {label: config for label, config, _ in EXERCISE_CHOICES}
+CONFIG_TO_EXERCISE = {config: label for label, config, _ in EXERCISE_CHOICES}
 CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "low": 80,
     "high": 150,
@@ -59,6 +66,31 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
 
 
 def _inject_css() -> None:
+    disabled_indices = [
+        idx + 1
+        for idx, (_, _, enabled) in enumerate(EXERCISE_CHOICES)
+        if not enabled
+    ]
+    disabled_css = ""
+    if disabled_indices:
+        selectors = ", ".join(
+            f'.step-detect [data-testid="stRadio"] div[role="radiogroup"] > label:nth-child({idx})'
+            for idx in disabled_indices
+        )
+        disabled_css = f"""
+      {selectors} {{
+        pointer-events: none;
+        opacity: .45;
+        border-style: dashed;
+        border-color: rgba(148,163,184,.18);
+        transform: none !important;
+        box-shadow: none !important;
+      }}
+      {selectors} input {{
+        pointer-events: none;
+      }}
+"""
+
     st.markdown(
         """
     <style>
@@ -88,31 +120,38 @@ def _inject_css() -> None:
       }
 
       .btn-danger > button, .btn-success > button {
-        border-radius: 12px !important;
-        border-width: 1px !important;
-        background: transparent !important;
-        transition: background .15s ease, border-color .15s ease;
+        border-radius: 999px !important;
+        font-weight: 600 !important;
+        min-height: 44px;
+        padding: .15rem 1.75rem !important;
+        transition: transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
       }
       .btn-danger > button {
-        color: #ef4444 !important;
-        border-color: rgba(239,68,68,.6) !important;
+        background: linear-gradient(135deg, rgba(30,41,59,.95), rgba(15,23,42,.95)) !important;
+        color: #f8fafc !important;
+        border: 1px solid rgba(148,163,184,.35) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 10px 20px rgba(15,23,42,.35);
       }
       .btn-danger > button:hover {
-        background: rgba(239,68,68,.10) !important;
-        border-color: rgba(239,68,68,.9) !important;
+        border-color: rgba(148,163,184,.6) !important;
+        transform: translateY(-1px);
       }
 
       .btn-success > button {
-        color: #22c55e !important;
-        border-color: rgba(34,197,94,.6) !important;
+        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
+        color: #ecfdf5 !important;
+        border: 1px solid rgba(34,197,94,.8) !important;
+        box-shadow: 0 12px 24px rgba(16,185,129,.35);
       }
       .btn-success > button:hover {
-        background: rgba(34,197,94,.10) !important;
-        border-color: rgba(34,197,94,.9) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 16px 28px rgba(16,185,129,.45);
       }
 
       .btn-danger > button[disabled], .btn-success > button[disabled] {
-        opacity: .6 !important;
+        opacity: .55 !important;
+        transform: none !important;
+        box-shadow: none !important;
         cursor: not-allowed !important;
       }
 
@@ -150,12 +189,48 @@ def _inject_css() -> None:
         header[data-testid="stHeader"]::before { display: none; }
       }
 
-      /* Make the select a little wider than the button for visual balance */
+      /* Make the detection controls sit side by side */
       .step-detect .row-detect { display: grid; grid-template-columns: 1fr 2.25fr; gap: 1rem; }
-      .step-detect .stSelect { margin-top: .25rem; }
+
+      /* Exercise selector as segmented control */
+      .step-detect [data-testid="stRadio"] { margin-top: .25rem; }
+      .step-detect [data-testid="stRadio"] > div[role="radiogroup"] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem;
+      }
+      .step-detect [data-testid="stRadio"] label[data-baseweb="radio"] {
+        flex: 1 1 140px;
+        border-radius: 999px;
+        border: 1px solid rgba(148,163,184,.25);
+        background: rgba(15,23,42,.78);
+        color: #e2e8f0;
+        padding: .55rem 1.25rem;
+        justify-content: center;
+        gap: .35rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease, color .15s ease;
+      }
+      .step-detect [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+        display: none;
+      }
+      .step-detect [data-testid="stRadio"] label[data-baseweb="radio"] span {
+        color: inherit !important;
+      }
+      .step-detect [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+        border-color: rgba(148,163,184,.45);
+        transform: translateY(-1px);
+      }
+      .step-detect [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {
+        background: linear-gradient(135deg, rgba(59,130,246,.85), rgba(37,99,235,.85));
+        border-color: rgba(59,130,246,.75);
+        color: #f8fafc;
+        box-shadow: 0 12px 28px rgba(37,99,235,.35);
+      }
 
       /* Slightly larger click targets for nav buttons */
-      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
+      .btn-danger > button, .btn-success > button { min-width: 140px; }
 
       /* Pull content closer to the toolbar */
       section[data-testid="stMain"],
@@ -228,6 +303,9 @@ def _inject_css() -> None:
         unsafe_allow_html=True,
     )
 
+    if disabled_css:
+        st.markdown(f"<style>{disabled_css}</style>", unsafe_allow_html=True)
+
 
 def _init_session_state() -> None:
     _inject_css()
@@ -242,7 +320,9 @@ def _init_session_state() -> None:
     if "video_path" not in st.session_state:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
-        st.session_state.exercise = EXERCISE_OPTIONS[0]
+        st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    if "last_valid_exercise" not in st.session_state:
+        st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     if "detect_result" not in st.session_state:
         st.session_state.detect_result = None
     if "configure_values" not in st.session_state:
@@ -281,7 +361,8 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.metrics_path = None
     st.session_state.cfg_fingerprint = None
     st.session_state.last_run_success = False
-    st.session_state.exercise = EXERCISE_OPTIONS[0]
+    st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
@@ -357,7 +438,7 @@ def _run_pipeline(progress_cb=None) -> None:
         except (TypeError, ValueError):
             pass
 
-    exercise_label = st.session_state.get("exercise", EXERCISE_OPTIONS[0])
+    exercise_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
     cfg.counting.exercise = EXERCISE_TO_CONFIG.get(exercise_label, "squat")
 
     det = st.session_state.get("detect_result")
@@ -472,21 +553,35 @@ def _detect_step() -> None:
                         "view": view,
                         "confidence": float(confidence),
                     }
-                    if label == "squat":
-                        st.session_state.exercise = "Squat"
-                    else:
-                        st.session_state.exercise = EXERCISE_OPTIONS[0]
+                    matched_display = CONFIG_TO_EXERCISE.get(label, DEFAULT_EXERCISE_LABEL)
+                    if matched_display not in ENABLED_EXERCISE_LABELS:
+                        matched_display = DEFAULT_EXERCISE_LABEL
+                    st.session_state.exercise = matched_display
+                    st.session_state.last_valid_exercise = matched_display
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_select:
         st.caption("Select the exercise")
-        st.selectbox(
+        st.radio(
             "",
-            options=EXERCISE_OPTIONS,
+            options=EXERCISE_LABELS,
             key="exercise",
             label_visibility="collapsed",
             disabled=detect_readonly,
+            horizontal=True,
         )
+        current_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+        last_valid = st.session_state.get("last_valid_exercise", DEFAULT_EXERCISE_LABEL)
+        if detect_readonly:
+            if current_label not in ENABLED_EXERCISE_LABELS:
+                st.session_state.exercise = last_valid
+                st.session_state.last_valid_exercise = last_valid
+        else:
+            if current_label in ENABLED_EXERCISE_LABELS:
+                st.session_state.last_valid_exercise = current_label
+            else:
+                st.session_state.exercise = last_valid
+                st.session_state.last_valid_exercise = last_valid
 
     st.markdown('</div>', unsafe_allow_html=True)
 
