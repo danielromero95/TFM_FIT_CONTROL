@@ -158,11 +158,30 @@ def _inject_css() -> None:
       .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
 
       /* Pull content closer to the toolbar */
-      main .block-container {
+      section[data-testid="stMain"],
+      main {
         padding-top: 0 !important;
       }
-      main .block-container > div:first-child {
+      section[data-testid="stMain"] > div:first-child,
+      main > div:first-child {
+        padding-top: 0 !important;
         margin-top: 0 !important;
+      }
+      main .block-container {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+      }
+      main .block-container > div:first-child {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+      }
+      main [data-testid="stToolbar"] {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+      }
+      main [data-testid="stToolbar"] + div {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
       }
       main [data-testid="stVerticalBlock"] {
         padding-top: 0 !important;
