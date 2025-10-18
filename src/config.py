@@ -14,24 +14,24 @@ try:  # Optional dependency – only needed when loading from YAML files.
 except Exception:  # pragma: no cover - PyYAML is optional at runtime
     yaml = None  # type: ignore
 
-# --- CONFIGURACIÓN GENERAL ---
+# --- GENERAL CONFIGURATION ---
 APP_NAME = "Gym Performance Analyzer"
 ORGANIZATION_NAME = "GymPerformance"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".mpg", ".mpeg", ".wmv"}
 
-# --- PARÁMETROS DEL PIPELINE ---
+# --- PIPELINE PARAMETERS ---
 MODEL_COMPLEXITY = 1
 MIN_DETECTION_CONFIDENCE = 0.5
 DEFAULT_TARGET_WIDTH = 256
 DEFAULT_TARGET_HEIGHT = 256
 
-# --- PARÁMETROS DE CONTEO (heredados) ---
+# --- COUNTING PARAMETERS (legacy) ---
 SQUAT_HIGH_THRESH = 160.0
 SQUAT_LOW_THRESH = 100.0
-PEAK_PROMINENCE = 10  # Prominencia para el detector de picos
-PEAK_DISTANCE = 15    # Distancia mínima en frames entre repeticiones
+PEAK_PROMINENCE = 10  # Prominence used by the peak detector
+PEAK_DISTANCE = 15    # Minimum distance in frames between repetitions
 
-# --- CONFIGURACIÓN DE VISUALIZACIÓN ---
+# --- VISUALISATION CONFIGURATION ---
 POSE_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8), (9, 10),
     (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21), (12, 14),
@@ -39,10 +39,10 @@ POSE_CONNECTIONS = [
     (23, 25), (25, 27), (27, 29), (27, 31), (24, 26), (26, 28), (28, 30),
     (28, 32), (29, 31), (30, 32)
 ]
-LANDMARK_COLOR = (0, 255, 0)  # Verde
-CONNECTION_COLOR = (0, 0, 255)  # Rojo
+LANDMARK_COLOR = (0, 255, 0)  # Green
+CONNECTION_COLOR = (0, 0, 255)  # Red
 
-# --- VALORES POR DEFECTO DE LA GUI ---
+# --- DEFAULT GUI VALUES ---
 DEFAULT_SAMPLE_RATE = 3
 DEFAULT_ROTATION = "0"
 DEFAULT_USE_CROP = True
@@ -86,7 +86,7 @@ class CountingConfig:
     """Parameters used for repetition counting."""
 
     exercise: str = "squat"
-    primary_angle: str = "rodilla_izq"
+    primary_angle: str = "left_knee"
     min_prominence: float = float(PEAK_PROMINENCE)
     min_distance_sec: float = 0.5
     refractory_sec: float = 0.4
@@ -167,7 +167,7 @@ def load_default() -> Config:
 def from_yaml(path: str | Path) -> Config:
     """Load a configuration from a YAML file and merge it with defaults."""
     if yaml is None:  # pragma: no cover - optional dependency guard
-        raise RuntimeError("PyYAML no está disponible. Instálalo para cargar archivos YAML.")
+        raise RuntimeError("PyYAML is not available. Install it to load YAML files.")
 
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     cfg = load_default()

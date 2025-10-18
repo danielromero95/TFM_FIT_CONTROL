@@ -4,7 +4,7 @@ setlocal EnableExtensions
 rem ============== project_tree.cmd =================
 rem Uso:
 rem   project_tree           -> crea project_tree_YYYY-MM-DD_HHMMSS.txt
-rem   project_tree /open     -> además lo abre en Notepad
+rem   project_tree /open     -> also opens it in Notepad
 rem   project_tree /notime   -> usa nombre fijo project_tree.txt
 rem =================================================
 

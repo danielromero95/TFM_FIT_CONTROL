@@ -69,7 +69,7 @@ def count_reps_by_valleys(
 
     prominences = properties.get("prominences", [])
     debug = CountingDebugInfo(valley_indices=[int(idx) for idx in valleys], prominences=list(map(float, prominences)))
-    logger.info("Detección de picos encontró %s valles válidos.", len(debug.valley_indices))
+    logger.info("Peak detection found %s valid valleys.", len(debug.valley_indices))
     return len(debug.valley_indices), debug
 
 
@@ -83,7 +83,7 @@ def count_repetitions_with_config(
 
     if df_metrics.empty or angle_column not in df_metrics.columns:
         logger.warning(
-            "La columna '%s' no se encontró o el DataFrame está vacío. Se devuelven 0 repeticiones.",
+            "Column '%s' was not found or the DataFrame is empty. Returning 0 repetitions.",
             angle_column,
         )
         return 0, CountingDebugInfo([], [])
@@ -116,13 +116,13 @@ def count_repetitions_with_config(
 
 def count_repetitions_from_df(
     df_metrics: pd.DataFrame,
-    angle_column: str = "rodilla_izq",
+    angle_column: str = "left_knee",
     low_thresh: float = config.SQUAT_LOW_THRESH,
 ) -> int:
     """Legacy helper preserved for backwards compatibility."""
     if df_metrics.empty or angle_column not in df_metrics.columns:
         logger.warning(
-            "La columna '%s' no se encontró o el DataFrame está vacío. Se devuelven 0 repeticiones.",
+            "Column '%s' was not found or the DataFrame is empty. Returning 0 repetitions.",
             angle_column,
         )
         return 0

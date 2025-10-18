@@ -1,4 +1,5 @@
-# src/A_preprocessing/video_metadata.py
+"""Utilities to query rotation metadata from video files."""
+
 import logging
 import shutil
 import subprocess
@@ -6,43 +7,46 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
 def _normalize_rotation(value: int) -> int:
-    """Devuelve 0/90/180/270 a partir de un entero (tolera negativos)."""
+    """Return the closest value among 0/90/180/270 for ``value``."""
     value = int(value) % 360
-    # Redondeo al múltiplo de 90 más cercano
     candidates = [0, 90, 180, 270]
-    return min(candidates, key=lambda x: abs(x - value))
+    return min(candidates, key=lambda candidate: abs(candidate - value))
+
 
 def get_video_rotation(video_path: str) -> int:
-    """
-    Obtiene la rotación de los metadatos de vídeo usando ffprobe (si está disponible).
-    Retorna 0 si no hay metadatos o ffprobe no está instalado.
-    """
+    """Read the video rotation metadata using ``ffprobe`` when available."""
     try:
         if shutil.which("ffprobe") is None:
-            logger.info("ffprobe no encontrado en PATH; se asume rotación 0.")
+            logger.info("ffprobe not found on PATH; assuming rotation 0°.")
             return 0
 
-        # 1) Intenta leer etiqueta clásica 'rotate'
+        # 1) Read the classic ``rotate`` tag when present.
         cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream_tags=rotate",
-            "-of", "default=nw=1:nk=1",
-            str(Path(video_path))
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream_tags=rotate",
+            "-of",
+            "default=nw=1:nk=1",
+            str(Path(video_path)),
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        txt = (res.stdout or "").strip()
-        if txt:
-            rot = _normalize_rotation(int(float(txt)))
-            if rot:
-                logger.info(f"Rotación detectada por ffprobe (tags): {rot}°")
-            return rot
+        output = (res.stdout or "").strip()
+        if output:
+            rotation = _normalize_rotation(int(float(output)))
+            if rotation:
+                logger.info("Rotation detected by ffprobe (tags): %d°", rotation)
+            return rotation
 
-        # 2) (Opcional) Otros contenedores: si no hay 'rotate', devolvemos 0
-        logger.info("No se detectó rotación en metadatos; se asume 0°.")
+        # 2) If no rotation metadata is present, default to 0°.
+        logger.info("No rotation detected in metadata; assuming 0°.")
         return 0
 
-    except Exception as exc:  # robustez
-        logger.warning(f"No se pudo leer rotación con ffprobe ({exc}); se asume 0°.")
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning("Unable to read rotation with ffprobe (%s); assuming 0°.", exc)
         return 0

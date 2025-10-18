@@ -73,8 +73,8 @@ class Report:
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Preserve the dictionary-based API used by the existing front-ends."""
         legacy: Dict[str, Any] = {
-            "repeticiones_contadas": self.repetitions,
-            "dataframe_metricas": self.metrics,
+            "repetition_count": self.repetitions,
+            "metrics_dataframe": self.metrics,
             "debug_video_path": str(self.debug_video_path) if self.debug_video_path else None,
             "stats": asdict(self.stats),
             "config_sha1": self.stats.config_sha1,
@@ -108,7 +108,7 @@ def run_pipeline(
         encoding="utf-8",
     )
 
-    notify(5, "FASE 1: Extrayendo y rotando fotogramas...")
+    notify(5, "STAGE 1: Extracting and rotating frames...")
     fps_original, _frame_count, fps_warning, prefer_reader_fps = _probe_video_metadata(video_path)
 
     initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
@@ -123,7 +123,7 @@ def run_pipeline(
         sample_rate=initial_sample_rate,
     )
     if not frames:
-        raise ValueError("No se pudieron extraer fotogramas del vídeo.")
+        raise ValueError("No frames could be extracted from the video.")
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
@@ -134,7 +134,7 @@ def run_pipeline(
 
     if fps_original <= 0 and fps_from_reader <= 0:
         warnings.append(
-            "No se pudo determinar un FPS válido a partir de los metadatos ni del lector. Se asume 1 FPS."
+            "Unable to determine a valid FPS from metadata or reader. Falling back to 1 FPS."
         )
         fps_original = 1.0
 
@@ -157,7 +157,7 @@ def run_pipeline(
         try:
             detected_label, detected_view, detected_confidence = detect_exercise(video_path)
         except Exception:  # pragma: no cover - defensive logging only
-            logger.exception("Fallo al detectar el ejercicio automáticamente")
+            logger.exception("Automatic exercise detection failed")
 
     if fps_warning:
         message = f"{fps_warning} FPS final utilizado: {fps_original:.2f}."
@@ -172,7 +172,7 @@ def run_pipeline(
         warnings.append(skip_reason)
     if fps_effective < cfg.video.min_fps:
         message = (
-            f"FPS efectivos {fps_effective:.2f} por debajo del mínimo ({cfg.video.min_fps}). "
+            f"Effective FPS {fps_effective:.2f} below the minimum ({cfg.video.min_fps}). "
             "Se omite el conteo de repeticiones."
         )
         warnings.append(message)
@@ -182,19 +182,19 @@ def run_pipeline(
     target_size = (cfg.pose.target_width, cfg.pose.target_height)
     processed_frames = [cv2.resize(frame, target_size) for frame in frames]
 
-    notify(25, "FASE 2: Estimando pose en los fotogramas...")
+    notify(25, "STAGE 2: Estimating pose on frames...")
     df_raw_landmarks = extract_landmarks_from_frames(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
         visibility_threshold=config.MIN_DETECTION_CONFIDENCE,
     )
 
-    notify(50, "FASE 3: Filtrando e interpolando landmarks...")
+    notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes = filter_and_interpolate_landmarks(df_raw_landmarks)
 
     debug_video_path: Optional[Path] = None
     if cfg.debug.generate_debug_video:
-        notify(65, "FASE EXTRA: Renderizando vídeo de depuración HQ...")
+        notify(65, "EXTRA STAGE: Rendering HQ debug video...")
         debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
         render_landmarks_on_video_hq(
             frames,
@@ -204,7 +204,7 @@ def run_pipeline(
             fps_effective,
         )
 
-    notify(75, "FASE 4: Calculando métricas biomecánicas...")
+    notify(75, "STAGE 4: Computing biomechanical metrics...")
     df_metrics = calculate_metrics_from_sequence(filtered_sequence, fps_effective)
 
     primary_angle = cfg.counting.primary_angle
@@ -215,35 +215,35 @@ def run_pipeline(
             angle_range = float(series.max() - series.min())
         else:
             warnings.append(
-                f"No se pudieron obtener valores válidos para el ángulo primario '{primary_angle}'."
+                f"No valid values could be obtained for the primary angle '{primary_angle}'."
             )
             if skip_reason is None:
-                skip_reason = "La columna de ángulo primario no contiene datos válidos."
+                skip_reason = "The primary angle column does not contain valid data."
     else:
         warnings.append(
-            f"La columna de ángulo primario '{primary_angle}' no está presente en las métricas."
+            f"The primary angle column '{primary_angle}' is not present in the metrics."
         )
         if skip_reason is None:
-            skip_reason = "No se encontró la columna del ángulo primario en las métricas."
+            skip_reason = "The primary angle column was not found in the metrics."
 
     if angle_range < cfg.counting.min_angle_excursion_deg and skip_reason is None:
         skip_reason = (
-            f"El rango de movimiento ({angle_range:.2f}°) es inferior al mínimo requerido "
+            f"The range of motion ({angle_range:.2f}°) is below the required minimum "
             f"({cfg.counting.min_angle_excursion_deg}°)."
         )
         warnings.append(skip_reason)
 
     reps = 0
     if skip_reason is None:
-        notify(90, "FASE 5: Contando repeticiones...")
+        notify(90, "STAGE 5: Counting repetitions...")
         reps, debug_info = count_repetitions_with_config(df_metrics, cfg.counting, fps_effective)
         if reps == 0 and not debug_info.valley_indices:
-            warnings.append("No se detectaron repeticiones con los parámetros actuales.")
+            warnings.append("No repetitions were detected with the current parameters.")
     else:
-        notify(90, "FASE 5: Conteo omitido por restricciones de calidad.")
+        notify(90, "STAGE 5: Counting skipped due to quality constraints.")
 
     if cfg.debug.debug_mode:
-        logger.info("MODO DEPURACIÓN: Guardando datos intermedios...")
+        logger.info("DEBUG MODE: Saving intermediate data...")
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
@@ -315,7 +315,7 @@ def _compute_sample_rate(fps: float, cfg: config.Config) -> int:
 def _probe_video_metadata(video_path: str) -> tuple[float, int, Optional[str], bool]:
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
-        raise IOError(f"No se pudo abrir el vídeo: {video_path}")
+        raise IOError(f"Could not open the video: {video_path}")
 
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -327,13 +327,13 @@ def _probe_video_metadata(video_path: str) -> tuple[float, int, Optional[str], b
         if duration_sec > 0 and frame_count > 0:
             estimated_fps = frame_count / duration_sec
             fallback_warning = (
-                "FPS de metadatos inválido. Estimado a partir de la duración del vídeo "
+                "Invalid metadata FPS. Estimated from video duration "
                 f"({estimated_fps:.2f} fps)."
             )
             fps = estimated_fps
         else:
             fallback_warning = (
-                "FPS de metadatos inválido y sin duración fiable. Se usará el FPS reportado por el lector."
+                "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
             )
             fps = 0.0
             prefer_reader_fps = True

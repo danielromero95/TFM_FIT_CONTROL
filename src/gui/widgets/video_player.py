@@ -20,7 +20,7 @@ class VideoPlayerWidget(QWidget):
         self.position_slider = QSlider(Qt.Horizontal)
         self.position_slider.sliderMoved.connect(self.set_position)
 
-        # --- CAMBIO CLAVE: Conectamos la señal de error ---
+        # --- KEY CHANGE: connect the error signal ---
         self.media_player.error.connect(self.handle_error)
         
         self.media_player.stateChanged.connect(self.update_play_button_icon)
@@ -47,10 +47,10 @@ class VideoPlayerWidget(QWidget):
             self.play_button.setEnabled(False)
             self.media_player.setMedia(QMediaContent())
 
-    # --- Método para imprimir errores ---
+    # --- Helper to print errors ---
     def handle_error(self):
         if self.media_player.error() != QMediaPlayer.NoError:
-            print(f"ERROR DEL REPRODUCTOR: {self.media_player.errorString()}")
+            print(f"PLAYER ERROR: {self.media_player.errorString()}")
 
     def toggle_play(self):
         if self.media_player.state() == QMediaPlayer.PlayingState:
