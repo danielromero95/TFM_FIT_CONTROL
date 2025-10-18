@@ -90,32 +90,56 @@ def _inject_css() -> None:
         text-overflow: ellipsis;
       }
 
-      .btn-danger > button, .btn-success > button {
+      .step-detect .form-label {
+        color: #e5e7eb;
+        font-weight: 600;
+        font-size: 0.875rem;
+        margin-bottom: .25rem;
+      }
+
+      /* Target the Streamlit button that follows our marker */
+      .step-detect .btn-danger + div .stButton > button,
+      .step-detect .btn-danger + div button {
         border-radius: 12px !important;
-        border-width: 1px !important;
+        min-height: 40px;
+        min-width: 140px;
         background: transparent !important;
-        transition: background .15s ease, border-color .15s ease;
-      }
-      .btn-danger > button {
         color: #ef4444 !important;
-        border-color: rgba(239,68,68,.6) !important;
+        border: 1px solid rgba(239,68,68,.6) !important;
+        transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
       }
-      .btn-danger > button:hover {
+      .step-detect .btn-danger + div .stButton > button:hover,
+      .step-detect .btn-danger + div button:hover {
         background: rgba(239,68,68,.10) !important;
         border-color: rgba(239,68,68,.9) !important;
+        transform: translateY(-1px);
       }
 
-      .btn-success > button {
-        color: #22c55e !important;
-        border-color: rgba(34,197,94,.6) !important;
+      .step-detect .btn-success + div .stButton > button,
+      .step-detect .btn-success + div button {
+        border-radius: 12px !important;
+        min-height: 40px;
+        min-width: 140px;
+        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
+        color: #ecfdf5 !important;
+        border: 1px solid rgba(34,197,94,.8) !important;
+        box-shadow: 0 12px 24px rgba(16,185,129,.35);
+        transition: transform .15s ease, box-shadow .15s ease;
+        margin-left: auto;
+        display: block;
       }
-      .btn-success > button:hover {
-        background: rgba(34,197,94,.10) !important;
-        border-color: rgba(34,197,94,.9) !important;
+      .step-detect .btn-success + div .stButton > button:hover,
+      .step-detect .btn-success + div button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 28px rgba(16,185,129,.45);
       }
 
-      .btn-danger > button[disabled], .btn-success > button[disabled] {
-        opacity: .6 !important;
+      /* Disabled state */
+      .step-detect .btn-danger + div .stButton > button[disabled],
+      .step-detect .btn-success + div .stButton > button[disabled] {
+        opacity: .55 !important;
+        transform: none !important;
+        box-shadow: none !important;
         cursor: not-allowed !important;
       }
 
@@ -457,10 +481,13 @@ def _detect_step() -> None:
 
     select_col_label, select_col_control = st.columns([1, 2])
     with select_col_label:
-        st.caption("Select the exercise")
+        st.markdown(
+            '<div class="form-label">Select the exercise</div>',
+            unsafe_allow_html=True,
+        )
     with select_col_control:
         st.selectbox(
-            "",
+            "Select the exercise",
             options=EXERCISE_LABELS,
             index=EXERCISE_LABELS.index(current_exercise),
             key="exercise",
@@ -472,21 +499,19 @@ def _detect_step() -> None:
     back_clicked = False
     continue_clicked = False
     with back_col:
-        st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
+        st.markdown('<div class="btn-danger"></div>', unsafe_allow_html=True)
         back_clicked = st.button(
             "Back",
             key="detect_back",
-            disabled=st.session_state.step != "detect",
+            disabled=detect_readonly,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
     with continue_col:
-        st.markdown('<div class="btn-success">', unsafe_allow_html=True)
+        st.markdown('<div class="btn-success"></div>', unsafe_allow_html=True)
         continue_clicked = st.button(
             "Continue",
             key="detect_continue",
             disabled=detect_readonly,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if back_clicked:
         st.session_state.step = "upload"
