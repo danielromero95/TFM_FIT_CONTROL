@@ -41,11 +41,18 @@ from src import config
 from src.detect.exercise_detector import detect_exercise
 from src.pipeline import Report, run_pipeline
 
-EXERCISE_OPTIONS = ["Auto (MVP)", "Squat"]
-EXERCISE_TO_CONFIG = {
-    "Auto (MVP)": "auto",
-    "Squat": "squat",
-}
+EXERCISE_CHOICES = [
+    ("Auto-Detect", "auto", True),
+    ("Squat", "squat", True),
+    ("Deadlift", "deadlift", False),
+    ("Bench Press", "benchpress", False),
+]
+
+DEFAULT_EXERCISE_LABEL = "Auto-Detect"
+ENABLED_EXERCISE_LABELS = [lbl for (lbl, _, en) in EXERCISE_CHOICES if en]
+EXERCISE_LABELS = [lbl for (lbl, _, _) in EXERCISE_CHOICES]
+EXERCISE_TO_CONFIG = {lbl: key for (lbl, key, _) in EXERCISE_CHOICES}
+CONFIG_TO_EXERCISE = {key: lbl for (lbl, key, _) in EXERCISE_CHOICES}
 CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "low": 80,
     "high": 150,
@@ -228,6 +235,47 @@ def _inject_css() -> None:
         unsafe_allow_html=True,
     )
 
+    # build a CSS selector for disabled radio items based on EXERCISE_CHOICES
+    disabled_indices = [i + 1 for i, (_, _, en) in enumerate(EXERCISE_CHOICES) if not en]
+    disabled_css = ""
+    if disabled_indices:
+        selector = ", ".join(
+            f'.step-detect [data-testid="stRadio"] div[role="radiogroup"] > label:nth-child({i})'
+            for i in disabled_indices
+        )
+        disabled_css = f"""
+{selector} {{
+  pointer-events: none;
+  opacity: .45;
+  border-style: dashed;
+  border-color: rgba(148,163,184,.18);
+}}
+{selector} input {{ pointer-events: none; }}
+"""
+    st.markdown(f"<style>{disabled_css}</style>", unsafe_allow_html=True)
+
+    # segmented radio visuals + compact spacing under the video
+    st.markdown(
+        """
+<style>
+.step-detect [data-testid="stRadio"] { margin-top: .25rem; }
+.step-detect [data-testid="stRadio"] > div[role="radiogroup"] {
+  display:flex; flex-wrap:wrap; gap:.5rem;
+}
+.step-detect [data-testid="stRadio"] label[data-baseweb="radio"]{
+  flex:1 1 120px; border-radius:999px; border:1px solid rgba(148,163,184,.25);
+  background:rgba(15,23,42,.78); color:#e2e8f0; padding:.5rem 1rem; font-weight:600;
+}
+.step-detect [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child{ display:none; }
+.step-detect [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked){
+  background:linear-gradient(135deg, rgba(59,130,246,.85), rgba(37,99,235,.85));
+  border-color:rgba(59,130,246,.75); color:#f8fafc;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
 
 def _init_session_state() -> None:
     _inject_css()
@@ -242,7 +290,9 @@ def _init_session_state() -> None:
     if "video_path" not in st.session_state:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
-        st.session_state.exercise = EXERCISE_OPTIONS[0]
+        st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    if "last_valid_exercise" not in st.session_state:
+        st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     if "detect_result" not in st.session_state:
         st.session_state.detect_result = None
     if "configure_values" not in st.session_state:
@@ -281,7 +331,8 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.metrics_path = None
     st.session_state.cfg_fingerprint = None
     st.session_state.last_run_success = False
-    st.session_state.exercise = EXERCISE_OPTIONS[0]
+    st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
@@ -357,8 +408,11 @@ def _run_pipeline(progress_cb=None) -> None:
         except (TypeError, ValueError):
             pass
 
-    exercise_label = st.session_state.get("exercise", EXERCISE_OPTIONS[0])
-    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(exercise_label, "squat")
+    exercise_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
+        exercise_label,
+        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
+    )
 
     det = st.session_state.get("detect_result")
     prefetched_detection = None
@@ -445,26 +499,39 @@ def _detect_step() -> None:
     )
 
     st.markdown('<div class="row-detect">', unsafe_allow_html=True)
-    col_detect, col_select = st.columns([1, 2])
+    col_select, col_detect = st.columns([3, 1])
+
+    with col_select:
+        st.caption("Select the exercise")
+        st.radio(
+            "",
+            options=EXERCISE_LABELS,
+            key="exercise",
+            label_visibility="collapsed",
+            horizontal=True,
+            disabled=detect_readonly,
+        )
+        # Enforce disabled choices and remember the last valid one
+        current = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+        last_valid = st.session_state.get("last_valid_exercise", DEFAULT_EXERCISE_LABEL)
+        if current in ENABLED_EXERCISE_LABELS:
+            st.session_state.last_valid_exercise = current
+        else:
+            st.session_state.exercise = last_valid
 
     with col_detect:
         st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-        if st.button(
-            "Detect exercise (beta)",
-            disabled=detect_readonly,
-            key="detect_run",
-        ):
-            video_path = st.session_state.get("video_path")
-            if not video_path:
+        if st.button("Detect", key="detect_run", disabled=detect_readonly):
+            vp = st.session_state.get("video_path")
+            if not vp:
                 st.warning("Upload a video before detecting the exercise.")
             else:
-                with st.spinner("Analyzing the video to detect the exercise…"):
-                    label, view, confidence = detect_exercise(str(video_path))
+                with st.spinner("Analyzing the video…"):
+                    label, view, confidence = detect_exercise(str(vp))
                 if label == "unknown" and view == "unknown" and confidence <= 0.0:
                     st.session_state.detect_result = None
                     st.warning(
-                        "The exercise could not be determined automatically. "
-                        "Check the recording or select the exercise manually."
+                        "Could not determine the exercise automatically. Select it manually."
                     )
                 else:
                     st.session_state.detect_result = {
@@ -472,23 +539,14 @@ def _detect_step() -> None:
                         "view": view,
                         "confidence": float(confidence),
                     }
-                    if label == "squat":
-                        st.session_state.exercise = "Squat"
-                    else:
-                        st.session_state.exercise = EXERCISE_OPTIONS[0]
+                    # Map to visible label; fallback to Auto-Detect if not enabled
+                    mapped = CONFIG_TO_EXERCISE.get(label, DEFAULT_EXERCISE_LABEL)
+                    if mapped not in ENABLED_EXERCISE_LABELS:
+                        mapped = DEFAULT_EXERCISE_LABEL
+                    st.session_state.exercise = mapped
+                    st.session_state.last_valid_exercise = mapped
         st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_select:
-        st.caption("Select the exercise")
-        st.selectbox(
-            "",
-            options=EXERCISE_OPTIONS,
-            key="exercise",
-            label_visibility="collapsed",
-            disabled=detect_readonly,
-        )
-
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     detect_result = st.session_state.get("detect_result")
     if detect_result:
