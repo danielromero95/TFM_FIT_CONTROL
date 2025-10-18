@@ -11,4 +11,4 @@ dependencies:
   - pip:
       - streamlit>=1.30
       - mediapipe>=0.10
-      - opencv-python        # usa "opencv-python-headless" si lo correrás en servidor sin GUI
+      - opencv-python        # use "opencv-python-headless" if running on a server without a GUI

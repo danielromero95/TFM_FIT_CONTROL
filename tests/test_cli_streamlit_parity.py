@@ -19,7 +19,7 @@ def _generate_smoke_video(path: Path, *, fps: int = 30, seconds: int = 3) -> Non
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(path), fourcc, fps, (width, height))
     if not writer.isOpened():  # pragma: no cover - defensive guard
-        pytest.skip("OpenCV no pudo inicializar el escritor de vídeo de prueba")
+        pytest.skip("OpenCV could not initialise the test video writer")
 
     total_frames = fps * seconds
     for index in range(total_frames):

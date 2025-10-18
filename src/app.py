@@ -41,15 +41,15 @@ from src import config
 from src.detect.exercise_detector import detect_exercise
 from src.pipeline import Report, run_pipeline
 
-EXERCISE_OPTIONS = ["Auto (MVP)", "Sentadilla"]
+EXERCISE_OPTIONS = ["Auto (MVP)", "Squat"]
 EXERCISE_TO_CONFIG = {
     "Auto (MVP)": "auto",
-    "Sentadilla": "squat",
+    "Squat": "squat",
 }
 CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "low": 80,
     "high": 150,
-    "primary_angle": "rodilla_izq",
+    "primary_angle": "left_knee",
     "min_prominence": 10.0,
     "min_distance_sec": 0.5,
     "debug_video": True,
@@ -335,7 +335,7 @@ def _run_pipeline(progress_cb=None) -> None:
 
     video_path = st.session_state.get("video_path")
     if not video_path:
-        st.session_state.pipeline_error = "No se encontró el vídeo a procesar."
+        st.session_state.pipeline_error = "The video to process was not found."
         return
 
     cfg = config.load_default()
@@ -403,9 +403,9 @@ def _run_pipeline(progress_cb=None) -> None:
 
 
 def _upload_step() -> None:
-    st.markdown("### 1. Sube tu vídeo")
+    st.markdown("### 1. Upload your video")
     uploaded = st.file_uploader(
-        "Sube un vídeo",
+        "Upload a video",
         type=["mp4", "mov", "avi", "mkv", "mpg", "mpeg", "wmv"],
         key="video_uploader",
         label_visibility="collapsed",
@@ -434,7 +434,7 @@ def _upload_step() -> None:
 
 
 def _detect_step() -> None:
-    st.markdown("### 2. Detecta el ejercicio")
+    st.markdown("### 2. Detect the exercise")
     st.markdown('<div class="step step-detect">', unsafe_allow_html=True)
     video_path = st.session_state.get("video_path")
     if video_path:
@@ -450,21 +450,21 @@ def _detect_step() -> None:
     with col_detect:
         st.markdown('<div class="btn-success">', unsafe_allow_html=True)
         if st.button(
-            "Detectar ejercicio (beta)",
+            "Detect exercise (beta)",
             disabled=detect_readonly,
             key="detect_run",
         ):
             video_path = st.session_state.get("video_path")
             if not video_path:
-                st.warning("Sube un vídeo antes de detectar el ejercicio.")
+                st.warning("Upload a video before detecting the exercise.")
             else:
-                with st.spinner("Analizando el vídeo para detectar el ejercicio…"):
+                with st.spinner("Analyzing the video to detect the exercise…"):
                     label, view, confidence = detect_exercise(str(video_path))
                 if label == "unknown" and view == "unknown" and confidence <= 0.0:
                     st.session_state.detect_result = None
                     st.warning(
-                        "No se pudo determinar el ejercicio automáticamente. "
-                        "Revisa la grabación o selecciona el ejercicio manualmente."
+                        "The exercise could not be determined automatically. "
+                        "Check the recording or select the exercise manually."
                     )
                 else:
                     st.session_state.detect_result = {
@@ -473,13 +473,13 @@ def _detect_step() -> None:
                         "confidence": float(confidence),
                     }
                     if label == "squat":
-                        st.session_state.exercise = "Sentadilla"
+                        st.session_state.exercise = "Squat"
                     else:
                         st.session_state.exercise = EXERCISE_OPTIONS[0]
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_select:
-        st.caption("Selecciona el ejercicio")
+        st.caption("Select the exercise")
         st.selectbox(
             "",
             options=EXERCISE_OPTIONS,
@@ -496,13 +496,12 @@ def _detect_step() -> None:
         view = detect_result["view"]
         confidence_pct = int(round(detect_result["confidence"] * 100))
         st.info(
-            f"Ejercicio detectado: {label} · Vista: {view} · "
-            f"Confianza: {confidence_pct}%"
+            f"Detected exercise: {label} · View: {view} · Confidence: {confidence_pct}%"
         )
 
     if detect_readonly:
         st.markdown(
-            '<div class="readonly-hint">Los controles de detección están en modo lectura en esta fase.</div>',
+            '<div class="readonly-hint">Detection controls are read-only during this step.</div>',
             unsafe_allow_html=True,
         )
 
@@ -512,12 +511,12 @@ def _detect_step() -> None:
         col_back, col_forward = st.columns(2)
         with col_back:
             st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Atrás", key="detect_back"):
+            if st.button("Back", key="detect_back"):
                 st.session_state.step = "upload"
             st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
             st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-            if st.button("Continuar", key="detect_continue"):
+            if st.button("Continue", key="detect_continue"):
                 st.session_state.step = "configure"
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -525,16 +524,16 @@ def _detect_step() -> None:
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
-    st.markdown("### 3. Configura el análisis")
+    st.markdown("### 3. Configure the analysis")
     cfg_values = st.session_state.get("configure_values", CONFIG_DEFAULTS.copy())
 
     if disabled:
-        st.info("La configuración se muestra solo para consulta mientras se procesa el análisis.")
+        st.info("The configuration is displayed for reference only while the analysis runs.")
 
     col1, col2 = st.columns(2)
     with col1:
         low = st.number_input(
-            "Umbral bajo (°)",
+            "Lower threshold (°)",
             min_value=0,
             max_value=180,
             value=int(cfg_values.get("low", CONFIG_DEFAULTS["low"])),
@@ -543,7 +542,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         )
     with col2:
         high = st.number_input(
-            "Umbral alto (°)",
+            "Upper threshold (°)",
             min_value=0,
             max_value=180,
             value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
@@ -552,7 +551,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         )
 
     primary_angle = st.text_input(
-        "Ángulo primario",
+        "Primary angle",
         value=str(cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"])),
         disabled=disabled,
         key="cfg_primary_angle",
@@ -561,7 +560,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
     col3, col4 = st.columns(2)
     with col3:
         min_prominence = st.number_input(
-            "Prominencia mínima",
+            "Minimum prominence",
             min_value=0.0,
             value=float(cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])),
             step=0.5,
@@ -570,7 +569,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         )
     with col4:
         min_distance_sec = st.number_input(
-            "Distancia mínima (s)",
+            "Minimum distance (s)",
             min_value=0.0,
             value=float(cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])),
             step=0.1,
@@ -579,13 +578,13 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         )
 
     debug_video = st.checkbox(
-        "Generar vídeo de depuración",
+        "Generate debug video",
         value=bool(cfg_values.get("debug_video", CONFIG_DEFAULTS["debug_video"])),
         disabled=disabled,
         key="cfg_debug_video",
     )
     use_crop = st.checkbox(
-        "Usar recorte automático (MediaPipe)",
+        "Use automatic crop (MediaPipe)",
         value=bool(cfg_values.get("use_crop", CONFIG_DEFAULTS["use_crop"])),
         disabled=disabled,
         key="cfg_use_crop",
@@ -594,9 +593,9 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
     target_fps_current = cfg_values.get("target_fps", CONFIG_DEFAULTS.get("target_fps"))
     target_fps_default = "" if target_fps_current in (None, "") else str(target_fps_current)
     target_fps_raw = st.text_input(
-        "FPS objetivo tras muestreo",
+        "Target FPS after resampling",
         value=target_fps_default,
-        help="Déjalo vacío para desactivar el remuestreo.",
+        help="Leave it empty to disable resampling.",
         disabled=disabled,
         key="cfg_target_fps",
     )
@@ -618,7 +617,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         except ValueError:
             target_fps_error = True
             target_fps_value = cfg_values.get("target_fps", None)
-            st.warning("Introduce un número válido para FPS objetivo o deja el campo vacío.")
+            st.warning("Enter a valid target FPS or leave the field empty.")
         else:
             target_fps_value = parsed_target_fps
     else:
@@ -641,14 +640,14 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         col_back, col_forward = st.columns(2)
         with col_back:
             st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Atrás", key="configure_back"):
+            if st.button("Back", key="configure_back"):
                 st.session_state.step = "detect"
             st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
             st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-            if st.button("Continuar", key="configure_continue"):
+            if st.button("Continue", key="configure_continue"):
                 if target_fps_error:
-                    st.warning("Corrige el valor de FPS objetivo antes de continuar.")
+                    st.warning("Fix the target FPS value before continuing.")
                 else:
                     st.session_state.configure_values = current_values
                     st.session_state.step = "running"
@@ -656,7 +655,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
 
 
 def _running_step() -> None:
-    st.markdown("### 4. Analizando…")
+    st.markdown("### 4. Running the analysis")
     progress_placeholder = st.progress(0)
     phase_placeholder = st.empty()
     debug_enabled = bool(
@@ -667,24 +666,24 @@ def _running_step() -> None:
 
     def _phase_for(p: int) -> str:
         if p < 10:
-            return "Preparando…"
+            return "Preparing…"
         if p < 25:
-            return "Extrayendo fotogramas…"
+            return "Extracting frames…"
         if p < 50:
-            return "Estimando pose…"
+            return "Estimating pose…"
         if p < 65:
-            return "Filtrando e interpolando…"
+            return "Filtering and interpolating…"
         if debug_enabled and p < 75:
-            return "Renderizando vídeo de depuración…"
+            return "Rendering debug video…"
         if debug_enabled:
             if p < 90:
-                return "Calculando métricas…"
+                return "Computing metrics…"
         else:
             if p < 85:
-                return "Calculando métricas…"
+                return "Computing metrics…"
         if p < 100:
-            return "Contando repeticiones…"
-        return "Finalizando…"
+            return "Counting repetitions…"
+        return "Finishing up…"
 
     def _cb(p: int) -> None:
         p = max(0, min(100, int(p)))
@@ -695,7 +694,7 @@ def _running_step() -> None:
 
     _ensure_video_path()
     if not st.session_state.video_path:
-        st.session_state.pipeline_error = "No se encontró el vídeo a procesar."
+        st.session_state.pipeline_error = "The video to process was not found."
         st.session_state.step = "results"
         try:
             st.rerun()
@@ -703,7 +702,7 @@ def _running_step() -> None:
             st.experimental_rerun()
         return
 
-    with st.spinner("Procesando vídeo…"):
+    with st.spinner("Processing video…"):
         _run_pipeline(progress_cb=_cb)
 
     st.session_state.last_run_success = (
@@ -719,12 +718,12 @@ def _running_step() -> None:
 
 def _results_panel() -> Dict[str, bool]:
     st.markdown('<div class="results-panel">', unsafe_allow_html=True)
-    st.markdown("### 5. Resultados")
+    st.markdown("### 5. Results")
 
     actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
     if st.session_state.pipeline_error:
-        st.error("Ha ocurrido un error durante el análisis")
+        st.error("An error occurred during the analysis")
         st.code(str(st.session_state.pipeline_error))
     elif st.session_state.report is not None:
         report: Report = st.session_state.report
@@ -732,39 +731,39 @@ def _results_panel() -> Dict[str, bool]:
         repetitions = report.repetitions
         metrics_df = report.metrics
 
-        st.markdown(f"**Repeticiones detectadas:** {repetitions}")
+        st.markdown(f"**Detected repetitions:** {repetitions}")
 
         if report.debug_video_path and bool(
             st.session_state.get("configure_values", {}).get("debug_video", True)
         ):
             st.video(str(report.debug_video_path))
-            st.caption("Vídeo con landmarks")
+            st.caption("Video with landmarks")
 
         stats_rows = [
-            {"Campo": "CONFIG_SHA1", "Valor": stats.config_sha1},
-            {"Campo": "fps_original", "Valor": f"{stats.fps_original:.2f}"},
-            {"Campo": "fps_effective", "Valor": f"{stats.fps_effective:.2f}"},
-            {"Campo": "frames", "Valor": stats.frames},
+            {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
+            {"Field": "fps_original", "Value": f"{stats.fps_original:.2f}"},
+            {"Field": "fps_effective", "Value": f"{stats.fps_effective:.2f}"},
+            {"Field": "frames", "Value": stats.frames},
             {
-                "Campo": "exercise_selected",
-                "Valor": stats.exercise_selected or "N/D",
+                "Field": "exercise_selected",
+                "Value": stats.exercise_selected or "N/A",
             },
-            {"Campo": "exercise_detected", "Valor": stats.exercise_detected},
-            {"Campo": "view_detected", "Valor": stats.view_detected},
+            {"Field": "exercise_detected", "Value": stats.exercise_detected},
+            {"Field": "view_detected", "Value": stats.view_detected},
             {
-                "Campo": "detection_confidence",
-                "Valor": f"{stats.detection_confidence:.0%}",
+                "Field": "detection_confidence",
+                "Value": f"{stats.detection_confidence:.0%}",
             },
-            {"Campo": "primary_angle", "Valor": stats.primary_angle or "N/D"},
-            {"Campo": "angle_range_deg", "Valor": f"{stats.angle_range_deg:.2f}"},
-            {"Campo": "min_prominence", "Valor": f"{stats.min_prominence:.2f}"},
-            {"Campo": "min_distance_sec", "Valor": f"{stats.min_distance_sec:.2f}"},
-            {"Campo": "refractory_sec", "Valor": f"{stats.refractory_sec:.2f}"},
+            {"Field": "primary_angle", "Value": stats.primary_angle or "N/A"},
+            {"Field": "angle_range_deg", "Value": f"{stats.angle_range_deg:.2f}"},
+            {"Field": "min_prominence", "Value": f"{stats.min_prominence:.2f}"},
+            {"Field": "min_distance_sec", "Value": f"{stats.min_distance_sec:.2f}"},
+            {"Field": "refractory_sec", "Value": f"{stats.refractory_sec:.2f}"},
         ]
-        stats_df = pd.DataFrame(stats_rows, columns=["Campo", "Valor"]).astype({"Valor": "string"})
+        stats_df = pd.DataFrame(stats_rows, columns=["Field", "Value"]).astype({"Value": "string"})
 
         if metrics_df is not None:
-            st.markdown("#### Métricas calculadas")
+            st.markdown("#### Calculated metrics")
             st.dataframe(metrics_df, use_container_width=True)
             numeric_columns = [
                 col
@@ -774,7 +773,7 @@ def _results_panel() -> Dict[str, bool]:
             if numeric_columns:
                 default_selection = numeric_columns[:3]
                 selected_metrics = st.multiselect(
-                    "Visualizar métricas",
+                    "View metrics",
                     options=numeric_columns,
                     default=default_selection,
                 )
@@ -785,16 +784,16 @@ def _results_panel() -> Dict[str, bool]:
             st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
 
         if stats.skip_reason:
-            st.error(f"Conteo de repeticiones omitido: {stats.skip_reason}")
+            st.error(f"Repetition counting skipped: {stats.skip_reason}")
 
-        with st.expander("Estadísticas de la ejecución (opcional)", expanded=False):
+        with st.expander("Run statistics (optional)", expanded=False):
             try:
                 st.dataframe(stats_df, use_container_width=True)
             except Exception:
-                st.json({row["Campo"]: row["Valor"] for row in stats_rows})
+                st.json({row["Field"]: row["Value"] for row in stats_rows})
 
             if st.session_state.video_path:
-                st.markdown("### Vídeo original")
+                st.markdown("### Original video")
                 st.video(str(st.session_state.video_path))
 
         if st.session_state.metrics_path is not None:
@@ -804,12 +803,12 @@ def _results_panel() -> Dict[str, bool]:
                     encoding="utf-8"
                 )
             except FileNotFoundError:
-                st.error("No se encontró el archivo de métricas para la descarga.")
+                st.error("The metrics file for download was not found.")
             except OSError as exc:
-                st.error(f"No se pudieron leer las métricas: {exc}")
+                st.error(f"Could not read metrics: {exc}")
             else:
                 st.download_button(
-                    "Descargar métricas",
+                    "Download metrics",
                     data=metrics_data,
                     file_name=f"{Path(st.session_state.video_path).stem}_metrics.csv",
                     mime="text/csv",
@@ -822,26 +821,26 @@ def _results_panel() -> Dict[str, bool]:
                     encoding="utf-8"
                 )
             except FileNotFoundError:
-                st.error("No se encontró el archivo de recuento para la descarga.")
+                st.error("The repetition file for download was not found.")
             except OSError as exc:
-                st.error(f"No se pudo leer el archivo de recuento: {exc}")
+                st.error(f"Could not read the repetition file: {exc}")
             else:
                 st.download_button(
-                    "Descargar recuento",
+                    "Download repetition count",
                     data=count_data,
                     file_name=f"{Path(st.session_state.video_path).stem}_count.txt",
                     mime="text/plain",
                 )
 
     else:
-        st.info("No se encontraron resultados para mostrar.")
+        st.info("No results found to display.")
 
     adjust_col, reset_col = st.columns(2)
     with adjust_col:
-        if st.button("Ajustar configuración y reanalizar", key="results_adjust"):
+        if st.button("Adjust configuration and re-run", key="results_adjust"):
             actions["adjust"] = True
     with reset_col:
-        if st.button("Volver a inicio", key="results_reset"):
+        if st.button("Back to start", key="results_reset"):
             actions["reset"] = True
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -850,9 +849,9 @@ def _results_panel() -> Dict[str, bool]:
 
 
 def _results_summary() -> None:
-    st.markdown("### 4. Ejecuta el análisis")
+    st.markdown("### 4. Run the analysis")
     if st.session_state.get("last_run_success"):
-        st.success("Análisis completado ✅")
+        st.success("Analysis complete ✅")
 
 
 def main() -> None:

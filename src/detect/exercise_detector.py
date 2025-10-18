@@ -63,12 +63,12 @@ def detect_exercise(video_path: str, max_frames: int = 300) -> Tuple[str, str, f
     try:
         features = extract_features(video_path, max_frames=max_frames)
     except Exception:  # pragma: no cover - defensive fallback
-        logger.exception("Fallo al extraer características para la detección de ejercicio")
+        logger.exception("Failed to extract features for exercise detection")
         return "unknown", "unknown", 0.0
 
     if features.total_frames == 0 or features.valid_frames < MIN_VALID_FRAMES:
         logger.info(
-            "Detección no concluyente: fotogramas válidos %d de %d",
+            "Inconclusive detection: valid frames %d of %d",
             features.valid_frames,
             features.total_frames,
         )
@@ -77,7 +77,7 @@ def detect_exercise(video_path: str, max_frames: int = 300) -> Tuple[str, str, f
     try:
         label, view, confidence = classify_features(features)
     except Exception:  # pragma: no cover - defensive fallback
-        logger.exception("Fallo al clasificar las características extraídas")
+        logger.exception("Failed to classify the extracted features")
         return "unknown", "unknown", 0.0
 
     logger.info(
@@ -100,7 +100,7 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
         capture.release()
-        raise IOError(f"No se pudo abrir el vídeo para la detección: {video_path}")
+        raise IOError(f"Could not open the video for detection: {video_path}")
 
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -118,7 +118,7 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         from mediapipe.python.solutions import pose as mp_pose_module
     except ImportError as exc:  # pragma: no cover - environment safeguard
         capture.release()
-        raise RuntimeError("MediaPipe no está disponible en el entorno de ejecución") from exc
+        raise RuntimeError("MediaPipe is not available in the runtime environment") from exc
 
     pose_landmark = mp_pose_module.PoseLandmark
 
@@ -188,7 +188,7 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
 
     percent_valid = (valid_frames / total_processed * 100.0) if total_processed else 0.0
     logger.info(
-        "Extracción detección ejercicio: frames=%d válidos=%d (%.1f%%) sample_rate=%.2f",
+        "Exercise detection extraction: frames=%d valid=%d (%.1f%%) sample_rate=%.2f",
         total_processed,
         valid_frames,
         percent_valid,

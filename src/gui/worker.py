@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class AnalysisWorker(QThread):
-    """Ejecuta el pipeline de análisis en un hilo separado."""
+    """Execute the analysis pipeline on a background thread."""
 
     progress = pyqtSignal(int)
     finished = pyqtSignal(dict)
@@ -32,5 +32,5 @@ class AnalysisWorker(QThread):
             )
             self.finished.emit(report.to_legacy_dict())
         except Exception as exc:  # pragma: no cover - surfaced to the GUI user
-            logger.exception("Error durante la ejecución del pipeline en el WorkerThread")
+            logger.exception("Error while running the pipeline inside WorkerThread")
             self.error.emit(str(exc))
