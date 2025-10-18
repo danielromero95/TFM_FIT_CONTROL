@@ -38,21 +38,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import config
-from src.detect.exercise_detector import detect_exercise
 from src.pipeline import Report, run_pipeline
 
-EXERCISE_CHOICES = [
-    ("Auto-Detect", "auto", True),
-    ("Squat", "squat", True),
-    ("Deadlift", "deadlift", False),
-    ("Bench Press", "benchpress", False),
-]
-
-DEFAULT_EXERCISE_LABEL = "Auto-Detect"
-ENABLED_EXERCISE_LABELS = [lbl for (lbl, _, en) in EXERCISE_CHOICES if en]
-EXERCISE_LABELS = [lbl for (lbl, _, _) in EXERCISE_CHOICES]
-EXERCISE_TO_CONFIG = {lbl: key for (lbl, key, _) in EXERCISE_CHOICES}
-CONFIG_TO_EXERCISE = {key: lbl for (lbl, key, _) in EXERCISE_CHOICES}
+EXERCISE_OPTIONS = ["Auto-Detect", "Squat"]
+DEFAULT_EXERCISE_LABEL = EXERCISE_OPTIONS[0]
+EXERCISE_TO_CONFIG = {"Auto-Detect": "auto", "Squat": "squat"}
 CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "low": 80,
     "high": 150,
@@ -158,7 +148,6 @@ def _inject_css() -> None:
       }
 
       /* Make the select a little wider than the button for visual balance */
-      .step-detect .row-detect { display: grid; grid-template-columns: 1fr 2.25fr; gap: 1rem; }
       .step-detect .stSelect { margin-top: .25rem; }
 
       /* Slightly larger click targets for nav buttons */
@@ -167,45 +156,13 @@ def _inject_css() -> None:
       /* Pull content closer to the toolbar */
       section[data-testid="stMain"],
       main {
-        padding-top: 0 !important;
-      }
-      section[data-testid="stMain"] > div:first-child,
-      main > div:first-child {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
+        padding-top: .5rem !important;
       }
       main .block-container {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-      main .block-container > div:first-child {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-      main [data-testid="stToolbar"] {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-      }
-      main [data-testid="stToolbar"] + div {
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] {
-        padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] > div:first-child {
-        margin-top: 0 !important;
+        padding-top: .5rem !important;
       }
       main [data-testid="stHorizontalBlock"] {
-        margin-top: 0 !important;
         align-items: flex-start !important;
-      }
-      main [data-testid="column"] {
-        padding-top: 0 !important;
-      }
-      main [data-testid="column"] > div {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
       }
 
       /* Ensure the results column aligns with step 4 content */
@@ -235,47 +192,6 @@ def _inject_css() -> None:
         unsafe_allow_html=True,
     )
 
-    # build a CSS selector for disabled radio items based on EXERCISE_CHOICES
-    disabled_indices = [i + 1 for i, (_, _, en) in enumerate(EXERCISE_CHOICES) if not en]
-    disabled_css = ""
-    if disabled_indices:
-        selector = ", ".join(
-            f'.step-detect [data-testid="stRadio"] div[role="radiogroup"] > label:nth-child({i})'
-            for i in disabled_indices
-        )
-        disabled_css = f"""
-{selector} {{
-  pointer-events: none;
-  opacity: .45;
-  border-style: dashed;
-  border-color: rgba(148,163,184,.18);
-}}
-{selector} input {{ pointer-events: none; }}
-"""
-    st.markdown(f"<style>{disabled_css}</style>", unsafe_allow_html=True)
-
-    # segmented radio visuals + compact spacing under the video
-    st.markdown(
-        """
-<style>
-.step-detect [data-testid="stRadio"] { margin-top: .25rem; }
-.step-detect [data-testid="stRadio"] > div[role="radiogroup"] {
-  display:flex; flex-wrap:wrap; gap:.5rem;
-}
-.step-detect [data-testid="stRadio"] label[data-baseweb="radio"]{
-  flex:1 1 120px; border-radius:999px; border:1px solid rgba(148,163,184,.25);
-  background:rgba(15,23,42,.78); color:#e2e8f0; padding:.5rem 1rem; font-weight:600;
-}
-.step-detect [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child{ display:none; }
-.step-detect [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked){
-  background:linear-gradient(135deg, rgba(59,130,246,.85), rgba(37,99,235,.85));
-  border-color:rgba(59,130,246,.75); color:#f8fafc;
-}
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
 
 def _init_session_state() -> None:
     _inject_css()
@@ -291,8 +207,6 @@ def _init_session_state() -> None:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
         st.session_state.exercise = DEFAULT_EXERCISE_LABEL
-    if "last_valid_exercise" not in st.session_state:
-        st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     if "detect_result" not in st.session_state:
         st.session_state.detect_result = None
     if "configure_values" not in st.session_state:
@@ -332,7 +246,6 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.cfg_fingerprint = None
     st.session_state.last_run_success = False
     st.session_state.exercise = DEFAULT_EXERCISE_LABEL
-    st.session_state.last_valid_exercise = DEFAULT_EXERCISE_LABEL
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
@@ -409,10 +322,7 @@ def _run_pipeline(progress_cb=None) -> None:
             pass
 
     exercise_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
-    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
-        exercise_label,
-        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
-    )
+    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(exercise_label, "squat")
 
     det = st.session_state.get("detect_result")
     prefetched_detection = None
@@ -498,85 +408,35 @@ def _detect_step() -> None:
         st.session_state.step != "detect" or video_path is None
     )
 
-    st.markdown('<div class="row-detect">', unsafe_allow_html=True)
-    col_select, col_detect = st.columns([3, 1])
+    exercise_options = EXERCISE_OPTIONS
+    current_exercise = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+    if current_exercise not in exercise_options:
+        st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+        current_exercise = DEFAULT_EXERCISE_LABEL
 
-    with col_select:
+    row1_left, row1_right = st.columns([1, 2])
+    with row1_left:
         st.caption("Select the exercise")
-        st.radio(
+    with row1_right:
+        st.selectbox(
             "",
-            options=EXERCISE_LABELS,
+            options=exercise_options,
             key="exercise",
             label_visibility="collapsed",
-            horizontal=True,
             disabled=detect_readonly,
         )
-        # Enforce disabled choices and remember the last valid one
-        current = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
-        last_valid = st.session_state.get("last_valid_exercise", DEFAULT_EXERCISE_LABEL)
-        if current in ENABLED_EXERCISE_LABELS:
-            st.session_state.last_valid_exercise = current
-        else:
-            st.session_state.exercise = last_valid
 
-    with col_detect:
-        st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-        if st.button("Detect", key="detect_run", disabled=detect_readonly):
-            vp = st.session_state.get("video_path")
-            if not vp:
-                st.warning("Upload a video before detecting the exercise.")
-            else:
-                with st.spinner("Analyzing the video…"):
-                    label, view, confidence = detect_exercise(str(vp))
-                if label == "unknown" and view == "unknown" and confidence <= 0.0:
-                    st.session_state.detect_result = None
-                    st.warning(
-                        "Could not determine the exercise automatically. Select it manually."
-                    )
-                else:
-                    st.session_state.detect_result = {
-                        "label": label,
-                        "view": view,
-                        "confidence": float(confidence),
-                    }
-                    # Map to visible label; fallback to Auto-Detect if not enabled
-                    mapped = CONFIG_TO_EXERCISE.get(label, DEFAULT_EXERCISE_LABEL)
-                    if mapped not in ENABLED_EXERCISE_LABELS:
-                        mapped = DEFAULT_EXERCISE_LABEL
-                    st.session_state.exercise = mapped
-                    st.session_state.last_valid_exercise = mapped
+    row2_left, row2_right = st.columns([1, 2])
+    with row2_left:
+        st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
+        if st.button("Back", key="detect_back", disabled=detect_readonly):
+            st.session_state.step = "upload"
         st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    detect_result = st.session_state.get("detect_result")
-    if detect_result:
-        label = detect_result["label"]
-        view = detect_result["view"]
-        confidence_pct = int(round(detect_result["confidence"] * 100))
-        st.info(
-            f"Detected exercise: {label} · View: {view} · Confidence: {confidence_pct}%"
-        )
-
-    if detect_readonly:
-        st.markdown(
-            '<div class="readonly-hint">Detection controls are read-only during this step.</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('<div class="spacer-sm"></div>', unsafe_allow_html=True)
-
-    if st.session_state.step == "detect":
-        col_back, col_forward = st.columns(2)
-        with col_back:
-            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Back", key="detect_back"):
-                st.session_state.step = "upload"
-            st.markdown("</div>", unsafe_allow_html=True)
-        with col_forward:
-            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-            if st.button("Continue", key="detect_continue"):
-                st.session_state.step = "configure"
-            st.markdown("</div>", unsafe_allow_html=True)
+    with row2_right:
+        st.markdown('<div class="btn-success">', unsafe_allow_html=True)
+        if st.button("Continue", key="detect_continue", disabled=detect_readonly):
+            st.session_state.step = "configure"
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -795,7 +655,6 @@ def _results_panel() -> Dict[str, bool]:
             st.session_state.get("configure_values", {}).get("debug_video", True)
         ):
             st.video(str(report.debug_video_path))
-            st.caption("Video with landmarks")
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -818,11 +677,12 @@ def _results_panel() -> Dict[str, bool]:
             {"Field": "min_distance_sec", "Value": f"{stats.min_distance_sec:.2f}"},
             {"Field": "refractory_sec", "Value": f"{stats.refractory_sec:.2f}"},
         ]
-        stats_df = pd.DataFrame(stats_rows, columns=["Field", "Value"]).astype({"Value": "string"})
+        stats_df = pd.DataFrame(stats_rows, columns=["Field", "Value"]).astype(
+            {"Value": "string"}
+        )
+        stats_df.columns = ["Field", "Value"]
 
         if metrics_df is not None:
-            st.markdown("#### Calculated metrics")
-            st.dataframe(metrics_df, use_container_width=True)
             numeric_columns = [
                 col
                 for col in metrics_df.columns
@@ -831,12 +691,14 @@ def _results_panel() -> Dict[str, bool]:
             if numeric_columns:
                 default_selection = numeric_columns[:3]
                 selected_metrics = st.multiselect(
-                    "View metrics",
+                    "Select metrics",
                     options=numeric_columns,
                     default=default_selection,
                 )
                 if selected_metrics:
                     st.line_chart(metrics_df[selected_metrics])
+            st.markdown("#### Calculated metrics")
+            st.dataframe(metrics_df, use_container_width=True)
 
         if stats.warnings:
             st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
@@ -850,10 +712,6 @@ def _results_panel() -> Dict[str, bool]:
             except Exception:
                 st.json({row["Field"]: row["Value"] for row in stats_rows})
 
-            if st.session_state.video_path:
-                st.markdown("### Original video")
-                st.video(str(st.session_state.video_path))
-
         if st.session_state.metrics_path is not None:
             metrics_data = None
             try:
@@ -861,9 +719,9 @@ def _results_panel() -> Dict[str, bool]:
                     encoding="utf-8"
                 )
             except FileNotFoundError:
-                st.error("The metrics file for download was not found.")
+                st.error("Metrics file not found for download.")
             except OSError as exc:
-                st.error(f"Could not read metrics: {exc}")
+                st.error(f"Unable to read metrics: {exc}")
             else:
                 st.download_button(
                     "Download metrics",
@@ -879,26 +737,26 @@ def _results_panel() -> Dict[str, bool]:
                     encoding="utf-8"
                 )
             except FileNotFoundError:
-                st.error("The repetition file for download was not found.")
+                st.error("Count file not found for download.")
             except OSError as exc:
-                st.error(f"Could not read the repetition file: {exc}")
+                st.error(f"Unable to read count file: {exc}")
             else:
                 st.download_button(
-                    "Download repetition count",
+                    "Download count",
                     data=count_data,
                     file_name=f"{Path(st.session_state.video_path).stem}_count.txt",
                     mime="text/plain",
                 )
 
     else:
-        st.info("No results found to display.")
+        st.info("No results available to display.")
 
     adjust_col, reset_col = st.columns(2)
     with adjust_col:
-        if st.button("Adjust configuration and re-run", key="results_adjust"):
+        if st.button("Adjust configuration and rerun", key="results_adjust"):
             actions["adjust"] = True
     with reset_col:
-        if st.button("Back to start", key="results_reset"):
+        if st.button("Return to start", key="results_reset"):
             actions["reset"] = True
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -907,9 +765,9 @@ def _results_panel() -> Dict[str, bool]:
 
 
 def _results_summary() -> None:
-    st.markdown("### 4. Run the analysis")
+    st.markdown("### 4. Ejecuta el análisis")
     if st.session_state.get("last_run_success"):
-        st.success("Analysis complete ✅")
+        st.success("Análisis completado ✅")
 
 
 def main() -> None:
@@ -936,6 +794,7 @@ def main() -> None:
             if step == "running":
                 _running_step()
         elif step == "results":
+            _configure_step(disabled=True, show_actions=False)
             _results_summary()
         else:
             st.empty()
