@@ -316,7 +316,6 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.last_run_success = False
     st.session_state.exercise = DEFAULT_EXERCISE_LABEL
     st.session_state.exercise_pending_update = None
-    st.session_state[EXERCISE_WIDGET_KEY] = DEFAULT_EXERCISE_LABEL
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
@@ -502,7 +501,6 @@ def _detect_step() -> None:
     pending_exercise = st.session_state.pop("exercise_pending_update", None)
     if pending_exercise in VALID_EXERCISE_LABELS:
         st.session_state.exercise = pending_exercise
-        st.session_state[EXERCISE_WIDGET_KEY] = pending_exercise
 
     current_exercise = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
     if current_exercise not in VALID_EXERCISE_LABELS:
