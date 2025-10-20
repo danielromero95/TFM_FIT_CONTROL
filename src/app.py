@@ -52,7 +52,7 @@ VALID_EXERCISE_LABELS = set(EXERCISE_LABELS)
 EXERCISE_TO_CONFIG = {lbl: key for (lbl, key) in EXERCISE_CHOICES}
 CONFIG_TO_LABEL = {key: lbl for (lbl, key) in EXERCISE_CHOICES}
 EXERCISE_WIDGET_KEY = "exercise_select_value"
-CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
+CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "low": 80,
     "high": 150,
     "primary_angle": "left_knee",
@@ -60,7 +60,6 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "min_distance_sec": 0.5,
     "debug_video": True,
     "use_crop": True,
-    "target_fps": None,
 }
 
 
@@ -381,15 +380,7 @@ def _run_pipeline(progress_cb=None) -> None:
     cfg.counting.min_prominence = float(cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"]))
     cfg.counting.min_distance_sec = float(cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"]))
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
-    cfg.pose.use_crop = bool(cfg_values.get("use_crop", True))
-    tfps = cfg_values.get("target_fps")
-    if tfps not in (None, "", 0) and hasattr(cfg, "video"):
-        try:
-            cfg.video.target_fps = float(tfps)
-            if hasattr(cfg.video, "manual_sample_rate"):
-                cfg.video.manual_sample_rate = None
-        except (TypeError, ValueError):
-            pass
+    cfg.pose.use_crop = True
 
     exercise_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
     cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
@@ -574,81 +565,91 @@ def _detect_step() -> None:
                     "Click Continue to accept this detection or choose an exercise manually."
                 )
 
+    actions_placeholder = st.empty()
     if is_active:
-        back_col, continue_col = st.columns([1, 2])
-        with back_col:
-            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Back", key="detect_back"):
-                st.session_state.detect_result = None
-                st.session_state.step = "upload"
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-        with continue_col:
-            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-            if st.button("Continue", key="detect_continue"):
-                if current_exercise == DEFAULT_EXERCISE_LABEL:
-                    detect_result = st.session_state.get("detect_result")
-                    if (
-                        detect_result
-                        and not detect_result.get("error")
-                        and detect_result.get("label")
-                        and detect_result.get("token") == token
-                        and detect_result.get("accepted")
-                    ):
-                        st.session_state.step = "configure"
-                    elif (
-                        detect_result
-                        and not detect_result.get("error")
-                        and detect_result.get("label")
-                        and detect_result.get("token") == token
-                    ):
-                        mapped_label = CONFIG_TO_LABEL.get(
-                            detect_result.get("label", ""),
-                            current_exercise,
-                        )
-                        st.session_state.exercise_pending_update = mapped_label
-                        detect_result["accepted"] = True
-                        st.session_state.step = "configure"
-                    else:
-                        if not video_path:
-                            st.warning("Please upload a video before continuing.")
-                        else:
-                            with st.spinner("Detecting exercise…"):
-                                try:
-                                    label_key, detected_view, confidence = detect_exercise(
-                                        str(video_path)
-                                    )
-                                except Exception as exc:  # pragma: no cover - UI feedback
-                                    st.session_state.detect_result = {
-                                        "error": str(exc),
-                                        "accepted": False,
-                                        "token": token,
-                                    }
-                                else:
-                                    st.session_state.detect_result = {
-                                        "label": label_key,
-                                        "view": detected_view,
-                                        "confidence": float(confidence),
-                                        "accepted": False,
-                                        "token": token,
-                                    }
-                            try:
-                                st.rerun()
-                            except Exception:
-                                st.experimental_rerun()
-                else:
+        with actions_placeholder.container():
+            back_col, continue_col = st.columns([1, 2])
+            with back_col:
+                st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
+                if st.button("Back", key="detect_back"):
                     st.session_state.detect_result = None
-                    st.session_state.step = "configure"
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.session_state.step = "upload"
+                    try:
+                        st.rerun()
+                    except Exception:
+                        st.experimental_rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+            with continue_col:
+                st.markdown('<div class="btn-success">', unsafe_allow_html=True)
+                if st.button("Continue", key="detect_continue"):
+                    if current_exercise == DEFAULT_EXERCISE_LABEL:
+                        detect_result = st.session_state.get("detect_result")
+                        if (
+                            detect_result
+                            and not detect_result.get("error")
+                            and detect_result.get("label")
+                            and detect_result.get("token") == token
+                            and detect_result.get("accepted")
+                        ):
+                            st.session_state.step = "configure"
+                        elif (
+                            detect_result
+                            and not detect_result.get("error")
+                            and detect_result.get("label")
+                            and detect_result.get("token") == token
+                        ):
+                            mapped_label = CONFIG_TO_LABEL.get(
+                                detect_result.get("label", ""),
+                                current_exercise,
+                            )
+                            st.session_state.exercise_pending_update = mapped_label
+                            detect_result["accepted"] = True
+                            st.session_state.step = "configure"
+                        else:
+                            if not video_path:
+                                st.warning("Please upload a video before continuing.")
+                            else:
+                                with st.spinner("Detecting exercise…"):
+                                    try:
+                                        label_key, detected_view, confidence = detect_exercise(
+                                            str(video_path)
+                                        )
+                                    except Exception as exc:  # pragma: no cover - UI feedback
+                                        st.session_state.detect_result = {
+                                            "error": str(exc),
+                                            "accepted": False,
+                                            "token": token,
+                                        }
+                                    else:
+                                        st.session_state.detect_result = {
+                                            "label": label_key,
+                                            "view": detected_view,
+                                            "confidence": float(confidence),
+                                            "accepted": False,
+                                            "token": token,
+                                        }
+                                try:
+                                    st.rerun()
+                                except Exception:
+                                    st.experimental_rerun()
+                    else:
+                        st.session_state.detect_result = None
+                        st.session_state.step = "configure"
+                st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        actions_placeholder.empty()
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     st.markdown("### 3. Configure the analysis")
-    cfg_values = st.session_state.get("configure_values", CONFIG_DEFAULTS.copy())
+    stored_cfg = st.session_state.get("configure_values")
+    if stored_cfg is None:
+        cfg_values = CONFIG_DEFAULTS.copy()
+    else:
+        cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
+    cfg_values.pop("target_fps", None)
+    cfg_values["use_crop"] = True
 
     if disabled:
         current_step = st.session_state.get("step")
@@ -712,45 +713,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         disabled=disabled,
         key="cfg_debug_video",
     )
-    use_crop = st.checkbox(
-        "Use automatic crop (MediaPipe)",
-        value=bool(cfg_values.get("use_crop", CONFIG_DEFAULTS["use_crop"])),
-        disabled=disabled,
-        key="cfg_use_crop",
-    )
-
-    target_fps_current = cfg_values.get("target_fps", CONFIG_DEFAULTS.get("target_fps"))
-    target_fps_default = "" if target_fps_current in (None, "") else str(target_fps_current)
-    target_fps_raw = st.text_input(
-        "Target FPS after resampling",
-        value=target_fps_default,
-        help="Leave it empty to disable resampling.",
-        disabled=disabled,
-        key="cfg_target_fps",
-    )
-    target_fps_error = False
-    if disabled:
-        raw_value = cfg_values.get("target_fps", None)
-        if isinstance(raw_value, str):
-            raw_value = raw_value.strip()
-        if raw_value in (None, "", 0):
-            target_fps_value = None
-        else:
-            try:
-                target_fps_value = float(raw_value)
-            except (TypeError, ValueError):
-                target_fps_value = None
-    elif target_fps_raw.strip():
-        try:
-            parsed_target_fps = float(target_fps_raw)
-        except ValueError:
-            target_fps_error = True
-            target_fps_value = cfg_values.get("target_fps", None)
-            st.warning("Enter a valid target FPS or leave the field empty.")
-        else:
-            target_fps_value = parsed_target_fps
-    else:
-        target_fps_value = None
+    st.caption("Automatic cropping with MediaPipe is always enabled for squat analysis.")
 
     current_values = {
         "low": float(low),
@@ -759,10 +722,9 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         "min_prominence": float(min_prominence),
         "min_distance_sec": float(min_distance_sec),
         "debug_video": bool(debug_video),
-        "use_crop": bool(use_crop),
-        "target_fps": target_fps_value,
+        "use_crop": True,
     }
-    if not disabled and not target_fps_error:
+    if not disabled:
         st.session_state.configure_values = current_values
 
     if show_actions and not disabled:
@@ -775,11 +737,12 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         with col_forward:
             st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button("Continue", key="configure_continue"):
-                if target_fps_error:
-                    st.warning("Fix the target FPS value before continuing.")
-                else:
-                    st.session_state.configure_values = current_values
-                    st.session_state.step = "running"
+                st.session_state.configure_values = current_values
+                st.session_state.step = "running"
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
 
