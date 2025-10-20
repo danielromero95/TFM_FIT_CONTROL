@@ -153,21 +153,18 @@ def _inject_css() -> None:
 
       .spacer-sm { height: .5rem; }
 
-      /* Step 2: fix preview width, keep aspect and black bars when needed */
+      /* Step 2: keep a consistent preview area regardless of the source video */
       .step-detect [data-testid="stVideo"] {
-        max-width: 720px;
-        margin: 0 auto .5rem auto;
+        width: 100%;
+        max-width: 100%;
+        margin: 0 auto .75rem auto;
       }
       .step-detect [data-testid="stVideo"] video {
-        width: min(720px, 100%) !important;
-        aspect-ratio: 16 / 9;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 360px !important;
         background: #000;
         object-fit: contain;
-      }
-
-      .step-detect .readonly-hint {
-        color: #94a3b8;
-        font-size: .85rem;
       }
 
       /* Keep title above content and safe on very narrow viewports */
@@ -622,12 +619,6 @@ def _detect_step() -> None:
                     st.session_state.detect_result = None
                     st.session_state.step = "configure"
             st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.markdown(
-            '<div class="readonly-hint">Detection controls are read-only during this step.</div>',
-            unsafe_allow_html=True,
-        )
-
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -636,7 +627,13 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
     cfg_values = st.session_state.get("configure_values", CONFIG_DEFAULTS.copy())
 
     if disabled:
-        st.info("The configuration is displayed for reference only while the analysis runs.")
+        current_step = st.session_state.get("step")
+        if current_step == "running":
+            st.info("The configuration is displayed for reference while the analysis runs.")
+        elif current_step == "results":
+            st.info("Configuration values used for the analysis are shown below.")
+        else:
+            st.info("Configuration is read-only at this stage.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -979,14 +976,14 @@ def main() -> None:
 
     with col_mid:
         step = st.session_state.step
-        if step in ("configure", "running"):
+        if step in ("configure", "running", "results"):
             disabled = step != "configure"
             show_actions = step == "configure"
             _configure_step(disabled=disabled, show_actions=show_actions)
             if step == "running":
                 _running_step()
-        elif step == "results":
-            _results_summary()
+            elif step == "results":
+                _results_summary()
         else:
             st.empty()
 
