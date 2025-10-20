@@ -713,7 +713,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         disabled=disabled,
         key="cfg_debug_video",
     )
-    st.caption("Automatic cropping with MediaPipe is always enabled for squat analysis.")
 
     current_values = {
         "low": float(low),
@@ -829,7 +828,6 @@ def _results_panel() -> Dict[str, bool]:
             st.session_state.get("configure_values", {}).get("debug_video", True)
         ):
             st.video(str(report.debug_video_path))
-            st.caption("Video with landmarks")
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
