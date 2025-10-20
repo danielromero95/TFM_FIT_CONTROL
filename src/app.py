@@ -38,7 +38,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import config
-from src.pipeline import Report, run_pipeline
+from src.pipeline import Report
+
+from src.services.analysis_service import run_pipeline
 from src.detect.exercise_detector import detect_exercise
 
 EXERCISE_CHOICES = [

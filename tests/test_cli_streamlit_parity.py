@@ -10,7 +10,7 @@ np = pytest.importorskip("numpy")
 cv2 = pytest.importorskip("cv2")
 
 from src import config
-from src.pipeline import run_pipeline
+from src.services.analysis_service import run_pipeline
 from src.run_pipeline import main as cli_main
 
 

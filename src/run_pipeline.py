@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from src import config
-from src.pipeline import Report, run_pipeline
+from src.pipeline import Report
+
+from src.services.analysis_service import run_pipeline
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

@@ -5,7 +5,7 @@ import pandas as pd
 
 from src import config
 from src.D_modeling.count_reps import CountingDebugInfo
-from src.pipeline import run_pipeline
+from src.services.analysis_service import run_pipeline
 
 
 def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
@@ -23,12 +23,12 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(20)]
 
     monkeypatch.setattr(
-        "src.pipeline._probe_video_metadata",
+        "src.services.analysis_service._probe_video_metadata",
         lambda _path: (30.0, 600, None, False),
     )
 
     monkeypatch.setattr(
-        "src.pipeline.extract_and_preprocess_frames",
+        "src.services.analysis_service.extract_and_preprocess_frames",
         lambda **kwargs: (frames, 30.0),
     )
 
@@ -37,7 +37,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
         return pd.DataFrame({"frame": range(length)})
 
     monkeypatch.setattr(
-        "src.pipeline.extract_landmarks_from_frames",
+        "src.services.analysis_service.extract_landmarks_from_frames",
         _fake_extract_landmarks,
     )
 
@@ -45,7 +45,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
         return df_raw_landmarks.copy(), []
 
     monkeypatch.setattr(
-        "src.pipeline.filter_and_interpolate_landmarks",
+        "src.services.analysis_service.filter_and_interpolate_landmarks",
         _fake_filter,
     )
 
@@ -53,19 +53,19 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
         return pd.DataFrame({cfg.counting.primary_angle: [90.0, 80.0, 105.0]})
 
     monkeypatch.setattr(
-        "src.pipeline.calculate_metrics_from_sequence",
+        "src.services.analysis_service.calculate_metrics_from_sequence",
         _fake_metrics,
     )
 
     monkeypatch.setattr(
-        "src.pipeline.count_repetitions_with_config",
+        "src.services.analysis_service.count_repetitions_with_config",
         lambda df, counting_cfg, fps: (2, CountingDebugInfo(valley_indices=[1], prominences=[1.0])),
     )
 
     def _fail_detect(*args, **kwargs):  # pragma: no cover - should not be invoked
         raise AssertionError("detect_exercise should not be called when prefetched")
 
-    monkeypatch.setattr("src.pipeline.detect_exercise", _fail_detect)
+    monkeypatch.setattr("src.services.analysis_service.detect_exercise", _fail_detect)
 
     report = run_pipeline(
         str(video_path),

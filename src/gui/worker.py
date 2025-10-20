@@ -6,7 +6,9 @@ import logging
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from src import config
-from src.pipeline import Report, run_pipeline
+from src.pipeline import Report
+
+from src.services.analysis_service import run_pipeline
 
 logger = logging.getLogger(__name__)
 
