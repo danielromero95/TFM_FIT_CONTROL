@@ -20,7 +20,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Gym Performance Analysis")
+st.set_page_config(layout="wide", page_title="Exercise Performance Analicer")
 
 # --- Ensure Windows loads codec DLLs from the active conda env first -----------
 if sys.platform.startswith("win"):
@@ -144,20 +144,22 @@ def _inject_css() -> None:
         position: relative;
       }
       header[data-testid="stHeader"]::before {
-        content: "Gym Performance Analysis";
+        content: "Exercise Performance Analicer" !important;
         position: absolute;
         left: 16px;
         top: 50%;
         transform: translateY(-50%);
-        color: #e5e7eb;
-        font-weight: 700;
-        font-size: 18px;
-        letter-spacing: .2px;
+        color: #e5e7eb !important;
+        font-weight: 700 !important;
+        font-size: 18px !important;
+        letter-spacing: .2px !important;
         pointer-events: none;
         max-width: calc(100% - 180px);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        display: block;
+        z-index: 2;
       }
 
       .step-detect .form-label {
