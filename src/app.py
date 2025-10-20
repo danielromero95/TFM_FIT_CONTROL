@@ -40,6 +40,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from src import config
 from src.pipeline import Report, run_pipeline
 from src.detect.exercise_detector import detect_exercise
+from src.theme import (
+    DEFAULT_PRIMARY_SHADOW,
+    DEFAULT_PRIMARY_SHADOW_HOVER,
+    DEFAULT_SECONDARY_BG_HOVER,
+    DEFAULT_SECONDARY_BORDER,
+    DEFAULT_SECONDARY_BORDER_HOVER,
+    load_theme_colors,
+    rgba_from_hex,
+)
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -61,21 +70,24 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "use_crop": True,
     "target_fps": None,
 }
-
-
-def _inject_css() -> None:
+def _inject_css(primary_color: str, secondary_color: str) -> None:
+    primary_shadow = rgba_from_hex(primary_color, 0.35, DEFAULT_PRIMARY_SHADOW)
+    primary_shadow_hover = rgba_from_hex(primary_color, 0.45, DEFAULT_PRIMARY_SHADOW_HOVER)
+    secondary_border = rgba_from_hex(secondary_color, 0.6, DEFAULT_SECONDARY_BORDER)
+    secondary_border_hover = rgba_from_hex(secondary_color, 0.9, DEFAULT_SECONDARY_BORDER_HOVER)
+    secondary_hover_bg = rgba_from_hex(secondary_color, 0.10, DEFAULT_SECONDARY_BG_HOVER)
     st.markdown(
-        """
+        f"""
     <style>
       /* --- Top header with inline title --- */
-      header[data-testid="stHeader"] {
+      header[data-testid="stHeader"] {{
         background: #0f172a;
         border-bottom: 1px solid #1f2937;
         height: 48px;
         padding-right: 140px;
         position: relative;
-      }
-      header[data-testid="stHeader"]::before {
+      }}
+      header[data-testid="stHeader"]::before {{
         content: "Gym Performance Analysis";
         position: absolute;
         left: 16px;
@@ -90,161 +102,171 @@ def _inject_css() -> None:
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-      }
+      }}
 
-      .step-detect .form-label {
+      .step-detect .form-label {{
         color: #e5e7eb;
         font-weight: 600;
         font-size: 0.875rem;
         margin-bottom: .25rem;
-      }
+      }}
 
       /* Target the Streamlit button that follows our marker */
       .step-detect .btn-danger + div .stButton > button,
-      .step-detect .btn-danger + div button {
+      .step-detect .btn-danger + div button,
+      .btn-danger + div .stButton > button,
+      .btn-danger + div button {{
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
         background: transparent !important;
-        color: #ef4444 !important;
-        border: 1px solid rgba(239,68,68,.6) !important;
+        color: {secondary_color} !important;
+        border: 1px solid {secondary_border} !important;
         transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
-      }
+      }}
       .step-detect .btn-danger + div .stButton > button:hover,
-      .step-detect .btn-danger + div button:hover {
-        background: rgba(239,68,68,.10) !important;
-        border-color: rgba(239,68,68,.9) !important;
+      .step-detect .btn-danger + div button:hover,
+      .btn-danger + div .stButton > button:hover,
+      .btn-danger + div button:hover {{
+        background: {secondary_hover_bg} !important;
+        border-color: {secondary_border_hover} !important;
         transform: translateY(-1px);
-      }
+      }}
 
       .step-detect .btn-success + div .stButton > button,
-      .step-detect .btn-success + div button {
+      .step-detect .btn-success + div button,
+      .btn-success + div .stButton > button,
+      .btn-success + div button {{
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
-        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
+        background: {primary_color} !important;
         color: #ecfdf5 !important;
-        border: 1px solid rgba(34,197,94,.8) !important;
-        box-shadow: 0 12px 24px rgba(16,185,129,.35);
+        border: 1px solid {primary_color} !important;
+        box-shadow: 0 12px 24px {primary_shadow};
         transition: transform .15s ease, box-shadow .15s ease;
         margin-left: auto;
         display: block;
-      }
+      }}
       .step-detect .btn-success + div .stButton > button:hover,
-      .step-detect .btn-success + div button:hover {
+      .step-detect .btn-success + div button:hover,
+      .btn-success + div .stButton > button:hover,
+      .btn-success + div button:hover {{
         transform: translateY(-1px);
-        box-shadow: 0 16px 28px rgba(16,185,129,.45);
-      }
+        box-shadow: 0 16px 28px {primary_shadow_hover};
+      }}
 
       /* Disabled state */
       .step-detect .btn-danger + div .stButton > button[disabled],
-      .step-detect .btn-success + div .stButton > button[disabled] {
+      .step-detect .btn-success + div .stButton > button[disabled],
+      .btn-danger + div .stButton > button[disabled],
+      .btn-success + div .stButton > button[disabled] {{
         opacity: .55 !important;
         transform: none !important;
         box-shadow: none !important;
         cursor: not-allowed !important;
-      }
+      }}
 
-      .chip {display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
-             margin-right:.25rem}
-      .chip.ok {background:#065f46;color:#ecfdf5;}      /* green */
-      .chip.warn {background:#7c2d12;color:#ffedd5;}    /* amber/brown */
-      .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
+      .chip {{display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
+             margin-right:.25rem}}
+      .chip.ok {{background:#065f46;color:#ecfdf5;}}      /* green */
+      .chip.warn {{background:#7c2d12;color:#ffedd5;}}    /* amber/brown */
+      .chip.info {{background:#1e293b;color:#e2e8f0;}}    /* slate */
 
-      .spacer-sm { height: .5rem; }
+      .spacer-sm {{ height: .5rem; }}
 
       /* Step 2: keep a consistent preview area regardless of the source video */
-      .step-detect [data-testid="stVideo"] {
+      .step-detect [data-testid="stVideo"] {{
         width: 100%;
         max-width: 100%;
         margin: 0 auto .75rem auto;
-      }
-      .step-detect [data-testid="stVideo"] video {
+      }}
+      .step-detect [data-testid="stVideo"] video {{
         width: 100% !important;
         max-width: 100% !important;
         height: 360px !important;
         background: #000;
         object-fit: contain;
-      }
+      }}
 
       /* Keep title above content and safe on very narrow viewports */
-      header[data-testid="stHeader"] { z-index: 1000; }
-      @media (max-width: 520px) {
-        header[data-testid="stHeader"]::before { font-size: 16px; }
-      }
-      @media (max-width: 420px) {
-        header[data-testid="stHeader"]::before { display: none; }
-      }
+      header[data-testid="stHeader"] {{ z-index: 1000; }}
+      @media (max-width: 520px) {{
+        header[data-testid="stHeader"]::before {{ font-size: 16px; }}
+      }}
+      @media (max-width: 420px) {{
+        header[data-testid="stHeader"]::before {{ display: none; }}
+      }}
 
       /* Slightly larger click targets for nav buttons */
-      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
+      .btn-danger > button, .btn-success > button {{ min-height: 40px; min-width: 140px; }}
 
       /* Pull content closer to the toolbar */
       section[data-testid="stMain"],
-      main {
+      main {{
         padding-top: 0 !important;
-      }
+      }}
       section[data-testid="stMain"] > div:first-child,
-      main > div:first-child {
+      main > div:first-child {{
         padding-top: 0 !important;
         margin-top: 0 !important;
-      }
-      main .block-container {
+      }}
+      main .block-container {{
         padding-top: 0 !important;
         margin-top: 0 !important;
-      }
-      main .block-container > div:first-child {
+      }}
+      main .block-container > div:first-child {{
         padding-top: 0 !important;
         margin-top: 0 !important;
-      }
-      main [data-testid="stToolbar"] {
+      }}
+      main [data-testid="stToolbar"] {{
         margin-top: 0 !important;
         margin-bottom: 0 !important;
-      }
-      main [data-testid="stToolbar"] + div {
+      }}
+      main [data-testid="stToolbar"] + div {{
         margin-top: 0 !important;
         padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] {
+      }}
+      main [data-testid="stVerticalBlock"] {{
         padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] > div:first-child {
+      }}
+      main [data-testid="stVerticalBlock"] > div:first-child {{
         margin-top: 0 !important;
-      }
-      main [data-testid="stHorizontalBlock"] {
+      }}
+      main [data-testid="stHorizontalBlock"] {{
         margin-top: 0 !important;
         align-items: flex-start !important;
-      }
-      main [data-testid="column"] {
+      }}
+      main [data-testid="column"] {{
         padding-top: 0 !important;
-      }
-      main [data-testid="column"] > div {
+      }}
+      main [data-testid="column"] > div {{
         padding-top: 0 !important;
         margin-top: 0 !important;
-      }
+      }}
 
       /* Ensure the results column aligns with step 4 content */
-      .results-panel {
+      .results-panel {{
         margin-top: 0 !important;
         display: flex;
         flex-direction: column;
         gap: .75rem;
-      }
-      .results-panel h3:first-child {
+      }}
+      .results-panel h3:first-child {{
         margin-top: 0 !important;
-      }
-      .results-panel .stDataFrame {
+      }}
+      .results-panel .stDataFrame {{
         margin-bottom: .25rem;
-      }
-      .results-panel video {
+      }}
+      .results-panel video {{
         border-radius: 12px;
-      }
-      .results-panel [data-testid="stHorizontalBlock"] {
+      }}
+      .results-panel [data-testid="stHorizontalBlock"] {{
         gap: .5rem !important;
-      }
-      .results-panel [data-testid="column"] .stButton > button {
+      }}
+      .results-panel [data-testid="column"] .stButton > button {{
         width: 100%;
-      }
+      }}
     </style>
     """,
         unsafe_allow_html=True,
@@ -252,7 +274,8 @@ def _inject_css() -> None:
 
 
 def _init_session_state() -> None:
-    _inject_css()
+    colors = load_theme_colors(PROJECT_ROOT)
+    _inject_css(colors.primary, colors.secondary)
     if "step" not in st.session_state:
         st.session_state.step = "upload"
     if "upload_data" not in st.session_state:
@@ -945,8 +968,10 @@ def _results_panel() -> Dict[str, bool]:
         if st.button("Adjust configuration and re-run", key="results_adjust"):
             actions["adjust"] = True
     with reset_col:
+        st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
         if st.button("Back to start", key="results_reset"):
             actions["reset"] = True
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 

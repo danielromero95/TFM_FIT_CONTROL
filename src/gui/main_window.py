@@ -29,11 +29,31 @@ from src.A_preprocessing.video_metadata import get_video_rotation
 from src.gui.style_utils import load_stylesheet
 from src.gui.widgets.video_display import VideoDisplayWidget
 from src.gui.worker import AnalysisWorker
+from src.theme import load_theme_colors
 from .widgets.results_panel import ResultsPanel
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _blend_hex(color: str, target: tuple[int, int, int], ratio: float) -> str:
+    color_value = color.lstrip("#")
+    if len(color_value) != 6:
+        return color
+    try:
+        red = int(color_value[0:2], 16)
+        green = int(color_value[2:4], 16)
+        blue = int(color_value[4:6], 16)
+    except ValueError:
+        return color
+    ratio = max(0.0, min(1.0, float(ratio)))
+    blended = (
+        int(round(red + (target[0] - red) * ratio)),
+        int(round(green + (target[1] - green) * ratio)),
+        int(round(blue + (target[2] - blue) * ratio)),
+    )
+    return f"#{blended[0]:02x}{blended[1]:02x}{blended[2]:02x}"
 
 
 class MainWindow(QMainWindow):
@@ -42,6 +62,7 @@ class MainWindow(QMainWindow):
         self.project_root = project_root
         self.video_path: str | None = None
         self.settings = QSettings(config.ORGANIZATION_NAME, config.APP_NAME)
+        self.theme_colors = load_theme_colors(self.project_root)
 
         self.current_rotation = 0
         self.original_pixmap: QPixmap | None = None
@@ -99,9 +120,38 @@ class MainWindow(QMainWindow):
         self.process_btn = QPushButton("Analyze video")
         self.process_btn.setEnabled(False)
         self.process_btn.clicked.connect(self._start_analysis)
+        self._apply_primary_button_style(self.process_btn)
         layout.addWidget(self.process_btn)
 
         return widget
+
+    def _apply_primary_button_style(self, button: QPushButton) -> None:
+        primary = self.theme_colors.primary
+        hover = _blend_hex(primary, (255, 255, 255), 0.12)
+        pressed = _blend_hex(primary, (0, 0, 0), 0.1)
+        disabled = _blend_hex(primary, (255, 255, 255), 0.45)
+        button.setStyleSheet(
+            (
+                "QPushButton {"
+                f"background-color: {primary};"
+                "color: #ffffff;"
+                "border: none;"
+                "padding: 10px 18px;"
+                "border-radius: 10px;"
+                "font-weight: 600;"
+                "}"
+                "QPushButton:hover {"
+                f"background-color: {hover};"
+                "}"
+                "QPushButton:pressed {"
+                f"background-color: {pressed};"
+                "}"
+                "QPushButton:disabled {"
+                f"background-color: {disabled};"
+                "color: rgba(255, 255, 255, 0.7);"
+                "}"
+            )
+        )
 
     def _create_settings_tab(self) -> QWidget:
         widget = QWidget()
