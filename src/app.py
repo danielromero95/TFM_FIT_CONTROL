@@ -265,6 +265,8 @@ def _init_session_state() -> None:
         st.session_state.video_path = None
     if "exercise" not in st.session_state:
         st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    if "exercise_pending_update" not in st.session_state:
+        st.session_state.exercise_pending_update = None
     else:
         current = st.session_state.exercise
         if current not in VALID_EXERCISE_LABELS:
@@ -308,6 +310,7 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     st.session_state.cfg_fingerprint = None
     st.session_state.last_run_success = False
     st.session_state.exercise = DEFAULT_EXERCISE_LABEL
+    st.session_state.exercise_pending_update = None
     st.session_state.detect_result = None
     st.session_state.configure_values = CONFIG_DEFAULTS.copy()
     st.session_state.step = "upload"
@@ -490,6 +493,10 @@ def _detect_step() -> None:
         st.session_state.detect_result = None
         detect_result = None
 
+    pending_exercise = st.session_state.pop("exercise_pending_update", None)
+    if pending_exercise in VALID_EXERCISE_LABELS:
+        st.session_state.exercise = pending_exercise
+
     current_exercise = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
     if current_exercise not in VALID_EXERCISE_LABELS:
         current_exercise = DEFAULT_EXERCISE_LABEL
@@ -585,7 +592,7 @@ def _detect_step() -> None:
                             detect_result.get("label", ""),
                             current_exercise,
                         )
-                        st.session_state.exercise = mapped_label
+                        st.session_state.exercise_pending_update = mapped_label
                         detect_result["accepted"] = True
                         st.session_state.step = "configure"
                     else:
