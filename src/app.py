@@ -39,6 +39,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src import config
 from src.pipeline import Report, run_pipeline
+from src.detect.exercise_detector import detect_exercise
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -49,6 +50,7 @@ DEFAULT_EXERCISE_LABEL = "Auto-Detect"
 EXERCISE_LABELS = [lbl for (lbl, _) in EXERCISE_CHOICES]
 VALID_EXERCISE_LABELS = set(EXERCISE_LABELS)
 EXERCISE_TO_CONFIG = {lbl: key for (lbl, key) in EXERCISE_CHOICES}
+CONFIG_TO_LABEL = {key: lbl for (lbl, key) in EXERCISE_CHOICES}
 CONFIG_DEFAULTS: Dict[str, float | str | bool | None] = {
     "low": 80,
     "high": 150,
@@ -461,6 +463,18 @@ def _upload_step() -> None:
                 st.session_state.step = "detect"
         else:
             st.session_state.active_upload_token = new_token
+    else:
+        uploader_state = st.session_state.get("video_uploader", "__unset__")
+        if (
+            previous_token is not None
+            and st.session_state.get("video_path")
+            and uploader_state in (None, "")
+        ):
+            _reset_state()
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
 
 
 def _detect_step() -> None:
@@ -470,14 +484,23 @@ def _detect_step() -> None:
     if video_path:
         st.video(str(video_path))
 
-    detect_readonly = (
-        st.session_state.step != "detect" or video_path is None
-    )
+    step = st.session_state.get("step", "upload")
+    is_active = step == "detect" and video_path is not None
+
+    token = st.session_state.get("upload_token")
+    detect_result = st.session_state.get("detect_result")
+    if detect_result is not None and detect_result.get("token") != token:
+        st.session_state.detect_result = None
+        detect_result = None
 
     current_exercise = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
     if current_exercise not in VALID_EXERCISE_LABELS:
         current_exercise = DEFAULT_EXERCISE_LABEL
         st.session_state.exercise = current_exercise
+
+    if current_exercise != DEFAULT_EXERCISE_LABEL and detect_result is not None:
+        st.session_state.detect_result = None
+        detect_result = None
 
     select_col_label, select_col_control = st.columns([1, 2])
     with select_col_label:
@@ -492,33 +515,114 @@ def _detect_step() -> None:
             index=EXERCISE_LABELS.index(current_exercise),
             key="exercise",
             label_visibility="collapsed",
-            disabled=detect_readonly,
+            disabled=not is_active,
         )
 
-    back_col, continue_col = st.columns([1, 2])
-    back_clicked = False
-    continue_clicked = False
-    with back_col:
-        st.markdown('<div class="btn-danger"></div>', unsafe_allow_html=True)
-        back_clicked = st.button(
-            "Back",
-            key="detect_back",
-            disabled=detect_readonly,
-        )
-    with continue_col:
-        st.markdown('<div class="btn-success"></div>', unsafe_allow_html=True)
-        continue_clicked = st.button(
-            "Continue",
-            key="detect_continue",
-            disabled=detect_readonly,
-        )
+    detect_result = st.session_state.get("detect_result")
+    if (
+        detect_result is not None
+        and detect_result.get("token") != token
+    ):
+        detect_result = None
+        st.session_state.detect_result = None
 
-    if back_clicked:
-        st.session_state.step = "upload"
-    if continue_clicked:
-        st.session_state.step = "configure"
+    info_container = st.container()
+    if detect_result:
+        if detect_result.get("error"):
+            info_container.error(
+                "Automatic exercise detection failed: "
+                f"{detect_result.get('error')}"
+            )
+            info_container.info(
+                "You can adjust the selection manually or try detecting again."
+            )
+        else:
+            label_key = detect_result.get("label", "unknown")
+            label_display = CONFIG_TO_LABEL.get(
+                label_key,
+                label_key.replace("_", " ").title(),
+            )
+            view_display = detect_result.get("view", "unknown").replace("_", " ").title()
+            confidence = float(detect_result.get("confidence", 0.0))
+            info_container.success(
+                f"Detected exercise: {label_display} – {view_display} view"
+                f" ({confidence:.0%} confidence)."
+            )
+            if not detect_result.get("accepted"):
+                info_container.info(
+                    "Click Continue to accept this detection or choose an exercise manually."
+                )
 
-    if detect_readonly:
+    if is_active:
+        back_col, continue_col = st.columns([1, 2])
+        with back_col:
+            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
+            if st.button("Back", key="detect_back"):
+                st.session_state.detect_result = None
+                st.session_state.step = "upload"
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+        with continue_col:
+            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
+            if st.button("Continue", key="detect_continue"):
+                if current_exercise == DEFAULT_EXERCISE_LABEL:
+                    detect_result = st.session_state.get("detect_result")
+                    if (
+                        detect_result
+                        and not detect_result.get("error")
+                        and detect_result.get("label")
+                        and detect_result.get("token") == token
+                        and detect_result.get("accepted")
+                    ):
+                        st.session_state.step = "configure"
+                    elif (
+                        detect_result
+                        and not detect_result.get("error")
+                        and detect_result.get("label")
+                        and detect_result.get("token") == token
+                    ):
+                        mapped_label = CONFIG_TO_LABEL.get(
+                            detect_result.get("label", ""),
+                            current_exercise,
+                        )
+                        st.session_state.exercise = mapped_label
+                        detect_result["accepted"] = True
+                        st.session_state.step = "configure"
+                    else:
+                        if not video_path:
+                            st.warning("Please upload a video before continuing.")
+                        else:
+                            with st.spinner("Detecting exercise…"):
+                                try:
+                                    label_key, detected_view, confidence = detect_exercise(
+                                        str(video_path)
+                                    )
+                                except Exception as exc:  # pragma: no cover - UI feedback
+                                    st.session_state.detect_result = {
+                                        "error": str(exc),
+                                        "accepted": False,
+                                        "token": token,
+                                    }
+                                else:
+                                    st.session_state.detect_result = {
+                                        "label": label_key,
+                                        "view": detected_view,
+                                        "confidence": float(confidence),
+                                        "accepted": False,
+                                        "token": token,
+                                    }
+                            try:
+                                st.rerun()
+                            except Exception:
+                                st.experimental_rerun()
+                else:
+                    st.session_state.detect_result = None
+                    st.session_state.step = "configure"
+            st.markdown("</div>", unsafe_allow_html=True)
+    else:
         st.markdown(
             '<div class="readonly-hint">Detection controls are read-only during this step.</div>',
             unsafe_allow_html=True,
