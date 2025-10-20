@@ -7,8 +7,9 @@ import hashlib
 import os
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -63,6 +64,40 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "debug_video": True,
     "use_crop": True,
 }
+
+
+@dataclass
+class AppState:
+    step: str = "upload"
+    upload_data: Optional[Dict[str, Any]] = None
+    upload_token: Optional[Tuple[str, int, str]] = None
+    active_upload_token: Optional[Tuple[str, int, str]] = None
+    video_path: Optional[str] = None
+    exercise: str = field(default_factory=lambda: DEFAULT_EXERCISE_LABEL)
+    exercise_pending_update: Optional[str] = None
+    detect_result: Optional[Dict[str, Any]] = None
+    configure_values: Dict[str, float | str | bool] = field(
+        default_factory=lambda: CONFIG_DEFAULTS.copy()
+    )
+    report: Optional[Report] = None
+    pipeline_error: Optional[str] = None
+    count_path: Optional[str] = None
+    metrics_path: Optional[str] = None
+    cfg_fingerprint: Optional[str] = None
+    last_run_success: bool = False
+    video_uploader: Any = None
+
+
+def _get_state() -> AppState:
+    _inject_css()
+    if "app_state" not in st.session_state:
+        st.session_state.app_state = AppState()
+    state: AppState = st.session_state.app_state
+    if "video_uploader" in st.session_state:
+        state.video_uploader = st.session_state.get("video_uploader")
+    else:
+        state.video_uploader = "__unset__"
+    return state
 
 
 def _inject_css() -> None:
@@ -251,52 +286,9 @@ def _inject_css() -> None:
     """,
         unsafe_allow_html=True,
     )
-
-
-def _init_session_state() -> None:
-    _inject_css()
-    if "step" not in st.session_state:
-        st.session_state.step = "upload"
-    if "upload_data" not in st.session_state:
-        st.session_state.upload_data = None
-    if "upload_token" not in st.session_state:
-        st.session_state.upload_token = None
-    if "active_upload_token" not in st.session_state:
-        st.session_state.active_upload_token = None
-    if "video_path" not in st.session_state:
-        st.session_state.video_path = None
-    if "exercise" not in st.session_state:
-        st.session_state.exercise = DEFAULT_EXERCISE_LABEL
-    if "exercise_pending_update" not in st.session_state:
-        st.session_state.exercise_pending_update = None
-    else:
-        current = st.session_state.exercise
-        if current not in VALID_EXERCISE_LABELS:
-            st.session_state.exercise = DEFAULT_EXERCISE_LABEL
-    widget_value = st.session_state.get(EXERCISE_WIDGET_KEY)
-    current_exercise = st.session_state.exercise
-    if widget_value not in VALID_EXERCISE_LABELS or widget_value != current_exercise:
-        st.session_state[EXERCISE_WIDGET_KEY] = current_exercise
-    if "detect_result" not in st.session_state:
-        st.session_state.detect_result = None
-    if "configure_values" not in st.session_state:
-        st.session_state.configure_values = CONFIG_DEFAULTS.copy()
-    if "report" not in st.session_state:
-        st.session_state.report = None
-    if "pipeline_error" not in st.session_state:
-        st.session_state.pipeline_error = None
-    if "count_path" not in st.session_state:
-        st.session_state.count_path = None
-    if "metrics_path" not in st.session_state:
-        st.session_state.metrics_path = None
-    if "cfg_fingerprint" not in st.session_state:
-        st.session_state.cfg_fingerprint = None
-    if "last_run_success" not in st.session_state:
-        st.session_state.last_run_success = False
-
-
 def _reset_state(*, preserve_upload: bool = False) -> None:
-    video_path = st.session_state.get("video_path")
+    state = _get_state()
+    video_path = state.video_path
     if video_path:
         try:
             Path(video_path).unlink(missing_ok=True)  # type: ignore[arg-type]
@@ -308,22 +300,22 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
                 pass
         except OSError:
             pass
-    st.session_state.video_path = None
-    st.session_state.report = None
-    st.session_state.pipeline_error = None
-    st.session_state.count_path = None
-    st.session_state.metrics_path = None
-    st.session_state.cfg_fingerprint = None
-    st.session_state.last_run_success = False
-    st.session_state.exercise = DEFAULT_EXERCISE_LABEL
-    st.session_state.exercise_pending_update = None
-    st.session_state.detect_result = None
-    st.session_state.configure_values = CONFIG_DEFAULTS.copy()
-    st.session_state.step = "upload"
+    state.video_path = None
+    state.report = None
+    state.pipeline_error = None
+    state.count_path = None
+    state.metrics_path = None
+    state.cfg_fingerprint = None
+    state.last_run_success = False
+    state.exercise = DEFAULT_EXERCISE_LABEL
+    state.exercise_pending_update = None
+    state.detect_result = None
+    state.configure_values = CONFIG_DEFAULTS.copy()
+    state.step = "upload"
     if not preserve_upload:
-        st.session_state.upload_data = None
-        st.session_state.upload_token = None
-    st.session_state.active_upload_token = None
+        state.upload_data = None
+        state.upload_token = None
+    state.active_upload_token = None
 
 
 def _reset_app() -> None:
@@ -335,11 +327,12 @@ def _reset_app() -> None:
 
 
 def _ensure_video_path() -> None:
-    upload_data = st.session_state.upload_data
+    state = _get_state()
+    upload_data = state.upload_data
     if not upload_data:
         return
     # If we're replacing an existing temp file, delete it first
-    old_path = st.session_state.get("video_path")
+    old_path = state.video_path
     if old_path:
         try:
             Path(old_path).unlink(missing_ok=True)  # type: ignore[arg-type]
@@ -355,27 +348,28 @@ def _ensure_video_path() -> None:
     tmp_file.write(upload_data["bytes"])
     tmp_file.flush()
     tmp_file.close()
-    st.session_state.video_path = tmp_file.name
-    st.session_state.detect_result = None
+    state.video_path = tmp_file.name
+    state.detect_result = None
     # Free large byte payload from session to reduce memory usage once persisted
-    st.session_state.upload_data = None
+    state.upload_data = None
 
 
 def _run_pipeline(progress_cb=None) -> None:
-    st.session_state.pipeline_error = None
-    st.session_state.report = None
-    st.session_state.count_path = None
-    st.session_state.metrics_path = None
-    st.session_state.cfg_fingerprint = None
+    state = _get_state()
+    state.pipeline_error = None
+    state.report = None
+    state.count_path = None
+    state.metrics_path = None
+    state.cfg_fingerprint = None
 
-    video_path = st.session_state.get("video_path")
+    video_path = state.video_path
     if not video_path:
-        st.session_state.pipeline_error = "The video to process was not found."
+        state.pipeline_error = "The video to process was not found."
         return
 
     cfg = config.load_default()
 
-    cfg_values = st.session_state.get("configure_values", CONFIG_DEFAULTS)
+    cfg_values = state.configure_values or CONFIG_DEFAULTS
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
     cfg.counting.primary_angle = str(cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"]))
@@ -384,13 +378,13 @@ def _run_pipeline(progress_cb=None) -> None:
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
     cfg.pose.use_crop = True
 
-    exercise_label = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
     cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
         exercise_label,
         EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
     )
 
-    det = st.session_state.get("detect_result")
+    det = state.detect_result
     prefetched_detection = None
     if det:
         prefetched_detection = (
@@ -407,11 +401,11 @@ def _run_pipeline(progress_cb=None) -> None:
             prefetched_detection=prefetched_detection,
         )
     except Exception as exc:  # pragma: no cover - surfaced to the UI user
-        st.session_state.pipeline_error = str(exc)
+        state.pipeline_error = str(exc)
         return
 
-    st.session_state.report = report
-    st.session_state.cfg_fingerprint = report.stats.config_sha1
+    state.report = report
+    state.cfg_fingerprint = report.stats.config_sha1
 
     counts_dir = Path(cfg.output.counts_dir)
     poses_dir = Path(cfg.output.poses_dir)
@@ -421,15 +415,15 @@ def _run_pipeline(progress_cb=None) -> None:
     video_stem = Path(video_path).stem
     count_path = counts_dir / f"{video_stem}_count.txt"
     count_path.write_text(f"{report.repetitions}\n", encoding="utf-8")
-    st.session_state.count_path = str(count_path)
+    state.count_path = str(count_path)
 
     metrics_df = report.metrics
     if metrics_df is not None:
         metrics_path = poses_dir / f"{video_stem}_metrics.csv"
         metrics_df.to_csv(metrics_path, index=False)
-        st.session_state.metrics_path = str(metrics_path)
+        state.metrics_path = str(metrics_path)
     else:
-        st.session_state.metrics_path = None
+        state.metrics_path = None
 
 
 def _upload_step() -> None:
@@ -440,7 +434,8 @@ def _upload_step() -> None:
         key="video_uploader",
         label_visibility="collapsed",
     )
-    previous_token = st.session_state.get("active_upload_token")
+    state = _get_state()
+    previous_token = state.active_upload_token
     if uploaded is not None:
         data_bytes = uploaded.getvalue()
         new_token = (
@@ -450,22 +445,24 @@ def _upload_step() -> None:
         )
         if previous_token != new_token:
             _reset_state(preserve_upload=True)
-            st.session_state.upload_data = {
+            state = _get_state()
+            state.upload_data = {
                 "name": uploaded.name,
                 "bytes": data_bytes,
             }
-            st.session_state.upload_token = new_token
-            st.session_state.active_upload_token = new_token
+            state.upload_token = new_token
+            state.active_upload_token = new_token
             _ensure_video_path()
-            if st.session_state.video_path:
-                st.session_state.step = "detect"
+            state = _get_state()
+            if state.video_path:
+                state.step = "detect"
         else:
-            st.session_state.active_upload_token = new_token
+            state.active_upload_token = new_token
     else:
-        uploader_state = st.session_state.get("video_uploader", "__unset__")
+        uploader_state = state.video_uploader
         if (
             previous_token is not None
-            and st.session_state.get("video_path")
+            and state.video_path
             and uploader_state in (None, "")
         ):
             _reset_state()
@@ -478,38 +475,40 @@ def _upload_step() -> None:
 def _detect_step() -> None:
     st.markdown("### 2. Detect the exercise")
     st.markdown('<div class="step step-detect">', unsafe_allow_html=True)
-    video_path = st.session_state.get("video_path")
+    state = _get_state()
+    video_path = state.video_path
     if video_path:
         st.video(str(video_path))
 
-    step = st.session_state.get("step", "upload")
+    step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
 
-    token = st.session_state.get("upload_token")
-    detect_result = st.session_state.get("detect_result")
+    token = state.upload_token
+    detect_result = state.detect_result
     if detect_result is not None and detect_result.get("token") != token:
-        st.session_state.detect_result = None
+        state.detect_result = None
         detect_result = None
 
-    pending_exercise = st.session_state.pop("exercise_pending_update", None)
+    pending_exercise = state.exercise_pending_update
+    state.exercise_pending_update = None
     if pending_exercise in VALID_EXERCISE_LABELS:
-        st.session_state.exercise = pending_exercise
+        state.exercise = pending_exercise
 
-    current_exercise = st.session_state.get("exercise", DEFAULT_EXERCISE_LABEL)
+    current_exercise = state.exercise or DEFAULT_EXERCISE_LABEL
     if current_exercise not in VALID_EXERCISE_LABELS:
         current_exercise = DEFAULT_EXERCISE_LABEL
-        st.session_state.exercise = current_exercise
+        state.exercise = current_exercise
 
     widget_value = st.session_state.get(EXERCISE_WIDGET_KEY)
     if widget_value not in VALID_EXERCISE_LABELS:
         widget_value = current_exercise
     if widget_value != current_exercise:
         current_exercise = widget_value
-        st.session_state.exercise = current_exercise
+        state.exercise = current_exercise
     st.session_state[EXERCISE_WIDGET_KEY] = current_exercise
 
     if current_exercise != DEFAULT_EXERCISE_LABEL and detect_result is not None:
-        st.session_state.detect_result = None
+        state.detect_result = None
         detect_result = None
 
     select_col_label, select_col_control = st.columns([1, 2])
@@ -529,16 +528,16 @@ def _detect_step() -> None:
             disabled=not is_active,
         )
         if selected_exercise != current_exercise:
-            st.session_state.exercise = selected_exercise
+            state.exercise = selected_exercise
             current_exercise = selected_exercise
 
-    detect_result = st.session_state.get("detect_result")
+    detect_result = state.detect_result
     if (
         detect_result is not None
         and detect_result.get("token") != token
     ):
         detect_result = None
-        st.session_state.detect_result = None
+        state.detect_result = None
 
     info_container = st.container()
     if detect_result:
@@ -574,8 +573,8 @@ def _detect_step() -> None:
             with back_col:
                 st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
                 if st.button("Back", key="detect_back"):
-                    st.session_state.detect_result = None
-                    st.session_state.step = "upload"
+                    state.detect_result = None
+                    state.step = "upload"
                     try:
                         st.rerun()
                     except Exception:
@@ -585,7 +584,7 @@ def _detect_step() -> None:
                 st.markdown('<div class="btn-success">', unsafe_allow_html=True)
                 if st.button("Continue", key="detect_continue"):
                     if current_exercise == DEFAULT_EXERCISE_LABEL:
-                        detect_result = st.session_state.get("detect_result")
+                        detect_result = state.detect_result
                         if (
                             detect_result
                             and not detect_result.get("error")
@@ -593,7 +592,7 @@ def _detect_step() -> None:
                             and detect_result.get("token") == token
                             and detect_result.get("accepted")
                         ):
-                            st.session_state.step = "configure"
+                            state.step = "configure"
                         elif (
                             detect_result
                             and not detect_result.get("error")
@@ -604,9 +603,9 @@ def _detect_step() -> None:
                                 detect_result.get("label", ""),
                                 current_exercise,
                             )
-                            st.session_state.exercise_pending_update = mapped_label
+                            state.exercise_pending_update = mapped_label
                             detect_result["accepted"] = True
-                            st.session_state.step = "configure"
+                            state.step = "configure"
                         else:
                             if not video_path:
                                 st.warning("Please upload a video before continuing.")
@@ -617,13 +616,13 @@ def _detect_step() -> None:
                                             str(video_path)
                                         )
                                     except Exception as exc:  # pragma: no cover - UI feedback
-                                        st.session_state.detect_result = {
+                                        state.detect_result = {
                                             "error": str(exc),
                                             "accepted": False,
                                             "token": token,
                                         }
                                     else:
-                                        st.session_state.detect_result = {
+                                        state.detect_result = {
                                             "label": label_key,
                                             "view": detected_view,
                                             "confidence": float(confidence),
@@ -635,8 +634,8 @@ def _detect_step() -> None:
                                 except Exception:
                                     st.experimental_rerun()
                     else:
-                        st.session_state.detect_result = None
-                        st.session_state.step = "configure"
+                        state.detect_result = None
+                        state.step = "configure"
                 st.markdown("</div>", unsafe_allow_html=True)
     else:
         actions_placeholder.empty()
@@ -645,7 +644,8 @@ def _detect_step() -> None:
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     st.markdown("### 3. Configure the analysis")
-    stored_cfg = st.session_state.get("configure_values")
+    state = _get_state()
+    stored_cfg = state.configure_values
     if stored_cfg is None:
         cfg_values = CONFIG_DEFAULTS.copy()
     else:
@@ -654,7 +654,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
     cfg_values["use_crop"] = True
 
     if disabled:
-        current_step = st.session_state.get("step")
+        current_step = state.step
         if current_step == "running":
             st.info("The configuration is displayed for reference while the analysis runs.")
         elif current_step == "results":
@@ -726,20 +726,20 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         "use_crop": True,
     }
     if not disabled:
-        st.session_state.configure_values = current_values
+        state.configure_values = current_values
 
     if show_actions and not disabled:
         col_back, col_forward = st.columns(2)
         with col_back:
             st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
             if st.button("Back", key="configure_back"):
-                st.session_state.step = "detect"
+                state.step = "detect"
             st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
             st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button("Continue", key="configure_continue"):
-                st.session_state.configure_values = current_values
-                st.session_state.step = "running"
+                state.configure_values = current_values
+                state.step = "running"
                 try:
                     st.rerun()
                 except Exception:
@@ -751,11 +751,12 @@ def _running_step() -> None:
     st.markdown("### 4. Running the analysis")
     progress_placeholder = st.progress(0)
     phase_placeholder = st.empty()
+    state = _get_state()
     debug_enabled = bool(
-        st.session_state.get("configure_values", {}).get("debug_video", True)
+        (state.configure_values or {}).get("debug_video", True)
     )
 
-    st.session_state.last_run_success = False
+    state.last_run_success = False
 
     def _phase_for(p: int) -> str:
         if p < 10:
@@ -786,9 +787,10 @@ def _running_step() -> None:
     phase_placeholder.text(_phase_for(0))
 
     _ensure_video_path()
-    if not st.session_state.video_path:
-        st.session_state.pipeline_error = "The video to process was not found."
-        st.session_state.step = "results"
+    state = _get_state()
+    if not state.video_path:
+        state.pipeline_error = "The video to process was not found."
+        state.step = "results"
         try:
             st.rerun()
         except Exception:
@@ -798,11 +800,11 @@ def _running_step() -> None:
     with st.spinner("Processing video…"):
         _run_pipeline(progress_cb=_cb)
 
-    st.session_state.last_run_success = (
-        st.session_state.pipeline_error is None
-        and st.session_state.report is not None
+    state.last_run_success = (
+        state.pipeline_error is None
+        and state.report is not None
     )
-    st.session_state.step = "results"
+    state.step = "results"
     try:
         st.rerun()
     except Exception:
@@ -815,11 +817,13 @@ def _results_panel() -> Dict[str, bool]:
 
     actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
-    if st.session_state.pipeline_error:
+    state = _get_state()
+
+    if state.pipeline_error:
         st.error("An error occurred during the analysis")
-        st.code(str(st.session_state.pipeline_error))
-    elif st.session_state.report is not None:
-        report: Report = st.session_state.report
+        st.code(str(state.pipeline_error))
+    elif state.report is not None:
+        report: Report = state.report
         stats = report.stats
         repetitions = report.repetitions
         metrics_df = report.metrics
@@ -827,7 +831,7 @@ def _results_panel() -> Dict[str, bool]:
         st.markdown(f"**Detected repetitions:** {repetitions}")
 
         if report.debug_video_path and bool(
-            st.session_state.get("configure_values", {}).get("debug_video", True)
+            (state.configure_values or {}).get("debug_video", True)
         ):
             st.video(str(report.debug_video_path))
 
@@ -884,14 +888,14 @@ def _results_panel() -> Dict[str, bool]:
             except Exception:
                 st.json({row["Field"]: row["Value"] for row in stats_rows})
 
-            if st.session_state.video_path:
+            if state.video_path:
                 st.markdown("### Original video")
-                st.video(str(st.session_state.video_path))
+                st.video(str(state.video_path))
 
-        if st.session_state.metrics_path is not None:
+        if state.metrics_path is not None:
             metrics_data = None
             try:
-                metrics_data = Path(st.session_state.metrics_path).read_text(
+                metrics_data = Path(state.metrics_path).read_text(
                     encoding="utf-8"
                 )
             except FileNotFoundError:
@@ -902,14 +906,14 @@ def _results_panel() -> Dict[str, bool]:
                 st.download_button(
                     "Download metrics",
                     data=metrics_data,
-                    file_name=f"{Path(st.session_state.video_path).stem}_metrics.csv",
+                    file_name=f"{Path(state.video_path).stem}_metrics.csv",
                     mime="text/csv",
                 )
 
-        if st.session_state.count_path is not None:
+        if state.count_path is not None:
             count_data = None
             try:
-                count_data = Path(st.session_state.count_path).read_text(
+                count_data = Path(state.count_path).read_text(
                     encoding="utf-8"
                 )
             except FileNotFoundError:
@@ -920,7 +924,7 @@ def _results_panel() -> Dict[str, bool]:
                 st.download_button(
                     "Download repetition count",
                     data=count_data,
-                    file_name=f"{Path(st.session_state.video_path).stem}_count.txt",
+                    file_name=f"{Path(state.video_path).stem}_count.txt",
                     mime="text/plain",
                 )
 
@@ -942,27 +946,30 @@ def _results_panel() -> Dict[str, bool]:
 
 def _results_summary() -> None:
     st.markdown("### 4. Run the analysis")
-    if st.session_state.get("last_run_success"):
+    state = _get_state()
+    if state.last_run_success:
         st.success("Analysis complete ✅")
 
 
 def main() -> None:
-    _init_session_state()
+    state = _get_state()
 
     col_left, col_mid, col_right = st.columns(3)
 
     with col_left:
         _upload_step()
+        state = _get_state()
         if (
-            st.session_state.step in ("detect", "configure", "running", "results")
-            and st.session_state.video_path
+            state.step in ("detect", "configure", "running", "results")
+            and state.video_path
         ):
             _detect_step()
 
     results_actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
     with col_mid:
-        step = st.session_state.step
+        state = _get_state()
+        step = state.step
         if step in ("configure", "running", "results"):
             disabled = step != "configure"
             show_actions = step == "configure"
@@ -975,13 +982,15 @@ def main() -> None:
             st.empty()
 
     with col_right:
-        if st.session_state.step == "results":
+        state = _get_state()
+        if state.step == "results":
             results_actions = _results_panel()
         else:
             st.empty()
 
     if results_actions.get("adjust"):
-        st.session_state.step = "configure"
+        state = _get_state()
+        state.step = "configure"
         try:
             st.rerun()
         except Exception:
