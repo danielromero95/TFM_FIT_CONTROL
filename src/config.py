@@ -160,7 +160,7 @@ class Config:
 # --- Public helpers ------------------------------------------------------------
 
 def load_default() -> Config:
-    """Return the default configuration used by both UIs and the CLI."""
+    """Return the default configuration used by the Streamlit application."""
     return Config()
 
 

@@ -33,7 +33,6 @@ The general workflow includes:
 - One *single* resize stage (documented in config) before pose estimation
 - Rep counting based on valleys with **prominence / min distance / refractory**
 - Streamlit & GUI surface **run stats**, warnings and `skip_reason`
-- CLI ↔ Streamlit parity test added
 - Pinned OpenCV/SciPy in `environment.yml` for stability
 
 ## What’s new in 2.0
@@ -85,3 +84,4 @@ Synthetic fixtures for squat/bench/deadlift and front vs side view checks.
 # 1) Create conda env
 conda env create -f environment.yml
 conda activate gym_env
+```
