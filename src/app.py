@@ -785,12 +785,12 @@ def _running_step() -> None:
         return
 
     cancel_disabled = not state.analysis_future or state.analysis_future.done()
-    if st.button("Cancelar análisis", disabled=cancel_disabled):
+    if st.button("Cancel analysis", disabled=cancel_disabled):
         if state.analysis_future and state.analysis_future.cancel():
             pass
         state.run_id = None
         state.last_run_success = False
-        state.pipeline_error = "Análisis cancelado por el usuario."
+        state.pipeline_error = "Analysis canceled by the user."
 
     debug_enabled = bool((state.configure_values or {}).get("debug_video", True))
 
@@ -882,7 +882,7 @@ def _running_step() -> None:
         return
 
     future = state.analysis_future
-    with st.status("Analizando vídeo...", expanded=True) as status:
+    with st.status("Analyzing video...", expanded=True) as status:
         latest_progress = getattr(state, "progress_value_from_cb", 0)
         latest_phase = getattr(
             state,
@@ -893,13 +893,13 @@ def _running_step() -> None:
         progress_message = status.empty()
 
         status.update(
-            label=f"Analizando vídeo... {latest_progress}%",
+            label=f"Analyzing video... {latest_progress}%",
             state="running",
             expanded=True,
         )
         bar.progress(latest_progress)
         progress_message.markdown(
-            f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+            f"**Current phase:** {latest_phase} ({latest_progress}%)"
         )
 
         while future and not future.done():
@@ -913,7 +913,7 @@ def _running_step() -> None:
                 state.progress_value_from_cb = latest_progress
                 state.phase_text_from_cb = latest_phase
                 state.analysis_future = None
-                state.pipeline_error = "Análisis cancelado por el usuario."
+                state.pipeline_error = "Analysis canceled by the user."
                 state.step = "results"
                 _drain_queue(progress_queue)
                 try:
@@ -939,13 +939,13 @@ def _running_step() -> None:
                 state.phase_text_from_cb = phase
 
             status.update(
-                label=f"Analizando vídeo... {latest_progress}%",
+                label=f"Analyzing video... {latest_progress}%",
                 state="running",
                 expanded=True,
             )
             bar.progress(latest_progress)
             progress_message.markdown(
-                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                f"**Current phase:** {latest_phase} ({latest_progress}%)"
             )
             time.sleep(0.2)
             future = state.analysis_future
@@ -953,8 +953,8 @@ def _running_step() -> None:
         state = _get_state()
         current_future = state.analysis_future
         if not current_future:
-            latest_phase = "Cancelado"
-            state.pipeline_error = "Análisis cancelado por el usuario."
+            latest_phase = "Canceled"
+            state.pipeline_error = "Analysis canceled by the user."
             state.report = None
             state.count_path = None
             state.metrics_path = None
@@ -962,10 +962,10 @@ def _running_step() -> None:
             state.last_run_success = False
             state.progress_value_from_cb = latest_progress
             state.phase_text_from_cb = latest_phase
-            status.update(label="Análisis cancelado", state="error", expanded=True)
+            status.update(label="Analysis canceled", state="error", expanded=True)
             bar.progress(latest_progress)
             progress_message.markdown(
-                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                f"**Current phase:** {latest_phase} ({latest_progress}%)"
             )
             _drain_queue(progress_queue)
             state.run_id = None
@@ -998,8 +998,8 @@ def _running_step() -> None:
                 completed_run_id, report = current_future.result()
                 _drain_queue(progress_queue)
             except CancelledError:
-                latest_phase = "Cancelado"
-                state.pipeline_error = "Análisis cancelado por el usuario."
+                latest_phase = "Canceled"
+                state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
                 state.count_path = None
                 state.metrics_path = None
@@ -1009,13 +1009,13 @@ def _running_step() -> None:
                 state.phase_text_from_cb = latest_phase
                 state.run_id = None
                 status.update(
-                    label="Análisis cancelado",
+                    label="Analysis canceled",
                     state="error",
                     expanded=True,
                 )
                 bar.progress(latest_progress)
                 progress_message.markdown(
-                    f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                    f"**Current phase:** {latest_phase} ({latest_progress}%)"
                 )
                 _drain_queue(progress_queue)
                 state.analysis_future = None
@@ -1027,8 +1027,8 @@ def _running_step() -> None:
                 return
 
             if state.run_id != completed_run_id:
-                latest_phase = "Cancelado"
-                state.pipeline_error = "Análisis cancelado por el usuario."
+                latest_phase = "Canceled"
+                state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
                 state.count_path = None
                 state.metrics_path = None
@@ -1038,13 +1038,13 @@ def _running_step() -> None:
                 state.phase_text_from_cb = latest_phase
                 state.run_id = None
                 status.update(
-                    label="Análisis cancelado",
+                    label="Analysis canceled",
                     state="error",
                     expanded=False,
                 )
                 bar.progress(latest_progress)
                 progress_message.markdown(
-                    f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                    f"**Current phase:** {latest_phase} ({latest_progress}%)"
                 )
                 _drain_queue(progress_queue)
                 state.analysis_future = None
@@ -1106,23 +1106,23 @@ def _running_step() -> None:
                 state.pipeline_error = "\n".join(file_errors)
                 state.last_run_success = False
                 status.update(
-                    label="Análisis completado con errores",
+                    label="Analysis completed with errors",
                     state="error",
                     expanded=True,
                 )
             else:
                 state.last_run_success = True
                 status.update(
-                    label="Análisis completado!",
+                    label="Analysis completed!",
                     state="complete",
                     expanded=False,
                 )
 
             progress_message.markdown(
-                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                f"**Current phase:** {latest_phase} ({latest_progress}%)"
             )
         except Exception as exc:
-            state.pipeline_error = f"Error en el hilo de análisis: {exc}"
+            state.pipeline_error = f"Error in analysis thread: {exc}"
             state.report = None
             state.count_path = None
             state.metrics_path = None
@@ -1130,7 +1130,7 @@ def _running_step() -> None:
             state.progress_value_from_cb = latest_progress
             state.phase_text_from_cb = latest_phase
             state.last_run_success = False
-            status.update(label="Error en el análisis", state="error", expanded=True)
+            status.update(label="Analysis error", state="error", expanded=True)
         finally:
             _drain_queue(progress_queue)
             state = _get_state()
