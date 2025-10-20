@@ -3,13 +3,19 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import sys
 import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, Future, CancelledError
+from queue import SimpleQueue, Empty
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -86,10 +92,35 @@ class AppState:
     cfg_fingerprint: Optional[str] = None
     last_run_success: bool = False
     video_uploader: Any = None
+    analysis_future: Future | None = None
+    progress_value_from_cb: int = 0
+    phase_text_from_cb: str = "Preparando..."
+    run_id: str | None = None
 
 
-def _get_state() -> AppState:
-    _inject_css()
+@st.cache_resource
+def get_thread_pool_executor() -> ThreadPoolExecutor:
+    executor = ThreadPoolExecutor(max_workers=1)
+    atexit.register(executor.shutdown, wait=False, cancel_futures=True)
+    return executor
+
+
+@st.cache_resource
+def get_progress_queue() -> SimpleQueue:
+    return SimpleQueue()
+
+
+def _drain_queue(queue: SimpleQueue) -> None:
+    while True:
+        try:
+            queue.get_nowait()
+        except Empty:
+            break
+
+
+def _get_state(*, inject_css: bool = True) -> AppState:
+    if inject_css and threading.current_thread() is threading.main_thread():
+        _inject_css()
     if "app_state" not in st.session_state:
         st.session_state.app_state = AppState()
     state: AppState = st.session_state.app_state
@@ -307,6 +338,10 @@ def _reset_state(*, preserve_upload: bool = False) -> None:
     state.metrics_path = None
     state.cfg_fingerprint = None
     state.last_run_success = False
+    state.analysis_future = None
+    state.progress_value_from_cb = 0
+    state.phase_text_from_cb = "Preparando..."
+    state.run_id = None
     state.exercise = DEFAULT_EXERCISE_LABEL
     state.exercise_pending_update = None
     state.detect_result = None
@@ -354,27 +389,25 @@ def _ensure_video_path() -> None:
     state.upload_data = None
 
 
-def _run_pipeline(progress_cb=None) -> None:
-    state = _get_state()
-    state.pipeline_error = None
-    state.report = None
-    state.count_path = None
-    state.metrics_path = None
-    state.cfg_fingerprint = None
-
+def _prepare_pipeline_inputs(state: AppState) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
     video_path = state.video_path
     if not video_path:
-        state.pipeline_error = "The video to process was not found."
-        return
+        raise ValueError("The video to process was not found.")
 
     cfg = config.load_default()
-
     cfg_values = state.configure_values or CONFIG_DEFAULTS
+
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
-    cfg.counting.primary_angle = str(cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"]))
-    cfg.counting.min_prominence = float(cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"]))
-    cfg.counting.min_distance_sec = float(cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"]))
+    cfg.counting.primary_angle = str(
+        cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"])
+    )
+    cfg.counting.min_prominence = float(
+        cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])
+    )
+    cfg.counting.min_distance_sec = float(
+        cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])
+    )
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
     cfg.pose.use_crop = True
 
@@ -385,7 +418,7 @@ def _run_pipeline(progress_cb=None) -> None:
     )
 
     det = state.detect_result
-    prefetched_detection = None
+    prefetched_detection: Optional[Tuple[str, str, float]] = None
     if det:
         prefetched_detection = (
             det.get("label", "unknown"),
@@ -393,37 +426,22 @@ def _run_pipeline(progress_cb=None) -> None:
             float(det.get("confidence", 0.0)),
         )
 
-    try:
-        report: Report = run_pipeline(
-            str(video_path),
-            cfg,
-            progress_callback=progress_cb,
-            prefetched_detection=prefetched_detection,
-        )
-    except Exception as exc:  # pragma: no cover - surfaced to the UI user
-        state.pipeline_error = str(exc)
-        return
+    return str(video_path), cfg, prefetched_detection
 
-    state.report = report
-    state.cfg_fingerprint = report.stats.config_sha1
 
-    counts_dir = Path(cfg.output.counts_dir)
-    poses_dir = Path(cfg.output.poses_dir)
-    counts_dir.mkdir(parents=True, exist_ok=True)
-    poses_dir.mkdir(parents=True, exist_ok=True)
-
-    video_stem = Path(video_path).stem
-    count_path = counts_dir / f"{video_stem}_count.txt"
-    count_path.write_text(f"{report.repetitions}\n", encoding="utf-8")
-    state.count_path = str(count_path)
-
-    metrics_df = report.metrics
-    if metrics_df is not None:
-        metrics_path = poses_dir / f"{video_stem}_metrics.csv"
-        metrics_df.to_csv(metrics_path, index=False)
-        state.metrics_path = str(metrics_path)
-    else:
-        state.metrics_path = None
+def _run_pipeline(
+    *,
+    video_path: str,
+    cfg: config.Config,
+    prefetched_detection: Optional[Tuple[str, str, float]] = None,
+    progress_cb=None,
+) -> Report:
+    return run_pipeline(
+        str(video_path),
+        cfg,
+        progress_callback=progress_cb,
+        prefetched_detection=prefetched_detection,
+    )
 
 
 def _upload_step() -> None:
@@ -729,15 +747,20 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         state.configure_values = current_values
 
     if show_actions and not disabled:
+        run_active = bool(state.analysis_future and not state.analysis_future.done())
         col_back, col_forward = st.columns(2)
         with col_back:
             st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Back", key="configure_back"):
+            if st.button("Back", key="configure_back", disabled=run_active):
                 state.step = "detect"
             st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
             st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-            if st.button("Continue", key="configure_continue"):
+            if st.button(
+                "Continue",
+                key="configure_continue",
+                disabled=run_active,
+            ):
                 state.configure_values = current_values
                 state.step = "running"
                 try:
@@ -749,16 +772,31 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
 
 def _running_step() -> None:
     st.markdown("### 4. Running the analysis")
-    progress_placeholder = st.progress(0)
-    phase_placeholder = st.empty()
+    executor = get_thread_pool_executor()
+    progress_queue = get_progress_queue()
+
     state = _get_state()
-    debug_enabled = bool(
-        (state.configure_values or {}).get("debug_video", True)
-    )
+    if state.analysis_future and state.analysis_future.done():
+        state.analysis_future = None
+        try:
+            st.rerun()
+        except Exception:
+            st.experimental_rerun()
+        return
+
+    cancel_disabled = not state.analysis_future or state.analysis_future.done()
+    if st.button("Cancelar análisis", disabled=cancel_disabled):
+        if state.analysis_future and state.analysis_future.cancel():
+            pass
+        state.run_id = None
+        state.last_run_success = False
+        state.pipeline_error = "Análisis cancelado por el usuario."
+
+    debug_enabled = bool((state.configure_values or {}).get("debug_video", True))
 
     state.last_run_success = False
 
-    def _phase_for(p: int) -> str:
+    def _phase_for(p: int, *, debug_enabled: bool) -> str:
         if p < 10:
             return "Preparing…"
         if p < 25:
@@ -779,12 +817,16 @@ def _running_step() -> None:
             return "Counting repetitions…"
         return "Finishing up…"
 
-    def _cb(p: int) -> None:
-        p = max(0, min(100, int(p)))
-        progress_placeholder.progress(p)
-        phase_placeholder.text(_phase_for(p))
+    def make_cb(queue: SimpleQueue, run_id: str, debug_enabled: bool):
+        def _cb(p: int) -> None:
+            value = max(0, min(100, int(p)))
+            phase = _phase_for(value, debug_enabled=debug_enabled)
+            try:
+                queue.put((run_id, value, phase))
+            except Exception as exc:  # pragma: no cover - defensive logging
+                print(f"Error putting progress in queue: {exc}")
 
-    phase_placeholder.text(_phase_for(0))
+        return _cb
 
     _ensure_video_path()
     state = _get_state()
@@ -797,18 +839,310 @@ def _running_step() -> None:
             st.experimental_rerun()
         return
 
-    with st.spinner("Processing video…"):
-        _run_pipeline(progress_cb=_cb)
+    if state.analysis_future is None:
+        try:
+            video_path, cfg, prefetched_detection = _prepare_pipeline_inputs(state)
+        except ValueError as exc:
+            state.pipeline_error = str(exc)
+            state.step = "results"
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
+            return
 
-    state.last_run_success = (
-        state.pipeline_error is None
-        and state.report is not None
-    )
-    state.step = "results"
-    try:
-        st.rerun()
-    except Exception:
-        st.experimental_rerun()
+        state.pipeline_error = None
+        state.report = None
+        state.count_path = None
+        state.metrics_path = None
+        state.cfg_fingerprint = None
+        state.progress_value_from_cb = 0
+        state.phase_text_from_cb = _phase_for(0, debug_enabled=debug_enabled)
+
+        _drain_queue(progress_queue)
+
+        run_id = uuid4().hex
+        state.run_id = run_id
+        callback = make_cb(progress_queue, run_id, debug_enabled)
+
+        def _job() -> tuple[str, Report]:
+            report = _run_pipeline(
+                video_path=video_path,
+                cfg=cfg,
+                prefetched_detection=prefetched_detection,
+                progress_cb=callback,
+            )
+            return run_id, report
+
+        state.analysis_future = executor.submit(_job)
+        try:
+            st.rerun()
+        except Exception:
+            st.experimental_rerun()
+        return
+
+    future = state.analysis_future
+    with st.status("Analizando vídeo...", expanded=True) as status:
+        latest_progress = getattr(state, "progress_value_from_cb", 0)
+        latest_phase = getattr(
+            state,
+            "phase_text_from_cb",
+            _phase_for(latest_progress, debug_enabled=debug_enabled),
+        )
+        bar = st.progress(latest_progress)
+        progress_message = status.empty()
+
+        status.update(
+            label=f"Analizando vídeo... {latest_progress}%",
+            state="running",
+            expanded=True,
+        )
+        bar.progress(latest_progress)
+        progress_message.markdown(
+            f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+        )
+
+        while future and not future.done():
+            state = _get_state()
+            if state.run_id is None:
+                state.report = None
+                state.count_path = None
+                state.metrics_path = None
+                state.cfg_fingerprint = None
+                state.last_run_success = False
+                state.progress_value_from_cb = latest_progress
+                state.phase_text_from_cb = latest_phase
+                state.analysis_future = None
+                state.pipeline_error = "Análisis cancelado por el usuario."
+                state.step = "results"
+                _drain_queue(progress_queue)
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+                return
+            while True:
+                try:
+                    msg_run_id, progress, phase = progress_queue.get_nowait()
+                except Empty:
+                    break
+                if msg_run_id != state.run_id:
+                    continue
+                clamped_progress = max(latest_progress, progress)
+                if clamped_progress != progress:
+                    phase = _phase_for(
+                        clamped_progress, debug_enabled=debug_enabled
+                    )
+                latest_progress = clamped_progress
+                latest_phase = phase
+                state.progress_value_from_cb = clamped_progress
+                state.phase_text_from_cb = phase
+
+            status.update(
+                label=f"Analizando vídeo... {latest_progress}%",
+                state="running",
+                expanded=True,
+            )
+            bar.progress(latest_progress)
+            progress_message.markdown(
+                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+            )
+            time.sleep(0.2)
+            future = state.analysis_future
+
+        state = _get_state()
+        current_future = state.analysis_future
+        if not current_future:
+            latest_phase = "Cancelado"
+            state.pipeline_error = "Análisis cancelado por el usuario."
+            state.report = None
+            state.count_path = None
+            state.metrics_path = None
+            state.cfg_fingerprint = None
+            state.last_run_success = False
+            state.progress_value_from_cb = latest_progress
+            state.phase_text_from_cb = latest_phase
+            status.update(label="Análisis cancelado", state="error", expanded=True)
+            bar.progress(latest_progress)
+            progress_message.markdown(
+                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+            )
+            _drain_queue(progress_queue)
+            state.run_id = None
+            state.step = "results"
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
+            return
+
+        try:
+            while True:
+                try:
+                    msg_run_id, progress, phase = progress_queue.get_nowait()
+                except Empty:
+                    break
+                if msg_run_id != state.run_id:
+                    continue
+                clamped_progress = max(latest_progress, progress)
+                if clamped_progress != progress:
+                    phase = _phase_for(
+                        clamped_progress, debug_enabled=debug_enabled
+                    )
+                latest_progress = clamped_progress
+                latest_phase = phase
+            state.progress_value_from_cb = latest_progress
+            state.phase_text_from_cb = latest_phase
+
+            try:
+                completed_run_id, report = current_future.result()
+                _drain_queue(progress_queue)
+            except CancelledError:
+                latest_phase = "Cancelado"
+                state.pipeline_error = "Análisis cancelado por el usuario."
+                state.report = None
+                state.count_path = None
+                state.metrics_path = None
+                state.cfg_fingerprint = None
+                state.last_run_success = False
+                state.progress_value_from_cb = latest_progress
+                state.phase_text_from_cb = latest_phase
+                state.run_id = None
+                status.update(
+                    label="Análisis cancelado",
+                    state="error",
+                    expanded=True,
+                )
+                bar.progress(latest_progress)
+                progress_message.markdown(
+                    f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                )
+                _drain_queue(progress_queue)
+                state.analysis_future = None
+                state.step = "results"
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+                return
+
+            if state.run_id != completed_run_id:
+                latest_phase = "Cancelado"
+                state.pipeline_error = "Análisis cancelado por el usuario."
+                state.report = None
+                state.count_path = None
+                state.metrics_path = None
+                state.cfg_fingerprint = None
+                state.last_run_success = False
+                state.progress_value_from_cb = latest_progress
+                state.phase_text_from_cb = latest_phase
+                state.run_id = None
+                status.update(
+                    label="Análisis cancelado",
+                    state="error",
+                    expanded=False,
+                )
+                bar.progress(latest_progress)
+                progress_message.markdown(
+                    f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+                )
+                _drain_queue(progress_queue)
+                state.analysis_future = None
+                state.step = "results"
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+                return
+
+            state.pipeline_error = None
+            state.report = report
+            state.cfg_fingerprint = report.stats.config_sha1
+
+            file_errors: list[str] = []
+            video_path = state.video_path
+            if video_path:
+                counts_dir = Path(report.config_used.output.counts_dir)
+                poses_dir = Path(report.config_used.output.poses_dir)
+                try:
+                    counts_dir.mkdir(parents=True, exist_ok=True)
+                    poses_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as io_exc:
+                    file_errors.append(f"Could not prepare output directories: {io_exc}")
+
+                video_stem = Path(video_path).stem
+                try:
+                    count_path = counts_dir / f"{video_stem}_count.txt"
+                    count_path.write_text(
+                        f"{report.repetitions}\n", encoding="utf-8"
+                    )
+                    state.count_path = str(count_path)
+                except OSError as io_exc:
+                    state.count_path = None
+                    file_errors.append(f"Could not write repetition count: {io_exc}")
+
+                metrics_df = report.metrics
+                if metrics_df is not None:
+                    try:
+                        metrics_path = poses_dir / f"{video_stem}_metrics.csv"
+                        metrics_df.to_csv(metrics_path, index=False)
+                        state.metrics_path = str(metrics_path)
+                    except OSError as io_exc:
+                        state.metrics_path = None
+                        file_errors.append(f"Could not write metrics: {io_exc}")
+                else:
+                    state.metrics_path = None
+            else:
+                state.count_path = None
+                state.metrics_path = None
+
+            latest_progress = 100
+            latest_phase = _phase_for(100, debug_enabled=debug_enabled)
+            state.progress_value_from_cb = latest_progress
+            state.phase_text_from_cb = latest_phase
+            bar.progress(latest_progress)
+
+            if file_errors:
+                state.pipeline_error = "\n".join(file_errors)
+                state.last_run_success = False
+                status.update(
+                    label="Análisis completado con errores",
+                    state="error",
+                    expanded=True,
+                )
+            else:
+                state.last_run_success = True
+                status.update(
+                    label="Análisis completado!",
+                    state="complete",
+                    expanded=False,
+                )
+
+            progress_message.markdown(
+                f"**Fase actual:** {latest_phase} ({latest_progress}%)"
+            )
+        except Exception as exc:
+            state.pipeline_error = f"Error en el hilo de análisis: {exc}"
+            state.report = None
+            state.count_path = None
+            state.metrics_path = None
+            state.cfg_fingerprint = None
+            state.progress_value_from_cb = latest_progress
+            state.phase_text_from_cb = latest_phase
+            state.last_run_success = False
+            status.update(label="Error en el análisis", state="error", expanded=True)
+        finally:
+            _drain_queue(progress_queue)
+            state = _get_state()
+            state.run_id = None
+            if state.analysis_future is current_future:
+                state.analysis_future = None
+                state.step = "results"
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
+            return
 
 
 def _results_panel() -> Dict[str, bool]:
