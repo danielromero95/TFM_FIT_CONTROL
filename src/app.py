@@ -20,7 +20,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Gym Performance Analysis")
+st.set_page_config(layout="wide", page_title="Exercise Performance Analicer")
 
 # --- Ensure Windows loads codec DLLs from the active conda env first -----------
 if sys.platform.startswith("win"):
@@ -142,13 +142,12 @@ def _inject_css() -> None:
         height: 48px;
         padding-right: 140px;
         position: relative;
+        display: flex;
+        align-items: center;
       }
-      header[data-testid="stHeader"]::before {
-        content: "Gym Performance Analysis";
-        position: absolute;
-        left: 16px;
-        top: 50%;
-        transform: translateY(-50%);
+      header[data-testid="stHeader"] .app-toolbar-title {
+        margin-left: 16px;
+        margin-right: auto;
         color: #e5e7eb;
         font-weight: 700;
         font-size: 18px;
@@ -238,10 +237,10 @@ def _inject_css() -> None:
       /* Keep title above content and safe on very narrow viewports */
       header[data-testid="stHeader"] { z-index: 1000; }
       @media (max-width: 520px) {
-        header[data-testid="stHeader"]::before { font-size: 16px; }
+        header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
       }
       @media (max-width: 420px) {
-        header[data-testid="stHeader"]::before { display: none; }
+        header[data-testid="stHeader"] .app-toolbar-title { display: none; }
       }
 
       /* Slightly larger click targets for nav buttons */
@@ -314,6 +313,78 @@ def _inject_css() -> None:
         width: 100%;
       }
     </style>
+    <script>
+      (() => {
+        const TITLE = "Exercise Performance Analicer";
+        const doc = (window.parent && window.parent.document) ? window.parent.document : document;
+        if (!doc || doc.__appToolbarTitleInit) {
+          if (doc && doc.__appToolbarTitleInit && doc.__appToolbarTitleInit.ensure) {
+            doc.__appToolbarTitleInit.ensure();
+          }
+          return;
+        }
+
+        const headerObserver = new MutationObserver(() => {
+          ensure(false);
+        });
+
+        const attachObserver = () => {
+          const header = doc.querySelector('header[data-testid="stHeader"]');
+          if (!header) {
+            headerObserver.disconnect();
+            return false;
+          }
+          headerObserver.disconnect();
+          headerObserver.observe(header, { childList: true });
+          return true;
+        };
+
+        function ensure(reattach = true) {
+          const header = doc.querySelector('header[data-testid="stHeader"]');
+          if (!header) {
+            return false;
+          }
+          let title = header.querySelector('.app-toolbar-title');
+          if (!title) {
+            title = doc.createElement('div');
+            title.className = 'app-toolbar-title';
+            header.insertBefore(title, header.firstChild);
+          }
+          if (title.textContent !== TITLE) {
+            title.textContent = TITLE;
+          }
+          if (reattach) {
+            attachObserver();
+          }
+          return true;
+        }
+
+        const ensureWithRetry = () => {
+          if (ensure()) {
+            return;
+          }
+          const retryInterval = setInterval(() => {
+            if (ensure()) {
+              clearInterval(retryInterval);
+            }
+          }, 150);
+          setTimeout(() => clearInterval(retryInterval), 5000);
+        };
+
+        const init = () => {
+          ensureWithRetry();
+          attachObserver();
+        };
+
+        if (doc.readyState === 'loading') {
+          doc.addEventListener('DOMContentLoaded', init, { once: true });
+        } else {
+          init();
+        }
+
+        doc.__appToolbarTitleInit = { ensure: ensureWithRetry };
+      })();
+    </script>
     """,
         unsafe_allow_html=True,
     )
