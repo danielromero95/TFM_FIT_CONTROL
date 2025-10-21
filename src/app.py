@@ -20,7 +20,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Exercise Performance Analicer")
+st.set_page_config(layout="wide", page_title="Exercise Performance Analyzer")
 
 # --- Ensure Windows loads codec DLLs from the active conda env first -----------
 if sys.platform.startswith("win"):
@@ -378,7 +378,7 @@ def _inject_css_from_file() -> None:
     </style>
     <script>
       (() => {
-        const TITLE = "Exercise Performance Analicer";
+        const TITLE = "Exercise Performance Analyzer";
         const doc = (window.parent && window.parent.document) ? window.parent.document : document;
         if (!doc || doc.__appToolbarTitleInit) {
           if (doc && doc.__appToolbarTitleInit && doc.__appToolbarTitleInit.ensure) {
