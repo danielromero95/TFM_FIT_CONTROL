@@ -194,7 +194,9 @@ def _inject_css_from_file() -> None:
         min-height: 38px;
       }
 
-      div[data-testid="stButton"][aria-label="Back"] > button {
+      /* Target the Streamlit button that follows our marker */
+      .btn-danger + div .stButton > button,
+      .btn-danger + div button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
@@ -203,13 +205,15 @@ def _inject_css_from_file() -> None:
         border: 1px solid rgba(239, 68, 68, .6) !important;
         transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
       }
-      div[data-testid="stButton"][aria-label="Back"] > button:hover {
-        background: rgba(239, 68, 68, .10) !important;
-        border-color: rgba(239, 68, 68, .9) !important;
+      .btn-danger + div .stButton > button:hover,
+      .btn-danger + div button:hover {
+        background: rgba(239,68,68,.10) !important;
+        border-color: rgba(239,68,68,.9) !important;
         transform: translateY(-1px);
       }
 
-      div[data-testid="stButton"][aria-label="Continue"] > button {
+      .btn-success + div .stButton > button,
+      .btn-success + div button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
@@ -219,13 +223,15 @@ def _inject_css_from_file() -> None:
         box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
         transition: transform .15s ease, box-shadow .15s ease;
       }
-      div[data-testid="stButton"][aria-label="Continue"] > button:hover {
+      .btn-success + div .stButton > button:hover,
+      .btn-success + div button:hover {
         transform: translateY(-1px);
         box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
       }
 
-      div[data-testid="stButton"][aria-label="Back"] > button[disabled],
-      div[data-testid="stButton"][aria-label="Continue"] > button[disabled] {
+      /* Disabled state */
+      .btn-danger + div .stButton > button[disabled],
+      .btn-success + div .stButton > button[disabled] {
         opacity: .55 !important;
         transform: none !important;
         box-shadow: none !important;
@@ -572,11 +578,7 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        render_uniform_video(
-            str(state.video_path),
-            key="detect_video",
-            bottom_margin=0.0,
-        )
+        render_uniform_video(str(state.video_path), key="detect_video")
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
