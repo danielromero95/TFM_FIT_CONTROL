@@ -49,7 +49,7 @@ from src.pipeline import Report
 
 from src.services.analysis_service import run_pipeline
 from src.detect.exercise_detector import detect_exercise
-from src.ui.video import render_uniform_video
+from src.ui import render_uniform_video
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -117,15 +117,6 @@ def _drain_queue(queue: SimpleQueue) -> None:
             queue.get_nowait()
         except Empty:
             break
-
-
-def _render_video(path: str | os.PathLike[str], *, start_time: int = 0) -> None:
-    """Render a video inside a fixed-size viewport for visual consistency."""
-
-    st.markdown('<div class="app-video-marker"></div>', unsafe_allow_html=True)
-    st.video(str(path), start_time=start_time)
-
-
 def _get_state(*, inject_css: bool = True) -> AppState:
     if inject_css and threading.current_thread() is threading.main_thread():
         _inject_css_from_file()
@@ -179,39 +170,6 @@ def _inject_css_from_file() -> None:
         text-overflow: ellipsis;
         display: block;
         z-index: 2;
-      }
-
-      .uniform-video-wrapper {
-        width: min(100%, 960px);
-        margin: 0 auto 1.5rem;
-      }
-
-      .uniform-video-aspect {
-        position: relative;
-        width: 100%;
-        padding-top: 56.25%;
-        background: #000;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.45);
-      }
-
-      .uniform-video-aspect [data-testid="stVideo"] {
-        position: absolute !important;
-        inset: 0;
-        width: 100% !important;
-        height: 100% !important;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .uniform-video-aspect video,
-      .uniform-video-aspect iframe {
-        width: 100% !important;
-        height: 100% !important;
-        object-fit: contain;
-        background: #000;
       }
 
       .step-detect .form-label {
@@ -274,28 +232,6 @@ def _inject_css_from_file() -> None:
       .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
 
       .spacer-sm { height: .5rem; }
-
-      /* Video players share a fixed viewport to keep sizing consistent */
-      .app-video-marker + div[data-testid="stVideoBlock"] {
-        width: 100%;
-        max-width: 520px;
-        aspect-ratio: 16 / 9;
-        background: #000;
-        border-radius: 12px;
-        overflow: hidden;
-        margin: 0 auto 1rem auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-      }
-
-      .app-video-marker + div[data-testid="stVideoBlock"] video {
-        width: 100% !important;
-        height: 100% !important;
-        object-fit: contain;
-        background: #000;
-      }
 
       /* Keep title above content and safe on very narrow viewports */
       header[data-testid="stHeader"] { z-index: 1000; }
@@ -632,7 +568,8 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        _render_video(video_path)
+        render_uniform_video(str(state.video_path), key="detect_video")
+        st.caption("custom 16:9 player active (detect)")
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -1303,7 +1240,11 @@ def _results_panel() -> Dict[str, bool]:
         if report.debug_video_path and bool(
             (state.configure_values or {}).get("debug_video", True)
         ):
-            _render_video(report.debug_video_path)
+            render_uniform_video(
+                str(report.debug_video_path),
+                key="results_debug_video",
+            )
+            st.caption("custom 16:9 player active (results)")
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1360,7 +1301,11 @@ def _results_panel() -> Dict[str, bool]:
 
             if state.video_path:
                 st.markdown("### Original video")
-                _render_video(state.video_path)
+                render_uniform_video(
+                    str(state.video_path),
+                    key="results_original_video",
+                )
+                st.caption("custom 16:9 player active (results)")
 
         if state.metrics_path is not None:
             metrics_data = None
