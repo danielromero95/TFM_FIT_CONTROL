@@ -128,7 +128,7 @@ def _render_video(path: str | os.PathLike[str], *, start_time: int = 0) -> None:
 
 def _get_state(*, inject_css: bool = True) -> AppState:
     if inject_css and threading.current_thread() is threading.main_thread():
-        _inject_css()
+        _inject_css_from_file()
     if "app_state" not in st.session_state:
         st.session_state.app_state = AppState()
     state: AppState = st.session_state.app_state
@@ -139,7 +139,16 @@ def _get_state(*, inject_css: bool = True) -> AppState:
     return state
 
 
-def _inject_css() -> None:
+def _inject_css_from_file() -> None:
+    """Reads the CSS file and injects it into the app."""
+    css_path = Path(__file__).parent / "ui" / "styles.css"
+    try:
+        css = css_path.read_text()
+    except FileNotFoundError:
+        st.error("Custom CSS file not found. Please check the path.")
+        return
+
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
     st.markdown(
         """
     <style>
@@ -442,6 +451,8 @@ def _inject_css() -> None:
     """,
         unsafe_allow_html=True,
     )
+
+
 def _reset_state(*, preserve_upload: bool = False) -> None:
     state = _get_state()
     video_path = state.video_path
