@@ -37,6 +37,9 @@ YAW_SIDE_MIN_DEG = 25.0
 Z_DELTA_FRONT_MAX = 0.08               # normalized MediaPipe units (smaller is more front)
 SIDE_WIDTH_MAX = 0.50                  # if width_norm mean ≤ this, likely side
 
+VIEW_SCORE_PER_EVIDENCE_THRESHOLD = 0.25
+VIEW_MARGIN_PER_EVIDENCE_THRESHOLD = 0.12
+
 CLASSIFICATION_MARGIN = 0.15
 MIN_CONFIDENCE_SCORE = 0.50
 
@@ -453,12 +456,35 @@ def _finite_stat(series: np.ndarray | None, reducer) -> float:
     return float(reducer(finite))
 
 
+def _finite_percentile(series: np.ndarray | None, percentile: float) -> float:
+    if series is None or series.size == 0:
+        return float("nan")
+    finite = series[np.isfinite(series)]
+    if finite.size == 0:
+        return float("nan")
+    percentile = float(np.clip(percentile, 0.0, 100.0))
+    return float(np.percentile(finite, percentile))
+
+
 def _score(value: float, threshold: float, scale: float = 1.5) -> float:
     if threshold <= 0:
         return 0.0
     if value <= 0:
         return 0.0
     ratio = value / threshold
+    ratio = max(0.0, min(ratio, scale * 2.0))
+    return ratio
+
+
+def _score_inverse(value: float, threshold: float, scale: float = 1.5) -> float:
+    if threshold <= 0:
+        return 0.0
+    if value <= 0:
+        return 0.0
+    headroom = threshold - value
+    if headroom <= 0:
+        return 0.0
+    ratio = headroom / threshold
     ratio = max(0.0, min(ratio, scale * 2.0))
     return ratio
 
@@ -480,31 +506,101 @@ def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:
     return labels[max_index], confidence
 
 
+def _pick_view_label(scores: Dict[str, float], evidence: int) -> str:
+    if not scores:
+        return "unknown"
+
+    labels = list(scores.keys())
+    values = np.array(list(scores.values()), dtype=float)
+    finite_mask = np.isfinite(values)
+    if not finite_mask.any():
+        return "unknown"
+
+    values = values[finite_mask]
+    labels = [label for label, mask in zip(labels, finite_mask) if mask]
+
+    max_index = int(np.argmax(values))
+    max_value = float(values[max_index])
+    if max_value <= 0:
+        return "unknown"
+
+    if values.size > 1:
+        sorted_values = np.sort(values)
+        second_best = float(sorted_values[-2])
+    else:
+        second_best = 0.0
+
+    evidence = max(1, int(evidence))
+    min_required = VIEW_SCORE_PER_EVIDENCE_THRESHOLD * evidence
+    margin_required = VIEW_MARGIN_PER_EVIDENCE_THRESHOLD * evidence
+
+    if max_value < min_required:
+        return "unknown"
+
+    if (max_value - second_best) < margin_required:
+        return "unknown"
+
+    return labels[max_index]
+
+
 def _classify_view(
     shoulder_width_series: np.ndarray | None,
     shoulder_yaw_series: np.ndarray | None = None,
     shoulder_z_delta_series: np.ndarray | None = None,
 ) -> str:
     yaw_med = _finite_stat(shoulder_yaw_series, np.median)
+    yaw_p75 = _finite_percentile(shoulder_yaw_series, 75)
     z_med = _finite_stat(shoulder_z_delta_series, np.median)
     width_mean = _finite_stat(shoulder_width_series, np.mean)
     width_std = _finite_stat(shoulder_width_series, np.std)
+    width_p10 = _finite_percentile(shoulder_width_series, 10)
 
-    yaw_available = np.isfinite(yaw_med) and np.isfinite(z_med)
+    front_score = 0.0
+    side_score = 0.0
+    evidence = 0
 
-    if yaw_available:
-        if yaw_med <= YAW_FRONT_MAX_DEG and z_med <= Z_DELTA_FRONT_MAX:
-            return "front"
-        if yaw_med >= YAW_SIDE_MIN_DEG:
-            return "side"
-        if np.isfinite(width_mean) and width_mean <= SIDE_WIDTH_MAX:
-            return "side"
+    if np.isfinite(yaw_med):
+        front_score += _score_inverse(yaw_med, YAW_FRONT_MAX_DEG, scale=2.0)
+        evidence += 1
+    if np.isfinite(yaw_p75):
+        side_score += _score(yaw_p75, YAW_SIDE_MIN_DEG, scale=2.0)
 
-    if np.isfinite(width_mean) and np.isfinite(width_std):
-        if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD and width_std <= VIEW_WIDTH_STD_THRESHOLD:
-            return "front"
+    if np.isfinite(z_med):
+        front_score += _score_inverse(z_med, Z_DELTA_FRONT_MAX, scale=2.0)
+        side_score += _score(z_med, Z_DELTA_FRONT_MAX * 1.6, scale=2.0)
+        evidence += 1
 
     if np.isfinite(width_mean):
-        return "side"
+        front_score += _score(width_mean, VIEW_FRONT_WIDTH_THRESHOLD, scale=2.0)
+        side_score += _score_inverse(width_mean, SIDE_WIDTH_MAX, scale=2.0)
+        evidence += 1
 
-    return "unknown"
+    if np.isfinite(width_std):
+        front_score += _score_inverse(width_std, VIEW_WIDTH_STD_THRESHOLD, scale=2.0)
+        side_score += _score(width_std, VIEW_WIDTH_STD_THRESHOLD * 0.9, scale=2.0)
+        evidence += 1
+
+    if np.isfinite(width_p10):
+        front_score += _score(width_p10, VIEW_FRONT_WIDTH_THRESHOLD * 0.9, scale=1.8)
+        side_score += _score_inverse(width_p10, SIDE_WIDTH_MAX * 1.1, scale=1.8)
+
+    scores = {"front": float(front_score), "side": float(side_score)}
+    view = _pick_view_label(scores, evidence)
+
+    logger.info(
+        "VIEW DEBUG — scores=%s evidence=%d yawMed=%.1f yawP75=%.1f zMed=%.3f widthMean=%.3f "
+        "widthStd=%.3f widthP10=%.3f",
+        scores,
+        evidence,
+        float(yaw_med) if np.isfinite(yaw_med) else float("nan"),
+        float(yaw_p75) if np.isfinite(yaw_p75) else float("nan"),
+        float(z_med) if np.isfinite(z_med) else float("nan"),
+        float(width_mean) if np.isfinite(width_mean) else float("nan"),
+        float(width_std) if np.isfinite(width_std) else float("nan"),
+        float(width_p10) if np.isfinite(width_p10) else float("nan"),
+    )
+
+    if view == "unknown" and np.isfinite(width_mean):
+        return "front" if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD else "side"
+
+    return view
