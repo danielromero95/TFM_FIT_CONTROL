@@ -49,6 +49,7 @@ from src.pipeline import Report
 
 from src.services.analysis_service import run_pipeline
 from src.detect.exercise_detector import detect_exercise
+from src.ui.video import render_uniform_video
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -169,6 +170,39 @@ def _inject_css() -> None:
         text-overflow: ellipsis;
         display: block;
         z-index: 2;
+      }
+
+      .uniform-video-wrapper {
+        width: min(100%, 960px);
+        margin: 0 auto 1.5rem;
+      }
+
+      .uniform-video-aspect {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%;
+        background: #000;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.45);
+      }
+
+      .uniform-video-aspect [data-testid="stVideo"] {
+        position: absolute !important;
+        inset: 0;
+        width: 100% !important;
+        height: 100% !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .uniform-video-aspect video,
+      .uniform-video-aspect iframe {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: contain;
+        background: #000;
       }
 
       .step-detect .form-label {
