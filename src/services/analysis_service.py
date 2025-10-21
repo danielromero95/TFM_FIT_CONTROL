@@ -21,7 +21,7 @@ from src.B_pose_estimation.processing import (
 )
 from src.D_modeling.count_reps import count_repetitions_with_config
 from src.F_visualization.video_renderer import render_landmarks_on_video_hq
-from src.detect.exercise_detector import DetectionResult, detect_exercise
+from src.exercise_detection.exercise_detector import DetectionResult, detect_exercise
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline import OutputPaths, Report, RunStats
 

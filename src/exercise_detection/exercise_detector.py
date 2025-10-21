@@ -1,4 +1,4 @@
-# src/detect/exercise_detector.py
+# src/exercise_detection/exercise_detector.py
 """Heuristic exercise detection based on MediaPipe pose landmarks."""
 
 from __future__ import annotations
