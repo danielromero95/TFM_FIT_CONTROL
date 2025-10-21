@@ -2,12 +2,13 @@
 import cv2
 import numpy as np
 import logging
-from src import config
+from src.config import POSE_CONNECTIONS
+from src.config.settings import MODEL_COMPLEXITY, MIN_DETECTION_CONFIDENCE
 
 logger = logging.getLogger(__name__)
 
 class PoseEstimator:
-    def __init__(self, static_image_mode=True, model_complexity=config.MODEL_COMPLEXITY, min_detection_confidence=config.MIN_DETECTION_CONFIDENCE):
+    def __init__(self, static_image_mode=True, model_complexity=MODEL_COMPLEXITY, min_detection_confidence=MIN_DETECTION_CONFIDENCE):
         try:
             from mediapipe.python.solutions import pose as mp_pose_module, drawing_utils as mp_drawing
         except ImportError: raise
@@ -18,13 +19,13 @@ class PoseEstimator:
         if not results.pose_landmarks: return None, image
         landmarks = [{'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility} for lm in results.pose_landmarks.landmark]
         annotated_image = image.copy()
-        self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, config.POSE_CONNECTIONS)
+        self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, POSE_CONNECTIONS)
         return landmarks, annotated_image
     def close(self):
         self.pose.close()
 
 class CroppedPoseEstimator:
-    def __init__(self, static_image_mode=True, model_complexity=config.MODEL_COMPLEXITY, min_detection_confidence=config.MIN_DETECTION_CONFIDENCE, crop_margin=0.15, target_size=(256, 256)):
+    def __init__(self, static_image_mode=True, model_complexity=MODEL_COMPLEXITY, min_detection_confidence=MIN_DETECTION_CONFIDENCE, crop_margin=0.15, target_size=(256, 256)):
         self.crop_margin, self.target_size = crop_margin, target_size
         try:
             from mediapipe.python.solutions import pose as mp_pose_module, drawing_utils as mp_drawing
@@ -49,7 +50,7 @@ class CroppedPoseEstimator:
         annotated_crop = crop_resized.copy()
         if results_crop.pose_landmarks:
             landmarks_crop = [{'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility} for lm in results_crop.pose_landmarks.landmark]
-            self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, config.POSE_CONNECTIONS)
+            self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, POSE_CONNECTIONS)
         else: landmarks_crop = None
         return landmarks_crop, annotated_crop, crop_box
     def close(self):
