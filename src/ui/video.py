@@ -97,6 +97,7 @@ def render_uniform_video(
     format: str | None = None,
     start_time: int = 0,
     key: str | None = None,
+    bottom_margin: float = 1.25,
 ) -> None:
     """Render ``data`` inside a responsive 16:9 viewport."""
 
@@ -170,12 +171,13 @@ def render_uniform_video(
         **html_kwargs,
     )
 
+    margin_value = max(bottom_margin, 0.0)
     st.markdown(
         f"""
         <style>
         #{marker_id} + iframe {{
           width: min(100%, 720px) !important;
-          margin: 0 auto 1.25rem auto !important;
+          margin: 0 auto {margin_value:.2f}rem auto !important;
           display: block !important;
           border-radius: 12px !important;
           background: #000 !important;

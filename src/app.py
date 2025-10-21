@@ -202,7 +202,7 @@ def _inject_css_from_file() -> None:
         min-width: 140px;
         background: transparent !important;
         color: #ef4444 !important;
-        border: 1px solid rgba(239,68,68,.6) !important;
+        border: 1px solid rgba(239, 68, 68, .6) !important;
         transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
       }
       .btn-danger + div .stButton > button:hover,
@@ -217,18 +217,16 @@ def _inject_css_from_file() -> None:
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
-        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
+        background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
         color: #ecfdf5 !important;
-        border: 1px solid rgba(34,197,94,.8) !important;
-        box-shadow: 0 12px 24px rgba(16,185,129,.35);
+        border: 1px solid rgba(34, 197, 94, .8) !important;
+        box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
         transition: transform .15s ease, box-shadow .15s ease;
-        margin-left: auto;
-        display: block;
       }
       .btn-success + div .stButton > button:hover,
       .btn-success + div button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 16px 28px rgba(16,185,129,.45);
+        box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
       }
 
       /* Disabled state */
@@ -256,9 +254,6 @@ def _inject_css_from_file() -> None:
       @media (max-width: 420px) {
         header[data-testid="stHeader"] .app-toolbar-title { display: none; }
       }
-
-      /* Slightly larger click targets for nav buttons */
-      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
 
       /* Pull content closer to the toolbar */
       section[data-testid="stMain"],
@@ -676,18 +671,23 @@ def _detect_step() -> None:
         with actions_placeholder.container():
             back_col, continue_col = st.columns([1, 2])
             with back_col:
-                st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-                if st.button("Back", key="detect_back"):
+                if st.button(
+                    "Back",
+                    key="detect_back",
+                    use_container_width=True,
+                ):
                     state.detect_result = None
                     state.step = "upload"
                     try:
                         st.rerun()
                     except Exception:
                         st.experimental_rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
             with continue_col:
-                st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-                if st.button("Continue", key="detect_continue"):
+                if st.button(
+                    "Continue",
+                    key="detect_continue",
+                    use_container_width=True,
+                ):
                     if current_exercise == DEFAULT_EXERCISE_LABEL:
                         detect_result = state.detect_result
                         if (
@@ -741,7 +741,6 @@ def _detect_step() -> None:
                     else:
                         state.detect_result = None
                         state.step = "configure"
-                st.markdown("</div>", unsafe_allow_html=True)
     else:
         actions_placeholder.empty()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -837,16 +836,19 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         run_active = bool(state.analysis_future and not state.analysis_future.done())
         col_back, col_forward = st.columns(2)
         with col_back:
-            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Back", key="configure_back", disabled=run_active):
+            if st.button(
+                "Back",
+                key="configure_back",
+                disabled=run_active,
+                use_container_width=True,
+            ):
                 state.step = "detect"
-            st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
-            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button(
                 "Continue",
                 key="configure_continue",
                 disabled=run_active,
+                use_container_width=True,
             ):
                 state.configure_values = current_values
                 state.step = "running"
@@ -854,7 +856,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                     st.rerun()
                 except Exception:
                     st.experimental_rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _running_step() -> None:
