@@ -1271,7 +1271,7 @@ def _results_panel() -> Dict[str, bool]:
 
         if metrics_df is not None:
             st.markdown("#### Calculated metrics")
-            st.dataframe(metrics_df, use_container_width=True)
+            st.dataframe(metrics_df, width="stretch")
             numeric_columns = [
                 col
                 for col in metrics_df.columns
@@ -1295,7 +1295,7 @@ def _results_panel() -> Dict[str, bool]:
 
         with st.expander("Run statistics (optional)", expanded=False):
             try:
-                st.dataframe(stats_df, use_container_width=True)
+                st.dataframe(stats_df, width="stretch")
             except Exception:
                 st.json({row["Field"]: row["Value"] for row in stats_rows})
 
