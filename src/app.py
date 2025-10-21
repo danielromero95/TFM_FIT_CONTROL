@@ -325,30 +325,29 @@ def _inject_css_from_file() -> None:
     <script>
       (() => {
         const TITLE = "Exercise Performance Analyzer";
+        const ENHANCER_KEY = '__appEnhancer';
         const doc = (window.parent && window.parent.document) ? window.parent.document : document;
-        if (!doc || doc.__appToolbarTitleInit) {
-          if (doc && doc.__appToolbarTitleInit && doc.__appToolbarTitleInit.ensure) {
-            doc.__appToolbarTitleInit.ensure();
-          }
+        if (!doc) {
+          return;
+        }
+
+        const existingEnhancer = doc[ENHANCER_KEY];
+        if (existingEnhancer && typeof existingEnhancer.init === 'function') {
+          existingEnhancer.init();
           return;
         }
 
         const headerObserver = new MutationObserver(() => {
-          ensure(false);
+          ensureToolbarTitle(false);
         });
 
-        const attachObserver = () => {
-          const header = doc.querySelector('header[data-testid="stHeader"]');
-          if (!header) {
-            headerObserver.disconnect();
-            return false;
-          }
-          headerObserver.disconnect();
-          headerObserver.observe(header, { childList: true });
-          return true;
-        };
+        const mainObserver = new MutationObserver(() => {
+          scheduleEnhancements();
+        });
 
-        function ensure(reattach = true) {
+        let enhancementFrame = null;
+
+        function ensureToolbarTitle(reattach = true) {
           const header = doc.querySelector('header[data-testid="stHeader"]');
           if (!header) {
             return false;
@@ -363,27 +362,121 @@ def _inject_css_from_file() -> None:
             title.textContent = TITLE;
           }
           if (reattach) {
-            attachObserver();
+            attachHeaderObserver();
           }
           return true;
         }
 
-        const ensureWithRetry = () => {
-          if (ensure()) {
+        function ensureToolbarTitleWithRetry() {
+          if (ensureToolbarTitle()) {
             return;
           }
           const retryInterval = setInterval(() => {
-            if (ensure()) {
+            if (ensureToolbarTitle()) {
               clearInterval(retryInterval);
             }
           }, 150);
           setTimeout(() => clearInterval(retryInterval), 5000);
-        };
+        }
 
-        const init = () => {
-          ensureWithRetry();
-          attachObserver();
-        };
+        function attachHeaderObserver() {
+          const header = doc.querySelector('header[data-testid="stHeader"]');
+          if (!header) {
+            headerObserver.disconnect();
+            return false;
+          }
+          headerObserver.disconnect();
+          headerObserver.observe(header, { childList: true });
+          return true;
+        }
+
+        function attachMainObserver() {
+          const main = doc.querySelector('main');
+          if (!main) {
+            mainObserver.disconnect();
+            return false;
+          }
+          mainObserver.disconnect();
+          mainObserver.observe(main, { childList: true, subtree: true });
+          return true;
+        }
+
+        function scheduleEnhancements() {
+          if (enhancementFrame !== null) {
+            return;
+          }
+          const requestFrame = window.requestAnimationFrame || function (cb) { return setTimeout(cb, 16); };
+          enhancementFrame = requestFrame(() => {
+            enhancementFrame = null;
+            applyEnhancements();
+          });
+        }
+
+        function applyEnhancements() {
+          ensureToolbarTitle(false);
+          applyNavButtonClasses();
+          tagDetectStep();
+        }
+
+        function applyNavButtonClasses() {
+          const wrappers = doc.querySelectorAll('div[data-testid="stButton"]');
+          wrappers.forEach((wrapper) => {
+            wrapper.classList.remove('app-button-wrapper');
+          });
+
+          const buttons = doc.querySelectorAll('div[data-testid="stButton"] button');
+          buttons.forEach((button) => {
+            const text = (button.textContent || '').trim().toLowerCase();
+            button.classList.remove('app-button', 'app-button--back', 'app-button--continue', 'app-button--disabled');
+            if (!text) {
+              return;
+            }
+
+            if (text === 'back') {
+              button.classList.add('app-button', 'app-button--back');
+              const wrapper = button.closest('div[data-testid="stButton"]');
+              if (wrapper) {
+                wrapper.classList.add('app-button-wrapper');
+              }
+            }
+
+            if (text === 'continue') {
+              button.classList.add('app-button', 'app-button--continue');
+              const wrapper = button.closest('div[data-testid="stButton"]');
+              if (wrapper) {
+                wrapper.classList.add('app-button-wrapper');
+              }
+            }
+
+            if (button.disabled) {
+              button.classList.add('app-button--disabled');
+            }
+          });
+        }
+
+        function tagDetectStep() {
+          doc.querySelectorAll('.app-step-detect').forEach((node) => {
+            node.classList.remove('app-step-detect');
+          });
+          const headings = Array.from(doc.querySelectorAll('h3'));
+          for (const heading of headings) {
+            const label = (heading.textContent || '').trim().toLowerCase();
+            if (!label.startsWith('2. detect the exercise')) {
+              continue;
+            }
+            const block = heading.closest('[data-testid="stVerticalBlock"]');
+            if (block) {
+              block.classList.add('app-step-detect');
+            }
+          }
+        }
+
+        function init() {
+          ensureToolbarTitleWithRetry();
+          attachHeaderObserver();
+          attachMainObserver();
+          applyEnhancements();
+        }
 
         if (doc.readyState === 'loading') {
           doc.addEventListener('DOMContentLoaded', init, { once: true });
@@ -391,7 +484,11 @@ def _inject_css_from_file() -> None:
           init();
         }
 
-        doc.__appToolbarTitleInit = { ensure: ensureWithRetry };
+        doc[ENHANCER_KEY] = {
+          init,
+          ensure: ensureToolbarTitleWithRetry,
+        };
+        doc.__appToolbarTitleInit = doc[ENHANCER_KEY];
       })();
     </script>
     """,
@@ -574,7 +671,6 @@ def _upload_step() -> None:
 
 def _detect_step() -> None:
     st.markdown("### 2. Detect the exercise")
-    st.markdown('<div class="step step-detect">', unsafe_allow_html=True)
     state = _get_state()
     video_path = state.video_path
     if video_path:
@@ -611,7 +707,7 @@ def _detect_step() -> None:
         state.detect_result = None
         detect_result = None
 
-    select_col_label, select_col_control = st.columns([1, 2])
+    select_col_label, select_col_control = st.columns([1, 2], gap="small")
     with select_col_label:
         st.markdown(
             '<div class="form-label form-label--inline">Select the exercise</div>',
@@ -743,7 +839,6 @@ def _detect_step() -> None:
                         state.step = "configure"
     else:
         actions_placeholder.empty()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:

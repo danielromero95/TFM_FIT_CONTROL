@@ -49,6 +49,16 @@ header[data-testid="stHeader"]::before {
     border-radius: 12px !important;
     min-height: 40px;
     min-width: 140px;
+    font-weight: 600;
+    font-size: .95rem;
+    letter-spacing: .01em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.app-button--back {
     background: transparent !important;
     color: #ef4444 !important;
     border: 1px solid rgba(239, 68, 68, .6) !important;
@@ -191,6 +201,24 @@ main [data-testid="column"] > div {
 }
 .results-panel [data-testid="column"] .stButton > button {
     width: 100%;
+}
+
+.app-step-detect iframe {
+    margin-bottom: .15rem !important;
+}
+
+.app-step-detect .form-label--inline {
+    min-height: auto;
+}
+
+.app-step-detect [data-testid="stHorizontalBlock"] {
+    margin-top: .25rem !important;
+    align-items: center !important;
+}
+
+.app-step-detect [data-testid="column"] > div {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
 
 /*
