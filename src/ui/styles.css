@@ -11,7 +11,7 @@ header[data-testid="stHeader"] {
     align-items: center;
 }
 header[data-testid="stHeader"]::before {
-    content: "Exercise Performance Analyzer" !important;
+    content: "Exercise Performance Analicer" !important;
     position: absolute;
     left: 16px;
     top: 50%;
@@ -195,3 +195,40 @@ main [data-testid="column"] > div {
     width: 100%;
 }
 
+/*
+  This is the main container for our videos. It creates the black frame.
+*/
+.video-viewport-container {
+    /* 1. Set a standard max-width and center it */
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto 1.5rem auto;
+
+    /* 2. Enforce a 16:9 landscape aspect ratio */
+    aspect-ratio: 16 / 9;
+
+    /* 3. Style the "box" */
+    background: #000;  /* Black background for pillarboxing */
+    border-radius: 12px;
+    overflow: hidden;
+
+    /* 4. Use flex to center the video inside the box */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/*
+  This targets the actual <video> element *inside* our container.
+*/
+.video-viewport-container video {
+    width: 100%;
+    height: 100%;
+
+    /*
+      THIS IS THE KEY: It scales the video to fit *inside* the
+      container while maintaining its own aspect ratio.
+      This automatically creates the black bars for vertical videos.
+    */
+    object-fit: contain;
+}

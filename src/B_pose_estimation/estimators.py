@@ -3,7 +3,8 @@ import cv2
 import numpy as np
 import logging
 from src.config import POSE_CONNECTIONS
-from src.config.settings import MODEL_COMPLEXITY, MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE
+from src.config.settings import MODEL_COMPLEXITY
 
 logger = logging.getLogger(__name__)
 

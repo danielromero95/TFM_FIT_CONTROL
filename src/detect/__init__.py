@@ -1,10 +1,19 @@
 """Detection utilities for identifying exercises and camera views."""
 
-from .exercise_detector import FeatureSeries, classify_features, detect_exercise, extract_features
+from .exercise_detector import (
+    DetectionResult,
+    FeatureSeries,
+    classify_features,
+    detect_exercise,
+    extract_features,
+    make_detection_result,
+)
 
 __all__ = [
+    "DetectionResult",
     "FeatureSeries",
     "classify_features",
     "detect_exercise",
     "extract_features",
+    "make_detection_result",
 ]

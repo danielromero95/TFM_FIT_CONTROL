@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+import time
 
 import cv2
-import pandas as pd
 
 from src import config
-from src.config.settings import MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE
 from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
-from src.A_preprocessing.video_metadata import get_video_rotation
+from src.A_preprocessing.video_metadata import get_video_rotation, probe_video_metadata
 from src.B_pose_estimation.processing import (
     calculate_metrics_from_sequence,
     extract_landmarks_from_frames,
@@ -22,26 +21,37 @@ from src.B_pose_estimation.processing import (
 )
 from src.D_modeling.count_reps import count_repetitions_with_config
 from src.F_visualization.video_renderer import render_landmarks_on_video_hq
-from src.detect.exercise_detector import detect_exercise
+from src.detect.exercise_detector import DetectionResult, detect_exercise
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline import OutputPaths, Report, RunStats
 
 
 logger = logging.getLogger(__name__)
 
+def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> None:
+    """Call progress callback with (progress, message) if supported; fallback to (progress)."""
+    if not cb:
+        return
+    try:
+        # Nueva firma preferida: (progress, message)
+        cb(progress, message)
+    except TypeError:
+        # Compatibilidad hacia atrás: (progress)
+        cb(progress)
+
 
 def run_pipeline(
     video_path: str,
     cfg: config.Config,
-    progress_callback: Optional[Callable[[int], None]] = None,
+    progress_callback: Optional[Callable[..., None]] = None,
     *,
-    prefetched_detection: Optional[Tuple[str, str, float]] = None,
+    prefetched_detection: Optional[Union[Tuple[str, str, float], DetectionResult]] = None,
 ) -> Report:
     """Execute the full analysis pipeline using ``cfg`` as the single source of truth."""
 
     def notify(progress: int, message: str) -> None:
         logger.info(message)
-        if progress_callback:
-            progress_callback(progress)
+        _notify(progress_callback, progress, message)
 
     config_sha1 = cfg.fingerprint()
     logger.info("CONFIG_SHA1=%s", config_sha1)
@@ -53,8 +63,9 @@ def run_pipeline(
         encoding="utf-8",
     )
 
+    t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
-    fps_original, _frame_count, fps_warning, prefer_reader_fps = _probe_video_metadata(video_path)
+    fps_original, _frame_count, fps_warning, prefer_reader_fps = probe_video_metadata(video_path)
 
     initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
 
@@ -72,42 +83,37 @@ def run_pipeline(
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
-
-    if (fps_original <= 0 or prefer_reader_fps) and fps_from_reader > 0:
-        fps_original = float(fps_from_reader)
-    fps_original = float(fps_original)
-
-    if fps_original <= 0 and fps_from_reader <= 0:
-        warnings.append(
-            "Unable to determine a valid FPS from metadata or reader. Falling back to 1 FPS."
-        )
-        fps_original = 1.0
-
-    sample_rate = initial_sample_rate
-    if initial_sample_rate == 1 and cfg.video.target_fps and cfg.video.target_fps > 0:
-        recomputed = _compute_sample_rate(fps_original, cfg)
-        if recomputed > 1:
-            frames = frames[::recomputed]
-            sample_rate = recomputed
-
-    fps_effective = fps_original / sample_rate if sample_rate > 0 else fps_original
+    # Plan de muestreo unificado: decide fps_final, sample_rate y fps_effective.
+    sample_rate, fps_effective, fps_original, _sampling_warnings = _plan_sampling(
+        fps_metadata=fps_original,
+        fps_from_reader=float(fps_from_reader),
+        prefer_reader_fps=prefer_reader_fps,
+        initial_sample_rate=initial_sample_rate,
+        cfg=cfg,
+        fps_warning=fps_warning,
+    )
+    warnings.extend(_sampling_warnings)
+    # Si el plan decide mayor sample_rate que el usado en extracción inicial (solo ocurrirá si initial==1),
+    # submuestreamos la lista de frames en memoria.
+    if sample_rate != initial_sample_rate:
+        stride = max(1, int(sample_rate // max(1, initial_sample_rate)))
+        frames = frames[::stride]
     frames_processed = len(frames)
 
-    detected_label = "unknown"
-    detected_view = "unknown"
+    detected_label = ExerciseType.UNKNOWN
+    detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
     if prefetched_detection is not None:
-        detected_label, detected_view, detected_confidence = prefetched_detection
+        detected_label, detected_view, detected_confidence = _normalize_detection(prefetched_detection)
     else:
         try:
-            detected_label, detected_view, detected_confidence = detect_exercise(video_path)
+            detected_label, detected_view, detected_confidence = _normalize_detection(
+                detect_exercise(video_path)
+            )
         except Exception:  # pragma: no cover - defensive logging only
             logger.exception("Automatic exercise detection failed")
 
-    if fps_warning:
-        message = f"{fps_warning} FPS final utilizado: {fps_original:.2f}."
-        logger.warning(message)
-        warnings.append(message)
+    # Mensaje de aviso ya incorporado en _plan_sampling (incluye FPS final).
 
     if frames_processed < cfg.video.min_frames:
         skip_reason = (
@@ -127,6 +133,7 @@ def run_pipeline(
     target_size = (cfg.pose.target_width, cfg.pose.target_height)
     processed_frames = [cv2.resize(frame, target_size) for frame in frames]
 
+    t1 = time.perf_counter()
     notify(25, "STAGE 2: Estimating pose on frames...")
     df_raw_landmarks = extract_landmarks_from_frames(
         frames=processed_frames,
@@ -134,6 +141,7 @@ def run_pipeline(
         visibility_threshold=MIN_DETECTION_CONFIDENCE,
     )
 
+    t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes = filter_and_interpolate_landmarks(df_raw_landmarks)
 
@@ -149,8 +157,10 @@ def run_pipeline(
             fps_effective,
         )
 
+    t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
     df_metrics = calculate_metrics_from_sequence(filtered_sequence, fps_effective)
+    t_metrics_end = time.perf_counter()
 
     primary_angle = cfg.counting.primary_angle
     angle_range = 0.0
@@ -180,6 +190,7 @@ def run_pipeline(
 
     reps = 0
     if skip_reason is None:
+        t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
         reps, debug_info = count_repetitions_with_config(df_metrics, cfg.counting, fps_effective)
         if reps == 0 and not debug_info.valley_indices:
@@ -192,12 +203,21 @@ def run_pipeline(
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
+    notify(100, "PIPELINE COMPLETADO")
+    t5 = time.perf_counter()
+    extract_ms = (t1 - t0) * 1000
+    pose_ms = (t2 - t1) * 1000
+    filter_ms = (t3 - t2) * 1000
+    metrics_ms = (t_metrics_end - t3) * 1000
+    count_ms = (t5 - t4) * 1000 if "t4" in locals() else 0.0
+    total_ms = (t5 - t0) * 1000
+
     stats = RunStats(
         config_sha1=config_sha1,
         fps_original=float(fps_original),
         fps_effective=float(fps_effective),
         frames=frames_processed,
-        exercise_selected=cfg.counting.exercise,
+        exercise_selected=as_exercise(cfg.counting.exercise),
         exercise_detected=detected_label,
         view_detected=detected_view,
         detection_confidence=float(detected_confidence),
@@ -209,9 +229,23 @@ def run_pipeline(
         warnings=warnings,
         skip_reason=skip_reason,
         config_path=config_path,
+        t_extract_ms=float(extract_ms),
+        t_pose_ms=float(pose_ms),
+        t_filter_ms=float(filter_ms),
+        t_metrics_ms=float(metrics_ms),
+        t_count_ms=float(count_ms),
+        t_total_ms=float(total_ms),
     )
 
-    notify(100, "PIPELINE COMPLETADO")
+    logger.info(
+        "TIMINGS extract=%.0fms pose=%.0fms filter=%.0fms metrics=%.0fms count=%.0fms total=%.0fms",
+        extract_ms,
+        pose_ms,
+        filter_ms,
+        metrics_ms,
+        count_ms,
+        total_ms,
+    )
     return Report(
         repetitions=reps if skip_reason is None else 0,
         metrics=df_metrics,
@@ -258,49 +292,68 @@ def _compute_sample_rate(fps: float, cfg: config.Config) -> int:
     return 1
 
 
-def _probe_video_metadata(video_path: str) -> tuple[float, int, Optional[str], bool]:
-    capture = cv2.VideoCapture(video_path)
-    if not capture.isOpened():
-        raise IOError(f"Could not open the video: {video_path}")
-
-    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
-    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    fallback_warning: Optional[str] = None
-    prefer_reader_fps = False
-
-    if fps <= 1.0 or not math.isfinite(fps):
-        duration_sec = _estimate_duration_seconds(capture, frame_count)
-        if duration_sec > 0 and frame_count > 0:
-            estimated_fps = frame_count / duration_sec
-            fallback_warning = (
-                "Invalid metadata FPS. Estimated from video duration "
-                f"({estimated_fps:.2f} fps)."
-            )
-            fps = estimated_fps
-        else:
-            fallback_warning = (
-                "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
-            )
-            fps = 0.0
-            prefer_reader_fps = True
-
-    capture.release()
-    return float(fps), frame_count, fallback_warning, prefer_reader_fps
+def _normalize_detection(
+    detection: Union[DetectionResult, Tuple[str, str, float]]
+) -> Tuple[ExerciseType, ViewType, float]:
+    """Return ``(exercise, view, confidence)`` normalized to enums."""
+    if isinstance(detection, DetectionResult):
+        label, view, confidence = detection.label, detection.view, float(detection.confidence)
+    else:
+        label, view, confidence = detection
+    return as_exercise(label), as_view(view), float(confidence)
 
 
-def _estimate_duration_seconds(capture: cv2.VideoCapture, frame_count: int) -> float:
-    if frame_count <= 1:
-        return 0.0
-    try:
-        last_frame_index = max(frame_count - 1, 0)
-        capture.set(cv2.CAP_PROP_POS_FRAMES, last_frame_index)
-        if capture.grab():
-            duration_msec = capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0
-            return float(duration_msec) / 1000.0 if duration_msec > 0 else 0.0
-    except Exception:  # pragma: no cover - backend dependent fallbacks
-        return 0.0
-    return 0.0
+def _plan_sampling(
+    *,
+    fps_metadata: float,
+    fps_from_reader: float,
+    prefer_reader_fps: bool,
+    initial_sample_rate: int,
+    cfg: config.Config,
+    fps_warning: Optional[str],
+) -> tuple[int, float, float, list[str]]:
+    """
+    Decide el FPS efectivo y el sample_rate final en un único lugar.
 
+    Returns:
+        sample_rate (int): stride final para muestrear frames.
+        fps_effective (float): fps_metadata_final / sample_rate.
+        fps_original_final (float): FPS base decidido (metadata/reader/fallback).
+        warnings (list[str]): advertencias de calidad/estimación.
+    """
+    warnings: list[str] = []
+
+    # 1) Elegir FPS base
+    fps_base = float(fps_metadata)
+    if (fps_base <= 0.0 or prefer_reader_fps) and fps_from_reader > 0.0:
+        fps_base = float(fps_from_reader)
+    if fps_base <= 0.0 and fps_from_reader <= 0.0:
+        warnings.append(
+            "Unable to determine a valid FPS from metadata or reader. Falling back to 1 FPS."
+        )
+        fps_base = 1.0
+
+    # 2) Calcular sample_rate final manteniendo la semántica: si ya extrajimos con sample_rate>1,
+    # no volvemos a submuestrear. Sólo si initial_sample_rate == 1 permitimos aumentar el stride.
+    sample_rate = int(initial_sample_rate)
+    if initial_sample_rate == 1 and cfg.video.target_fps and cfg.video.target_fps > 0:
+        recomputed = _compute_sample_rate(fps_base, cfg)
+        if recomputed > 1:
+            sample_rate = recomputed
+
+    fps_effective = fps_base / sample_rate if sample_rate > 0 else fps_base
+
+    # 3) Avisos
+    if fps_warning:
+        message = f"{fps_warning} FPS final utilizado: {fps_base:.2f}."
+        logger.warning(message)
+        warnings.append(message)
+
+    return sample_rate, float(fps_effective), float(fps_base), warnings
+
+
+# (moved) probe_video_metadata and _estimate_duration_seconds now live in:
+# src/A_preprocessing/video_metadata.py
 
 def _apply_settings(cfg: config.Config, settings: Dict[str, Any]) -> None:
     """Bridge legacy dictionary settings into the structured ``Config`` object."""
