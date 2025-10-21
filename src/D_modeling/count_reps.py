@@ -11,6 +11,7 @@ import pandas as pd
 from scipy.signal import find_peaks
 
 from src import config
+from src.config.settings import PEAK_DISTANCE, PEAK_PROMINENCE, SQUAT_LOW_THRESH
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def count_repetitions_with_config(
 def count_repetitions_from_df(
     df_metrics: pd.DataFrame,
     angle_column: str = "left_knee",
-    low_thresh: float = config.SQUAT_LOW_THRESH,
+    low_thresh: float = SQUAT_LOW_THRESH,
 ) -> int:
     """Legacy helper preserved for backwards compatibility."""
     if df_metrics.empty or angle_column not in df_metrics.columns:
@@ -133,7 +134,7 @@ def count_repetitions_from_df(
 
     reps, _ = count_reps_by_valleys(
         angle_sequence=angles,
-        prominence=float(config.PEAK_PROMINENCE),
-        distance=int(config.PEAK_DISTANCE),
+        prominence=float(PEAK_PROMINENCE),
+        distance=int(PEAK_DISTANCE),
     )
     return reps
