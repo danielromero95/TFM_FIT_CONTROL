@@ -4,7 +4,6 @@ Default tunable parameters and settings for the analysis pipeline and GUI.
 
 # --- PIPELINE PARAMETERS ---
 MODEL_COMPLEXITY = 1
-MIN_DETECTION_CONFIDENCE = 0.5
 DEFAULT_TARGET_WIDTH = 256
 DEFAULT_TARGET_HEIGHT = 256
 

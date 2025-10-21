@@ -11,6 +11,8 @@ from typing import Any, Dict, Tuple
 import cv2
 import numpy as np
 
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
+
 logger = logging.getLogger(__name__)
 
 # --- Tunable thresholds -------------------------------------------------------
@@ -43,9 +45,15 @@ DEFAULT_SAMPLING_RATE = 30.0
 
 @dataclass(frozen=True)
 class DetectionResult:
-    label: str
-    view: str
+    label: ExerciseType
+    view: ViewType
     confidence: float
+
+
+def make_detection_result(label: str, view: str, confidence: float) -> DetectionResult:
+    """Normalize legacy string outputs into the enum-based ``DetectionResult``."""
+
+    return DetectionResult(as_exercise(label), as_view(view), float(confidence))
 
 
 @dataclass

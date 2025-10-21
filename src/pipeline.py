@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
 
 from src import config
+from src.core.types import ExerciseType, ViewType
 
 
 @dataclass
@@ -29,9 +31,9 @@ class RunStats:
     fps_original: float
     fps_effective: float
     frames: int
-    exercise_selected: Optional[str]
-    exercise_detected: str
-    view_detected: str
+    exercise_selected: Optional[ExerciseType | str]
+    exercise_detected: ExerciseType | str
+    view_detected: ViewType | str
     detection_confidence: float
     primary_angle: Optional[str]
     angle_range_deg: float
@@ -41,6 +43,13 @@ class RunStats:
     warnings: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
     config_path: Optional[Path] = None
+    # Stage timings (milliseconds). Optional for backward compatibility.
+    t_extract_ms: Optional[float] = None
+    t_pose_ms: Optional[float] = None
+    t_filter_ms: Optional[float] = None
+    t_metrics_ms: Optional[float] = None
+    t_count_ms: Optional[float] = None
+    t_total_ms: Optional[float] = None
 
 
 @dataclass
@@ -55,11 +64,17 @@ class Report:
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Preserve the dictionary-based API used by the existing front-ends."""
+        stats_dict = asdict(self.stats)
+        for key in ("exercise_selected", "exercise_detected", "view_detected"):
+            val = stats_dict.get(key)
+            if isinstance(val, Enum):
+                stats_dict[key] = val.value
+
         legacy: Dict[str, Any] = {
             "repetition_count": self.repetitions,
             "metrics_dataframe": self.metrics,
             "debug_video_path": str(self.debug_video_path) if self.debug_video_path else None,
-            "stats": asdict(self.stats),
+            "stats": stats_dict,
             "config_sha1": self.stats.config_sha1,
             "warnings": list(self.stats.warnings),
             "config_path": str(self.stats.config_path) if self.stats.config_path else None,

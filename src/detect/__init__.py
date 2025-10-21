@@ -6,6 +6,7 @@ from .exercise_detector import (
     classify_features,
     detect_exercise,
     extract_features,
+    make_detection_result,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "classify_features",
     "detect_exercise",
     "extract_features",
+    "make_detection_result",
 ]
