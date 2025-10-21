@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import inspect
 from base64 import b64encode
 from pathlib import Path
 from typing import BinaryIO, Union
@@ -109,6 +110,15 @@ def render_uniform_video(
 
     padding = 24
     initial_height = int(round(720 * 9 / 16)) + padding
+    html_kwargs: dict[str, object] = {"height": initial_height, "scrolling": False}
+    try:
+        signature = inspect.signature(html)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None and "key" in signature.parameters:
+        if component_key is not None:
+            html_kwargs["key"] = component_key
+
     html(
         f"""
         <div id="{inner_id}" style="width:100%;max-width:720px;margin:0 auto;">
@@ -157,9 +167,7 @@ def render_uniform_video(
           }})();
         </script>
         """,
-        height=initial_height,
-        scrolling=False,
-        key=component_key,
+        **html_kwargs,
     )
 
     st.markdown(
@@ -182,4 +190,3 @@ def render_uniform_video(
         unsafe_allow_html=True,
     )
 
-*** End File
