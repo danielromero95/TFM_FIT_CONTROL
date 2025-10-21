@@ -49,6 +49,7 @@ from src.pipeline import Report
 
 from src.services.analysis_service import run_pipeline
 from src.detect.exercise_detector import detect_exercise
+from src.ui import render_uniform_video
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -120,7 +121,7 @@ def _drain_queue(queue: SimpleQueue) -> None:
 
 def _get_state(*, inject_css: bool = True) -> AppState:
     if inject_css and threading.current_thread() is threading.main_thread():
-        _inject_css()
+        _inject_css_from_file()
     if "app_state" not in st.session_state:
         st.session_state.app_state = AppState()
     state: AppState = st.session_state.app_state
@@ -131,193 +132,18 @@ def _get_state(*, inject_css: bool = True) -> AppState:
     return state
 
 
-def _inject_css() -> None:
+def _inject_css_from_file() -> None:
+    """Reads the CSS file and injects it into the app."""
+    css_path = Path(__file__).parent / "ui" / "styles.css"
+    try:
+        css = css_path.read_text()
+    except FileNotFoundError:
+        st.error("Custom CSS file not found. Please check the path.")
+        return
+
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
     st.markdown(
         """
-    <style>
-      /* --- Top header with inline title --- */
-      header[data-testid="stHeader"] {
-        background: #0f172a;
-        border-bottom: 1px solid #1f2937;
-        height: 48px;
-        padding-right: 140px;
-        position: relative;
-        display: flex;
-        align-items: center;
-      }
-      header[data-testid="stHeader"]::before {
-        content: "Exercise Performance Analicer" !important;
-        position: absolute;
-        left: 16px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #e5e7eb !important;
-        font-weight: 700 !important;
-        font-size: 18px !important;
-        letter-spacing: .2px !important;
-        pointer-events: none;
-        max-width: calc(100% - 180px);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        display: block;
-        z-index: 2;
-      }
-
-      .step-detect .form-label {
-        color: #e5e7eb;
-        font-weight: 600;
-        font-size: 0.875rem;
-        margin-bottom: .25rem;
-      }
-
-      /* Target the Streamlit button that follows our marker */
-      .step-detect .btn-danger + div .stButton > button,
-      .step-detect .btn-danger + div button {
-        border-radius: 12px !important;
-        min-height: 40px;
-        min-width: 140px;
-        background: transparent !important;
-        color: #ef4444 !important;
-        border: 1px solid rgba(239,68,68,.6) !important;
-        transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
-      }
-      .step-detect .btn-danger + div .stButton > button:hover,
-      .step-detect .btn-danger + div button:hover {
-        background: rgba(239,68,68,.10) !important;
-        border-color: rgba(239,68,68,.9) !important;
-        transform: translateY(-1px);
-      }
-
-      .step-detect .btn-success + div .stButton > button,
-      .step-detect .btn-success + div button {
-        border-radius: 12px !important;
-        min-height: 40px;
-        min-width: 140px;
-        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
-        color: #ecfdf5 !important;
-        border: 1px solid rgba(34,197,94,.8) !important;
-        box-shadow: 0 12px 24px rgba(16,185,129,.35);
-        transition: transform .15s ease, box-shadow .15s ease;
-        margin-left: auto;
-        display: block;
-      }
-      .step-detect .btn-success + div .stButton > button:hover,
-      .step-detect .btn-success + div button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 16px 28px rgba(16,185,129,.45);
-      }
-
-      /* Disabled state */
-      .step-detect .btn-danger + div .stButton > button[disabled],
-      .step-detect .btn-success + div .stButton > button[disabled] {
-        opacity: .55 !important;
-        transform: none !important;
-        box-shadow: none !important;
-        cursor: not-allowed !important;
-      }
-
-      .chip {display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
-             margin-right:.25rem}
-      .chip.ok {background:#065f46;color:#ecfdf5;}      /* green */
-      .chip.warn {background:#7c2d12;color:#ffedd5;}    /* amber/brown */
-      .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
-
-      .spacer-sm { height: .5rem; }
-
-      /* Step 2: keep a consistent preview area regardless of the source video */
-      .step-detect [data-testid="stVideo"] {
-        width: 100%;
-        max-width: 100%;
-        margin: 0 auto .75rem auto;
-      }
-      .step-detect [data-testid="stVideo"] video {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 360px !important;
-        background: #000;
-        object-fit: contain;
-      }
-
-      /* Keep title above content and safe on very narrow viewports */
-      header[data-testid="stHeader"] { z-index: 1000; }
-      @media (max-width: 520px) {
-        header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
-      }
-      @media (max-width: 420px) {
-        header[data-testid="stHeader"] .app-toolbar-title { display: none; }
-      }
-
-      /* Slightly larger click targets for nav buttons */
-      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
-
-      /* Pull content closer to the toolbar */
-      section[data-testid="stMain"],
-      main {
-        padding-top: 0 !important;
-      }
-      section[data-testid="stMain"] > div:first-child,
-      main > div:first-child {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-      main .block-container {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-      main .block-container > div:first-child {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-      main [data-testid="stToolbar"] {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-      }
-      main [data-testid="stToolbar"] + div {
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] {
-        padding-top: 0 !important;
-      }
-      main [data-testid="stVerticalBlock"] > div:first-child {
-        margin-top: 0 !important;
-      }
-      main [data-testid="stHorizontalBlock"] {
-        margin-top: 0 !important;
-        align-items: flex-start !important;
-      }
-      main [data-testid="column"] {
-        padding-top: 0 !important;
-      }
-      main [data-testid="column"] > div {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-      }
-
-      /* Ensure the results column aligns with step 4 content */
-      .results-panel {
-        margin-top: 0 !important;
-        display: flex;
-        flex-direction: column;
-        gap: .75rem;
-      }
-      .results-panel h3:first-child {
-        margin-top: 0 !important;
-      }
-      .results-panel .stDataFrame {
-        margin-bottom: .25rem;
-      }
-      .results-panel video {
-        border-radius: 12px;
-      }
-      .results-panel [data-testid="stHorizontalBlock"] {
-        gap: .5rem !important;
-      }
-      .results-panel [data-testid="column"] .stButton > button {
-        width: 100%;
-      }
-    </style>
     <script>
       (() => {
         const TITLE = "Exercise Performance Analicer";
@@ -393,6 +219,8 @@ def _inject_css() -> None:
     """,
         unsafe_allow_html=True,
     )
+
+
 def _reset_state(*, preserve_upload: bool = False) -> None:
     state = _get_state()
     video_path = state.video_path
@@ -572,7 +400,7 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        st.video(str(video_path))
+        render_uniform_video(str(video_path))
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -1243,7 +1071,7 @@ def _results_panel() -> Dict[str, bool]:
         if report.debug_video_path and bool(
             (state.configure_values or {}).get("debug_video", True)
         ):
-            st.video(str(report.debug_video_path))
+            render_uniform_video(str(report.debug_video_path))
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1300,7 +1128,7 @@ def _results_panel() -> Dict[str, bool]:
 
             if state.video_path:
                 st.markdown("### Original video")
-                st.video(str(state.video_path))
+                render_uniform_video(str(state.video_path))
 
         if state.metrics_path is not None:
             metrics_data = None
