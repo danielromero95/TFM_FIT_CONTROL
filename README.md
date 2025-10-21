@@ -38,7 +38,7 @@ The general workflow includes:
 ## What’s new in 2.0
 **Automatic Exercise & View Detection (MVP)**
 
-New module: src/detect/exercise_detector.py (and src/detect/__init__.py).
+New module: src/exercise_detection/exercise_detector.py (and src/exercise_detection/__init__.py).
 
 - Detects squat / bench / deadlift + front / side with a confidence score.
 
