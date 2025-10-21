@@ -48,8 +48,8 @@ from src import config
 from src.pipeline import Report
 
 from src.services.analysis_service import run_pipeline
-from src.detect.exercise_detector import detect_exercise
-from src.ui import render_uniform_video
+from src.exercise_detection.exercise_detector import detect_exercise
+from src.ui.video import render_uniform_video
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
