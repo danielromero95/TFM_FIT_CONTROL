@@ -48,7 +48,7 @@ except Exception:  # pragma: no cover
 
 # Visualization helpers ---------------------------------------------------------
 try:  # pragma: no cover - visualization may be optional in some deployments
-    from .visualization import (
+    from .pose_visualization import (
         POSE_CONNECTIONS,
         LANDMARK_COLOR,
         CONNECTION_COLOR,
