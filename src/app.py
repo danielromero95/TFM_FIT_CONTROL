@@ -50,10 +50,18 @@ from src.pipeline import Report
 from src.services.analysis_service import run_pipeline
 from src.exercise_detection.exercise_detector import detect_exercise
 from src.ui.video import render_uniform_video
+from src.core.types import ExerciseType
+
+def _exercise_display_name(ex_type: ExerciseType) -> str:
+    return ex_type.value.replace("_", " ").title()
+
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
-    ("Squat", "squat"),
+] + [
+    (_exercise_display_name(ex_type), ex_type.value)
+    for ex_type in ExerciseType
+    if ex_type is not ExerciseType.UNKNOWN
 ]
 
 DEFAULT_EXERCISE_LABEL = "Auto-Detect"
@@ -172,16 +180,23 @@ def _inject_css_from_file() -> None:
         z-index: 2;
       }
 
-      .step-detect .form-label {
+      .form-label {
         color: #e5e7eb;
         font-weight: 600;
         font-size: 0.875rem;
         margin-bottom: .25rem;
       }
 
+      .form-label--inline {
+        margin-bottom: 0;
+        display: flex;
+        align-items: center;
+        min-height: 38px;
+      }
+
       /* Target the Streamlit button that follows our marker */
-      .step-detect .btn-danger + div .stButton > button,
-      .step-detect .btn-danger + div button {
+      .btn-danger + div .stButton > button,
+      .btn-danger + div button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
@@ -190,15 +205,15 @@ def _inject_css_from_file() -> None:
         border: 1px solid rgba(239,68,68,.6) !important;
         transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
       }
-      .step-detect .btn-danger + div .stButton > button:hover,
-      .step-detect .btn-danger + div button:hover {
+      .btn-danger + div .stButton > button:hover,
+      .btn-danger + div button:hover {
         background: rgba(239,68,68,.10) !important;
         border-color: rgba(239,68,68,.9) !important;
         transform: translateY(-1px);
       }
 
-      .step-detect .btn-success + div .stButton > button,
-      .step-detect .btn-success + div button {
+      .btn-success + div .stButton > button,
+      .btn-success + div button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
@@ -210,15 +225,15 @@ def _inject_css_from_file() -> None:
         margin-left: auto;
         display: block;
       }
-      .step-detect .btn-success + div .stButton > button:hover,
-      .step-detect .btn-success + div button:hover {
+      .btn-success + div .stButton > button:hover,
+      .btn-success + div button:hover {
         transform: translateY(-1px);
         box-shadow: 0 16px 28px rgba(16,185,129,.45);
       }
 
       /* Disabled state */
-      .step-detect .btn-danger + div .stButton > button[disabled],
-      .step-detect .btn-success + div .stButton > button[disabled] {
+      .btn-danger + div .stButton > button[disabled],
+      .btn-success + div .stButton > button[disabled] {
         opacity: .55 !important;
         transform: none !important;
         box-shadow: none !important;
@@ -569,7 +584,6 @@ def _detect_step() -> None:
     video_path = state.video_path
     if video_path:
         render_uniform_video(str(state.video_path), key="detect_video")
-        st.caption("custom 16:9 player active (detect)")
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -605,7 +619,7 @@ def _detect_step() -> None:
     select_col_label, select_col_control = st.columns([1, 2])
     with select_col_label:
         st.markdown(
-            '<div class="form-label">Select the exercise</div>',
+            '<div class="form-label form-label--inline">Select the exercise</div>',
             unsafe_allow_html=True,
         )
     with select_col_control:
@@ -1244,7 +1258,6 @@ def _results_panel() -> Dict[str, bool]:
                 str(report.debug_video_path),
                 key="results_debug_video",
             )
-            st.caption("custom 16:9 player active (results)")
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1305,7 +1318,6 @@ def _results_panel() -> Dict[str, bool]:
                     str(state.video_path),
                     key="results_original_video",
                 )
-                st.caption("custom 16:9 player active (results)")
 
         if state.metrics_path is not None:
             metrics_data = None

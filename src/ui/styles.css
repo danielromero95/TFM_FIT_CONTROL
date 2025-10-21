@@ -29,16 +29,23 @@ header[data-testid="stHeader"]::before {
     z-index: 2;
 }
 
-.step-detect .form-label {
+.form-label {
     color: #e5e7eb;
     font-weight: 600;
     font-size: 0.875rem;
     margin-bottom: .25rem;
 }
 
+.form-label--inline {
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    min-height: 38px;
+}
+
 /* Target the Streamlit button that follows our marker */
-.step-detect .btn-danger + div .stButton > button,
-.step-detect .btn-danger + div button {
+.btn-danger + div .stButton > button,
+.btn-danger + div button {
     border-radius: 12px !important;
     min-height: 40px;
     min-width: 140px;
@@ -47,15 +54,15 @@ header[data-testid="stHeader"]::before {
     border: 1px solid rgba(239,68,68,.6) !important;
     transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
 }
-.step-detect .btn-danger + div .stButton > button:hover,
-.step-detect .btn-danger + div button:hover {
+.btn-danger + div .stButton > button:hover,
+.btn-danger + div button:hover {
     background: rgba(239,68,68,.10) !important;
     border-color: rgba(239,68,68,.9) !important;
     transform: translateY(-1px);
 }
 
-.step-detect .btn-success + div .stButton > button,
-.step-detect .btn-success + div button {
+.btn-success + div .stButton > button,
+.btn-success + div button {
     border-radius: 12px !important;
     min-height: 40px;
     min-width: 140px;
@@ -67,15 +74,15 @@ header[data-testid="stHeader"]::before {
     margin-left: auto;
     display: block;
 }
-.step-detect .btn-success + div .stButton > button:hover,
-.step-detect .btn-success + div button:hover {
+.btn-success + div .stButton > button:hover,
+.btn-success + div button:hover {
     transform: translateY(-1px);
     box-shadow: 0 16px 28px rgba(16,185,129,.45);
 }
 
 /* Disabled state */
-.step-detect .btn-danger + div .stButton > button[disabled],
-.step-detect .btn-success + div .stButton > button[disabled] {
+.btn-danger + div .stButton > button[disabled],
+.btn-success + div .stButton > button[disabled] {
     opacity: .55 !important;
     transform: none !important;
     box-shadow: none !important;
