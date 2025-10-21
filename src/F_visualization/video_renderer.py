@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from src import config
+from src.config.settings import DEFAULT_TARGET_HEIGHT, DEFAULT_TARGET_WIDTH
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def render_landmarks_on_video_hq(
         return
 
     orig_h, orig_w, _ = original_frames[0].shape
-    proc_w, proc_h = config.DEFAULT_TARGET_WIDTH, config.DEFAULT_TARGET_HEIGHT
+    proc_w, proc_h = DEFAULT_TARGET_WIDTH, DEFAULT_TARGET_HEIGHT
 
     # Scaling factors from the 256x256 processed space to the original resolution.
     scale_x = orig_w / proc_w

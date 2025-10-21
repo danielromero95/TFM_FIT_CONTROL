@@ -12,6 +12,7 @@ import cv2
 import pandas as pd
 
 from src import config
+from src.config.settings import MIN_DETECTION_CONFIDENCE
 from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
 from src.A_preprocessing.video_metadata import get_video_rotation
 from src.B_pose_estimation.processing import (
@@ -130,7 +131,7 @@ def run_pipeline(
     df_raw_landmarks = extract_landmarks_from_frames(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
-        visibility_threshold=config.MIN_DETECTION_CONFIDENCE,
+        visibility_threshold=MIN_DETECTION_CONFIDENCE,
     )
 
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
