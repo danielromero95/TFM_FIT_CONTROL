@@ -11,7 +11,7 @@ import time
 import cv2
 
 from src import config
-from src.config.settings import MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE
 from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
 from src.A_preprocessing.video_metadata import get_video_rotation, probe_video_metadata
 from src.B_pose_estimation.processing import (
@@ -22,6 +22,7 @@ from src.B_pose_estimation.processing import (
 from src.D_modeling.count_reps import count_repetitions_with_config
 from src.F_visualization.video_renderer import render_landmarks_on_video_hq
 from src.detect.exercise_detector import DetectionResult, detect_exercise
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline import OutputPaths, Report, RunStats
 
 
@@ -99,8 +100,8 @@ def run_pipeline(
         frames = frames[::stride]
     frames_processed = len(frames)
 
-    detected_label = "unknown"
-    detected_view = "unknown"
+    detected_label = ExerciseType.UNKNOWN
+    detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
     if prefetched_detection is not None:
         detected_label, detected_view, detected_confidence = _normalize_detection(prefetched_detection)
@@ -159,6 +160,7 @@ def run_pipeline(
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
     df_metrics = calculate_metrics_from_sequence(filtered_sequence, fps_effective)
+    t_metrics_end = time.perf_counter()
 
     primary_angle = cfg.counting.primary_angle
     angle_range = 0.0
@@ -201,12 +203,21 @@ def run_pipeline(
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
+    notify(100, "PIPELINE COMPLETADO")
+    t5 = time.perf_counter()
+    extract_ms = (t1 - t0) * 1000
+    pose_ms = (t2 - t1) * 1000
+    filter_ms = (t3 - t2) * 1000
+    metrics_ms = (t_metrics_end - t3) * 1000
+    count_ms = (t5 - t4) * 1000 if "t4" in locals() else 0.0
+    total_ms = (t5 - t0) * 1000
+
     stats = RunStats(
         config_sha1=config_sha1,
         fps_original=float(fps_original),
         fps_effective=float(fps_effective),
         frames=frames_processed,
-        exercise_selected=cfg.counting.exercise,
+        exercise_selected=as_exercise(cfg.counting.exercise),
         exercise_detected=detected_label,
         view_detected=detected_view,
         detection_confidence=float(detected_confidence),
@@ -218,18 +229,22 @@ def run_pipeline(
         warnings=warnings,
         skip_reason=skip_reason,
         config_path=config_path,
+        t_extract_ms=float(extract_ms),
+        t_pose_ms=float(pose_ms),
+        t_filter_ms=float(filter_ms),
+        t_metrics_ms=float(metrics_ms),
+        t_count_ms=float(count_ms),
+        t_total_ms=float(total_ms),
     )
 
-    notify(100, "PIPELINE COMPLETADO")
-    t5 = time.perf_counter()
     logger.info(
         "TIMINGS extract=%.0fms pose=%.0fms filter=%.0fms metrics=%.0fms count=%.0fms total=%.0fms",
-        (t1 - t0) * 1000,
-        (t2 - t1) * 1000,
-        (t3 - t2) * 1000,
-        (t5 - t4) * 1000 if 't4' in locals() else 0.0,
-        (t5 - t3) * 1000 if 't4' not in locals() else 0.0,  # fallback si se saltó el conteo
-        (t5 - t0) * 1000,
+        extract_ms,
+        pose_ms,
+        filter_ms,
+        metrics_ms,
+        count_ms,
+        total_ms,
     )
     return Report(
         repetitions=reps if skip_reason is None else 0,
@@ -279,11 +294,13 @@ def _compute_sample_rate(fps: float, cfg: config.Config) -> int:
 
 def _normalize_detection(
     detection: Union[DetectionResult, Tuple[str, str, float]]
-) -> Tuple[str, str, float]:
-    """Return ``(label, view, confidence)`` from either tuple or ``DetectionResult``."""
+) -> Tuple[ExerciseType, ViewType, float]:
+    """Return ``(exercise, view, confidence)`` normalized to enums."""
     if isinstance(detection, DetectionResult):
-        return detection.label, detection.view, float(detection.confidence)
-    return detection
+        label, view, confidence = detection.label, detection.view, float(detection.confidence)
+    else:
+        label, view, confidence = detection
+    return as_exercise(label), as_view(view), float(confidence)
 
 
 def _plan_sampling(
