@@ -203,6 +203,17 @@ main [data-testid="column"] > div {
     width: 100%;
 }
 
+.results-panel .results-metrics-block {
+    margin-top: -0.35rem;
+}
+.results-panel .results-metrics-block [data-baseweb="select"] {
+    margin-top: 0 !important;
+}
+.results-panel h4 {
+    margin-top: .75rem !important;
+    margin-bottom: .5rem !important;
+}
+
 .app-step-detect iframe {
     margin-bottom: .15rem !important;
 }

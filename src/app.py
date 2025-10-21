@@ -674,7 +674,11 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        render_uniform_video(str(state.video_path), key="detect_video")
+        render_uniform_video(
+            str(state.video_path),
+            key="detect_video",
+            bottom_margin=0.15,
+        )
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -1344,6 +1348,13 @@ def _results_panel() -> Dict[str, bool]:
         stats = report.stats
         repetitions = report.repetitions
         metrics_df = report.metrics
+        numeric_columns: list[str] = []
+        if metrics_df is not None:
+            numeric_columns = [
+                col
+                for col in metrics_df.columns
+                if metrics_df[col].dtype.kind in "fi"
+            ]
 
         st.markdown(f"**Detected repetitions:** {repetitions}")
 
@@ -1353,7 +1364,26 @@ def _results_panel() -> Dict[str, bool]:
             render_uniform_video(
                 str(report.debug_video_path),
                 key="results_debug_video",
+                bottom_margin=0.18,
             )
+
+        if metrics_df is not None:
+            st.markdown(
+                '<div class="results-metrics-block">',
+                unsafe_allow_html=True,
+            )
+            if numeric_columns:
+                default_selection = numeric_columns[:3]
+                selected_metrics = st.multiselect(
+                    "View metrics",
+                    options=numeric_columns,
+                    default=default_selection,
+                )
+                if selected_metrics:
+                    st.line_chart(metrics_df[selected_metrics])
+            else:
+                st.info("No numeric metrics available for charting.")
+            st.markdown("</div>", unsafe_allow_html=True)
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1381,20 +1411,6 @@ def _results_panel() -> Dict[str, bool]:
         if metrics_df is not None:
             st.markdown("#### Calculated metrics")
             st.dataframe(metrics_df, width="stretch")
-            numeric_columns = [
-                col
-                for col in metrics_df.columns
-                if metrics_df[col].dtype.kind in "fi"
-            ]
-            if numeric_columns:
-                default_selection = numeric_columns[:3]
-                selected_metrics = st.multiselect(
-                    "View metrics",
-                    options=numeric_columns,
-                    default=default_selection,
-                )
-                if selected_metrics:
-                    st.line_chart(metrics_df[selected_metrics])
 
         if stats.warnings:
             st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
@@ -1413,6 +1429,7 @@ def _results_panel() -> Dict[str, bool]:
                 render_uniform_video(
                     str(state.video_path),
                     key="results_original_video",
+                    bottom_margin=0.25,
                 )
 
         if state.metrics_path is not None:
