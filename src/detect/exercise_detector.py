@@ -41,6 +41,13 @@ MIN_CONFIDENCE_SCORE = 0.50
 DEFAULT_SAMPLING_RATE = 30.0
 
 
+@dataclass(frozen=True)
+class DetectionResult:
+    label: str
+    view: str
+    confidence: float
+
+
 @dataclass
 class FeatureSeries:
     """Container for the extracted time-series and metadata."""
