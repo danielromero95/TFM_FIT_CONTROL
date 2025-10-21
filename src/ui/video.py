@@ -120,75 +120,95 @@ def render_uniform_video(
         if component_key is not None:
             html_kwargs["key"] = component_key
 
-    html(
-        f"""
-        <div id="{inner_id}" style="width:100%;max-width:720px;margin:0 auto;">
+    html_template = r"""
+        <div id="__INNER_ID__" style="width:100%;max-width:720px;margin:0 auto;">
           <div style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;">
             <video
-              id="{video_id}"
+              id="__VIDEO_ID__"
               controls
               preload="metadata"
               playsinline
               webkit-playsinline
               style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;"
             >
-              <source src="{source}" type="{mime}">
+              <source src="__SOURCE__" type="__MIME__">
             </video>
           </div>
         </div>
         <script>
-          (function() {{
-            const pad = {padding};
-            const inner = document.getElementById('{inner_id}');
-            const video = document.getElementById('{video_id}');
+          (function() {
+            const pad = __PADDING__;
+            const inner = document.getElementById('__INNER_ID__');
+            const video = document.getElementById('__VIDEO_ID__');
             if (!inner || !video) return;
-            const fit = () => {{
+            const fit = () => {
               const w = inner.clientWidth || 720;
               const h = Math.round(w * 9 / 16) + pad;
-              if (window.frameElement) {{
+              if (window.frameElement) {
                 window.frameElement.style.height = h + 'px';
-              }}
-            }};
-            if (typeof ResizeObserver !== 'undefined') {{
+              }
+            };
+            if (typeof ResizeObserver !== 'undefined') {
               new ResizeObserver(() => fit()).observe(inner);
-            }} else {{
+            } else {
               window.addEventListener('resize', () => fit());
-            }}
+            }
             fit();
-            window.addEventListener('load', () => fit(), {{ once: true }});
-            const start = Math.max({start_time}, 0);
-            video.addEventListener('loadedmetadata', () => {{
+            window.addEventListener('load', () => fit(), { once: true });
+            const start = Math.max(__START_TIME__, 0);
+            video.addEventListener('loadedmetadata', () => {
               if (!start) return;
-              try {{
+              try {
                 video.currentTime = start;
-              }} catch (err) {{
+              } catch (err) {
                 console.warn('Unable to seek video start time', err);
-              }}
-            }}, {{ once: true }});
-          }})();
+              }
+            }, { once: true });
+          })();
         </script>
-        """,
+    """
+
+    html_content = (
+        html_template
+        .replace("__INNER_ID__", inner_id)
+        .replace("__VIDEO_ID__", video_id)
+        .replace("__SOURCE__", source)
+        .replace("__MIME__", mime)
+        .replace("__PADDING__", str(padding))
+        .replace("__START_TIME__", str(start_time))
+    )
+
+    html(
+        html_content,
         **html_kwargs,
     )
 
     margin_value = max(bottom_margin, 0.0)
-    st.markdown(
-        f"""
+    css_template = r"""
         <style>
-        #{marker_id} + iframe {{
+        #__MARKER_ID__ + iframe {
           width: min(100%, 720px) !important;
-          margin: 0 auto {margin_value:.2f}rem auto !important;
+          margin: 0 auto __MARGIN_VALUE__rem auto !important;
           display: block !important;
           border-radius: 12px !important;
           background: #000 !important;
           overflow: hidden !important;
           box-shadow: 0 18px 36px rgba(15, 23, 42, 0.35);
-        }}
-        #{marker_id} + iframe > iframe {{
+        }
+        #__MARKER_ID__ + iframe > iframe {
           border-radius: 12px !important;
-        }}
+        }
         </style>
-        """,
+    """
+
+    css = (
+        css_template
+        .replace("__MARKER_ID__", marker_id)
+        .replace("__MARGIN_VALUE__", format(margin_value, ".2f"))
+    )
+
+    st.markdown(
+        css,
         unsafe_allow_html=True,
     )
 
