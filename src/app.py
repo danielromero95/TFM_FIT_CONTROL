@@ -118,6 +118,13 @@ def _drain_queue(queue: SimpleQueue) -> None:
             break
 
 
+def _render_video(path: str | os.PathLike[str], *, start_time: int = 0) -> None:
+    """Render a video inside a fixed-size viewport for visual consistency."""
+
+    st.markdown('<div class="app-video-marker"></div>', unsafe_allow_html=True)
+    st.video(str(path), start_time=start_time)
+
+
 def _get_state(*, inject_css: bool = True) -> AppState:
     if inject_css and threading.current_thread() is threading.main_thread():
         _inject_css()
@@ -225,18 +232,26 @@ def _inject_css() -> None:
 
       .spacer-sm { height: .5rem; }
 
-      /* Step 2: keep a consistent preview area regardless of the source video */
-      .step-detect [data-testid="stVideo"] {
+      /* Video players share a fixed viewport to keep sizing consistent */
+      .app-video-marker + div[data-testid="stVideoBlock"] {
         width: 100%;
-        max-width: 100%;
-        margin: 0 auto .75rem auto;
-      }
-      .step-detect [data-testid="stVideo"] video {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 360px !important;
+        max-width: 520px;
+        aspect-ratio: 16 / 9;
         background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        margin: 0 auto 1rem auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .app-video-marker + div[data-testid="stVideoBlock"] video {
+        width: 100% !important;
+        height: 100% !important;
         object-fit: contain;
+        background: #000;
       }
 
       /* Keep title above content and safe on very narrow viewports */
@@ -572,7 +587,7 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        st.video(str(video_path))
+        _render_video(video_path)
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -1243,7 +1258,7 @@ def _results_panel() -> Dict[str, bool]:
         if report.debug_video_path and bool(
             (state.configure_values or {}).get("debug_video", True)
         ):
-            st.video(str(report.debug_video_path))
+            _render_video(report.debug_video_path)
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1300,7 +1315,7 @@ def _results_panel() -> Dict[str, bool]:
 
             if state.video_path:
                 st.markdown("### Original video")
-                st.video(str(state.video_path))
+                _render_video(state.video_path)
 
         if state.metrics_path is not None:
             metrics_data = None
