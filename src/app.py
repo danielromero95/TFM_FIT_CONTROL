@@ -50,10 +50,18 @@ from src.pipeline import Report
 from src.services.analysis_service import run_pipeline
 from src.exercise_detection.exercise_detector import detect_exercise
 from src.ui.video import render_uniform_video
+from src.core.types import ExerciseType
+
+def _exercise_display_name(ex_type: ExerciseType) -> str:
+    return ex_type.value.replace("_", " ").title()
+
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
-    ("Squat", "squat"),
+] + [
+    (_exercise_display_name(ex_type), ex_type.value)
+    for ex_type in ExerciseType
+    if ex_type is not ExerciseType.UNKNOWN
 ]
 
 DEFAULT_EXERCISE_LABEL = "Auto-Detect"
@@ -172,53 +180,52 @@ def _inject_css_from_file() -> None:
         z-index: 2;
       }
 
-      .step-detect .form-label {
+      .form-label {
         color: #e5e7eb;
         font-weight: 600;
         font-size: 0.875rem;
         margin-bottom: .25rem;
       }
 
-      /* Target the Streamlit button that follows our marker */
-      .step-detect .btn-danger + div .stButton > button,
-      .step-detect .btn-danger + div button {
+      .form-label--inline {
+        margin-bottom: 0;
+        display: flex;
+        align-items: center;
+        min-height: 38px;
+      }
+
+      div[data-testid="stButton"][aria-label="Back"] > button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
         background: transparent !important;
         color: #ef4444 !important;
-        border: 1px solid rgba(239,68,68,.6) !important;
+        border: 1px solid rgba(239, 68, 68, .6) !important;
         transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
       }
-      .step-detect .btn-danger + div .stButton > button:hover,
-      .step-detect .btn-danger + div button:hover {
-        background: rgba(239,68,68,.10) !important;
-        border-color: rgba(239,68,68,.9) !important;
+      div[data-testid="stButton"][aria-label="Back"] > button:hover {
+        background: rgba(239, 68, 68, .10) !important;
+        border-color: rgba(239, 68, 68, .9) !important;
         transform: translateY(-1px);
       }
 
-      .step-detect .btn-success + div .stButton > button,
-      .step-detect .btn-success + div button {
+      div[data-testid="stButton"][aria-label="Continue"] > button {
         border-radius: 12px !important;
         min-height: 40px;
         min-width: 140px;
-        background: linear-gradient(135deg, rgba(34,197,94,.95), rgba(16,185,129,.95)) !important;
+        background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
         color: #ecfdf5 !important;
-        border: 1px solid rgba(34,197,94,.8) !important;
-        box-shadow: 0 12px 24px rgba(16,185,129,.35);
+        border: 1px solid rgba(34, 197, 94, .8) !important;
+        box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
         transition: transform .15s ease, box-shadow .15s ease;
-        margin-left: auto;
-        display: block;
       }
-      .step-detect .btn-success + div .stButton > button:hover,
-      .step-detect .btn-success + div button:hover {
+      div[data-testid="stButton"][aria-label="Continue"] > button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 16px 28px rgba(16,185,129,.45);
+        box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
       }
 
-      /* Disabled state */
-      .step-detect .btn-danger + div .stButton > button[disabled],
-      .step-detect .btn-success + div .stButton > button[disabled] {
+      div[data-testid="stButton"][aria-label="Back"] > button[disabled],
+      div[data-testid="stButton"][aria-label="Continue"] > button[disabled] {
         opacity: .55 !important;
         transform: none !important;
         box-shadow: none !important;
@@ -241,9 +248,6 @@ def _inject_css_from_file() -> None:
       @media (max-width: 420px) {
         header[data-testid="stHeader"] .app-toolbar-title { display: none; }
       }
-
-      /* Slightly larger click targets for nav buttons */
-      .btn-danger > button, .btn-success > button { min-height: 40px; min-width: 140px; }
 
       /* Pull content closer to the toolbar */
       section[data-testid="stMain"],
@@ -568,8 +572,11 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        render_uniform_video(str(state.video_path), key="detect_video")
-        st.caption("custom 16:9 player active (detect)")
+        render_uniform_video(
+            str(state.video_path),
+            key="detect_video",
+            bottom_margin=0.0,
+        )
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -605,7 +612,7 @@ def _detect_step() -> None:
     select_col_label, select_col_control = st.columns([1, 2])
     with select_col_label:
         st.markdown(
-            '<div class="form-label">Select the exercise</div>',
+            '<div class="form-label form-label--inline">Select the exercise</div>',
             unsafe_allow_html=True,
         )
     with select_col_control:
@@ -662,18 +669,23 @@ def _detect_step() -> None:
         with actions_placeholder.container():
             back_col, continue_col = st.columns([1, 2])
             with back_col:
-                st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-                if st.button("Back", key="detect_back"):
+                if st.button(
+                    "Back",
+                    key="detect_back",
+                    use_container_width=True,
+                ):
                     state.detect_result = None
                     state.step = "upload"
                     try:
                         st.rerun()
                     except Exception:
                         st.experimental_rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
             with continue_col:
-                st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-                if st.button("Continue", key="detect_continue"):
+                if st.button(
+                    "Continue",
+                    key="detect_continue",
+                    use_container_width=True,
+                ):
                     if current_exercise == DEFAULT_EXERCISE_LABEL:
                         detect_result = state.detect_result
                         if (
@@ -727,7 +739,6 @@ def _detect_step() -> None:
                     else:
                         state.detect_result = None
                         state.step = "configure"
-                st.markdown("</div>", unsafe_allow_html=True)
     else:
         actions_placeholder.empty()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -823,16 +834,19 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         run_active = bool(state.analysis_future and not state.analysis_future.done())
         col_back, col_forward = st.columns(2)
         with col_back:
-            st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-            if st.button("Back", key="configure_back", disabled=run_active):
+            if st.button(
+                "Back",
+                key="configure_back",
+                disabled=run_active,
+                use_container_width=True,
+            ):
                 state.step = "detect"
-            st.markdown("</div>", unsafe_allow_html=True)
         with col_forward:
-            st.markdown('<div class="btn-success">', unsafe_allow_html=True)
             if st.button(
                 "Continue",
                 key="configure_continue",
                 disabled=run_active,
+                use_container_width=True,
             ):
                 state.configure_values = current_values
                 state.step = "running"
@@ -840,7 +854,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                     st.rerun()
                 except Exception:
                     st.experimental_rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _running_step() -> None:
@@ -1244,7 +1257,6 @@ def _results_panel() -> Dict[str, bool]:
                 str(report.debug_video_path),
                 key="results_debug_video",
             )
-            st.caption("custom 16:9 player active (results)")
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1305,7 +1317,6 @@ def _results_panel() -> Dict[str, bool]:
                     str(state.video_path),
                     key="results_original_video",
                 )
-                st.caption("custom 16:9 player active (results)")
 
         if state.metrics_path is not None:
             metrics_data = None
