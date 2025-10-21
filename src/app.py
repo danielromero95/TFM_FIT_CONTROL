@@ -49,6 +49,7 @@ from src.pipeline import Report
 
 from src.services.analysis_service import run_pipeline
 from src.detect.exercise_detector import detect_exercise
+from src.ui.video import render_uniform_video
 
 EXERCISE_CHOICES = [
     ("Auto-Detect", "auto"),
@@ -164,6 +165,39 @@ def _inject_css() -> None:
         z-index: 2;
       }
 
+      .uniform-video-wrapper {
+        width: min(100%, 960px);
+        margin: 0 auto 1.5rem;
+      }
+
+      .uniform-video-aspect {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%;
+        background: #000;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.45);
+      }
+
+      .uniform-video-aspect [data-testid="stVideo"] {
+        position: absolute !important;
+        inset: 0;
+        width: 100% !important;
+        height: 100% !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .uniform-video-aspect video,
+      .uniform-video-aspect iframe {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: contain;
+        background: #000;
+      }
+
       .step-detect .form-label {
         color: #e5e7eb;
         font-weight: 600;
@@ -225,18 +259,26 @@ def _inject_css() -> None:
 
       .spacer-sm { height: .5rem; }
 
-      /* Step 2: keep a consistent preview area regardless of the source video */
-      .step-detect [data-testid="stVideo"] {
+      /* Normalize video previews for detection and results steps */
+      .step-detect [data-testid="stVideo"],
+      .results-panel [data-testid="stVideo"] {
         width: 100%;
-        max-width: 100%;
-        margin: 0 auto .75rem auto;
-      }
-      .step-detect [data-testid="stVideo"] video {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 360px !important;
+        max-width: 720px;
+        margin: 0 auto 1.5rem auto;
+        aspect-ratio: 16 / 9;
         background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .step-detect [data-testid="stVideo"] video,
+      .results-panel [data-testid="stVideo"] video {
+        width: 100% !important;
+        height: 100% !important;
         object-fit: contain;
+        background: #000;
       }
 
       /* Keep title above content and safe on very narrow viewports */
@@ -572,7 +614,7 @@ def _detect_step() -> None:
     state = _get_state()
     video_path = state.video_path
     if video_path:
-        st.video(str(video_path))
+        render_uniform_video(str(video_path))
 
     step = state.step or "upload"
     is_active = step == "detect" and video_path is not None
@@ -1243,7 +1285,7 @@ def _results_panel() -> Dict[str, bool]:
         if report.debug_video_path and bool(
             (state.configure_values or {}).get("debug_video", True)
         ):
-            st.video(str(report.debug_video_path))
+            render_uniform_video(str(report.debug_video_path))
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -1300,7 +1342,7 @@ def _results_panel() -> Dict[str, bool]:
 
             if state.video_path:
                 st.markdown("### Original video")
-                st.video(str(state.video_path))
+                render_uniform_video(str(state.video_path))
 
         if state.metrics_path is not None:
             metrics_data = None
