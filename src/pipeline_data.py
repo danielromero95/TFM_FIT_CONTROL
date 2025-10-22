@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import pandas as pd
+if TYPE_CHECKING:  # pragma: no cover - imported for typing only
+    import pandas as pd
 
 from src import config
 from src.core.types import ExerciseType, ViewType
@@ -57,7 +58,7 @@ class Report:
     """Pipeline outcome."""
 
     repetitions: int
-    metrics: Optional[pd.DataFrame]
+    metrics: Optional["pd.DataFrame"]
     debug_video_path: Optional[Path]
     stats: RunStats
     config_used: config.Config
