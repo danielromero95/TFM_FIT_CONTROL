@@ -21,6 +21,9 @@ MIN_VALID_FRAMES = 20
 SQUAT_KNEE_ROM_THRESHOLD_DEG = 40.0
 SQUAT_HIP_ROM_THRESHOLD_DEG = 30.0
 SQUAT_PELVIS_DISPLACEMENT_THRESHOLD = 0.06
+SQUAT_KNEE_MIN_ANGLE_DEG = 135.0
+SQUAT_HIP_MIN_ANGLE_DEG = 150.0
+SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG = 18.0
 
 BENCH_ELBOW_ROM_THRESHOLD_DEG = 55.0
 BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.08
@@ -37,8 +40,10 @@ YAW_SIDE_MIN_DEG = 25.0
 Z_DELTA_FRONT_MAX = 0.08               # normalized MediaPipe units (smaller is more front)
 SIDE_WIDTH_MAX = 0.50                  # if width_norm mean ≤ this, likely side
 
-VIEW_SCORE_PER_EVIDENCE_THRESHOLD = 0.25
-VIEW_MARGIN_PER_EVIDENCE_THRESHOLD = 0.12
+VIEW_SCORE_PER_EVIDENCE_THRESHOLD = 0.22
+VIEW_MARGIN_PER_EVIDENCE_THRESHOLD = 0.10
+VIEW_FRONT_FALLBACK_YAW_DEG = 24.0
+VIEW_SIDE_FALLBACK_YAW_DEG = 27.0
 
 CLASSIFICATION_MARGIN = 0.15
 MIN_CONFIDENCE_SCORE = 0.50
@@ -353,8 +358,13 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     data = features.data
 
-    knee_rom = _max_range(data.get("knee_angle_left"), data.get("knee_angle_right"))
-    hip_rom = _max_range(data.get("hip_angle_left"), data.get("hip_angle_right"))
+    knee_left = data.get("knee_angle_left")
+    knee_right = data.get("knee_angle_right")
+    hip_left = data.get("hip_angle_left")
+    hip_right = data.get("hip_angle_right")
+
+    knee_rom = _max_range(knee_left, knee_right)
+    hip_rom = _max_range(hip_left, hip_right)
     elbow_rom = _max_range(data.get("elbow_angle_left"), data.get("elbow_angle_right"))
     shoulder_rom = _max_range(
         data.get("shoulder_angle_left"), data.get("shoulder_angle_right")
@@ -400,10 +410,17 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         z_med,
     )
 
+    knee_min = _min_finite_percentile(knee_left, knee_right, 15)
+    hip_min = _min_finite_percentile(hip_left, hip_right, 15)
+    symmetry = _symmetry_score(knee_left, knee_right, SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG)
+
     squat_score = (
         _score(knee_rom, SQUAT_KNEE_ROM_THRESHOLD_DEG)
         + 0.8 * _score(pelvis_disp, SQUAT_PELVIS_DISPLACEMENT_THRESHOLD)
         + 0.4 * _score(hip_rom, SQUAT_HIP_ROM_THRESHOLD_DEG)
+        + 0.6 * _score_inverse(knee_min, SQUAT_KNEE_MIN_ANGLE_DEG, scale=1.8)
+        + 0.4 * _score_inverse(hip_min, SQUAT_HIP_MIN_ANGLE_DEG, scale=1.6)
+        + 0.5 * symmetry
     )
 
     bench_score = (
@@ -447,6 +464,22 @@ def _range_of(series: np.ndarray | None) -> float:
     return float(valid.max() - valid.min())
 
 
+def _min_finite_percentile(
+    series_a: np.ndarray | None,
+    series_b: np.ndarray | None,
+    percentile: float,
+) -> float:
+    values = []
+    if series_a is not None:
+        values.append(_finite_percentile(series_a, percentile))
+    if series_b is not None:
+        values.append(_finite_percentile(series_b, percentile))
+    finite = [v for v in values if np.isfinite(v)]
+    if not finite:
+        return float("nan")
+    return float(min(finite))
+
+
 def _finite_stat(series: np.ndarray | None, reducer) -> float:
     if series is None or series.size == 0:
         return float("nan")
@@ -469,6 +502,8 @@ def _finite_percentile(series: np.ndarray | None, percentile: float) -> float:
 def _score(value: float, threshold: float, scale: float = 1.5) -> float:
     if threshold <= 0:
         return 0.0
+    if not np.isfinite(value):
+        return 0.0
     if value <= 0:
         return 0.0
     ratio = value / threshold
@@ -479,6 +514,8 @@ def _score(value: float, threshold: float, scale: float = 1.5) -> float:
 def _score_inverse(value: float, threshold: float, scale: float = 1.5) -> float:
     if threshold <= 0:
         return 0.0
+    if not np.isfinite(value):
+        return 0.0
     if value <= 0:
         return 0.0
     headroom = threshold - value
@@ -487,6 +524,23 @@ def _score_inverse(value: float, threshold: float, scale: float = 1.5) -> float:
     ratio = headroom / threshold
     ratio = max(0.0, min(ratio, scale * 2.0))
     return ratio
+
+
+def _symmetry_score(
+    series_a: np.ndarray | None,
+    series_b: np.ndarray | None,
+    tolerance: float,
+) -> float:
+    if tolerance <= 0:
+        return 0.0
+    if series_a is None or series_b is None:
+        return 0.0
+    a_med = _finite_percentile(series_a, 15)
+    b_med = _finite_percentile(series_b, 15)
+    if not np.isfinite(a_med) or not np.isfinite(b_med):
+        return 0.0
+    diff = abs(a_med - b_med)
+    return _score_inverse(diff, tolerance, scale=2.0)
 
 
 def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:
@@ -559,37 +613,62 @@ def _classify_view(
     side_score = 0.0
     evidence = 0
 
+    front_votes = 0
+    side_votes = 0
+
     if np.isfinite(yaw_med):
         front_score += _score_inverse(yaw_med, YAW_FRONT_MAX_DEG, scale=2.0)
+        if yaw_med <= YAW_FRONT_MAX_DEG * 1.05:
+            front_votes += 1
+        if yaw_med >= YAW_SIDE_MIN_DEG * 0.9:
+            side_votes += 1
         evidence += 1
     if np.isfinite(yaw_p75):
         side_score += _score(yaw_p75, YAW_SIDE_MIN_DEG, scale=2.0)
+        if yaw_p75 >= YAW_SIDE_MIN_DEG:
+            side_votes += 1
 
     if np.isfinite(z_med):
         front_score += _score_inverse(z_med, Z_DELTA_FRONT_MAX, scale=2.0)
         side_score += _score(z_med, Z_DELTA_FRONT_MAX * 1.6, scale=2.0)
+        if z_med <= Z_DELTA_FRONT_MAX * 1.05:
+            front_votes += 1
+        if z_med >= Z_DELTA_FRONT_MAX * 1.6:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_mean):
         front_score += _score(width_mean, VIEW_FRONT_WIDTH_THRESHOLD, scale=2.0)
         side_score += _score_inverse(width_mean, SIDE_WIDTH_MAX, scale=2.0)
+        if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD * 0.96:
+            front_votes += 1
+        if width_mean <= SIDE_WIDTH_MAX * 1.04:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_std):
         front_score += _score_inverse(width_std, VIEW_WIDTH_STD_THRESHOLD, scale=2.0)
         side_score += _score(width_std, VIEW_WIDTH_STD_THRESHOLD * 0.9, scale=2.0)
+        if width_std <= VIEW_WIDTH_STD_THRESHOLD * 0.9:
+            front_votes += 1
+        if width_std >= VIEW_WIDTH_STD_THRESHOLD * 1.05:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_p10):
         front_score += _score(width_p10, VIEW_FRONT_WIDTH_THRESHOLD * 0.9, scale=1.8)
         side_score += _score_inverse(width_p10, SIDE_WIDTH_MAX * 1.1, scale=1.8)
+        if width_p10 >= VIEW_FRONT_WIDTH_THRESHOLD * 0.85:
+            front_votes += 1
+        if width_p10 <= SIDE_WIDTH_MAX * 1.1:
+            side_votes += 1
 
     scores = {"front": float(front_score), "side": float(side_score)}
     view = _pick_view_label(scores, evidence)
 
     logger.info(
         "VIEW DEBUG — scores=%s evidence=%d yawMed=%.1f yawP75=%.1f zMed=%.3f widthMean=%.3f "
-        "widthStd=%.3f widthP10=%.3f",
+        "widthStd=%.3f widthP10=%.3f frontVotes=%d sideVotes=%d",
         scores,
         evidence,
         float(yaw_med) if np.isfinite(yaw_med) else float("nan"),
@@ -598,9 +677,34 @@ def _classify_view(
         float(width_mean) if np.isfinite(width_mean) else float("nan"),
         float(width_std) if np.isfinite(width_std) else float("nan"),
         float(width_p10) if np.isfinite(width_p10) else float("nan"),
+        front_votes,
+        side_votes,
     )
 
-    if view == "unknown" and np.isfinite(width_mean):
-        return "front" if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD else "side"
+    vote_margin = front_votes - side_votes
+
+    if vote_margin >= 2 and front_score >= side_score * 0.6:
+        return "front"
+    if vote_margin <= -2 and side_score >= front_score * 0.6:
+        return "side"
+
+    if view == "unknown":
+        if np.isfinite(yaw_med):
+            if yaw_med <= VIEW_FRONT_FALLBACK_YAW_DEG:
+                return "front"
+            if yaw_med >= VIEW_SIDE_FALLBACK_YAW_DEG:
+                return "side"
+        if np.isfinite(z_med):
+            if z_med <= Z_DELTA_FRONT_MAX:
+                return "front"
+            if z_med >= Z_DELTA_FRONT_MAX * 1.8:
+                return "side"
+        if np.isfinite(width_mean):
+            return "front" if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD else "side"
+
+    if view == "side" and vote_margin >= 1 and front_score >= side_score * 0.85:
+        return "front"
+    if view == "front" and vote_margin <= -1 and side_score >= front_score * 0.85:
+        return "side"
 
     return view
