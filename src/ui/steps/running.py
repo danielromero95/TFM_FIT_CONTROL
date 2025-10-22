@@ -9,7 +9,7 @@ from concurrent.futures import CancelledError
 
 import streamlit as st
 
-from src.ui.state import Step, get_state, go_to
+from src.ui.state import Step, get_state, go_to, trigger_rerun
 from src.ui_controller.analysis_controller import (
     RunHandle,
     cancel_run,
@@ -40,10 +40,7 @@ def _running_step() -> None:
     state = get_state()
     if state.analysis_future and state.analysis_future.done():
         state.analysis_future = None
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
+        trigger_rerun()
         return
 
     cancel_disabled = not state.analysis_future or state.analysis_future.done()
@@ -64,10 +61,7 @@ def _running_step() -> None:
     if not state.video_path:
         state.pipeline_error = "The video to process was not found."
         go_to(Step.RESULTS)
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
+        trigger_rerun()
         return
 
     if state.analysis_future is None:
@@ -76,10 +70,7 @@ def _running_step() -> None:
         except ValueError as exc:
             state.pipeline_error = str(exc)
             go_to(Step.RESULTS)
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            trigger_rerun()
             return
 
         state.pipeline_error = None
@@ -100,10 +91,7 @@ def _running_step() -> None:
         )
         state.run_id = handle.run_id
         state.analysis_future = handle.future
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
+        trigger_rerun()
         return
 
     future = state.analysis_future
@@ -141,10 +129,7 @@ def _running_step() -> None:
                 state.pipeline_error = "Analysis canceled by the user."
                 go_to(Step.RESULTS)
                 _drain_progress_queue()
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+                trigger_rerun()
                 return
 
             current_future = state.analysis_future
@@ -193,10 +178,7 @@ def _running_step() -> None:
             _drain_progress_queue()
             state.run_id = None
             go_to(Step.RESULTS)
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            trigger_rerun()
             return
 
         handle = _make_handle(state.run_id, current_future)
@@ -232,10 +214,7 @@ def _running_step() -> None:
                 _drain_progress_queue()
                 state.analysis_future = None
                 go_to(Step.RESULTS)
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+                trigger_rerun()
                 return
 
             if state.run_id != completed_run_id:
@@ -261,10 +240,7 @@ def _running_step() -> None:
                 _drain_progress_queue()
                 state.analysis_future = None
                 go_to(Step.RESULTS)
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+                trigger_rerun()
                 return
 
             state.pipeline_error = None
@@ -354,8 +330,5 @@ def _running_step() -> None:
             if state.analysis_future is current_future:
                 state.analysis_future = None
                 go_to(Step.RESULTS)
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            trigger_rerun()
             return
