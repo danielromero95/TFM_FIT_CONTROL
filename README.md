@@ -2,7 +2,7 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.3 (20-10-2025)
+**Version:** 2.4 (20-10-2025)
 
 ---
 
