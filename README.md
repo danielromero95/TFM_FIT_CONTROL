@@ -10,7 +10,7 @@
 
 This project delivers an exercise-analysis system powered by computer vision. From strength-training videos (squat, bench press, deadlift), the application—available both as a desktop client and a Streamlit experience—aims to:
 
-- Detect the exercise type (squat / bench / deadlift) and camera view (front / side) with confidence scores.
+- Detect the exercise type (squat / bench press / deadlift) and camera view (front / side) with confidence scores.
 - Automatically count repetitions.
 - Calculate key joint angles (knee, hip, shoulder).
 - Detect potential technique errors with ≥90% target accuracy.
@@ -82,7 +82,7 @@ streamlit run src/app.py
 **Automatic Exercise & View Detection (MVP)**
 
 - Added `src/exercise_detection/exercise_detector.py` (and `src/exercise_detection/__init__.py`).
-- Detects squat / bench / deadlift + front / side with a confidence score.
+- Detects squat / bench press / deadlift + front / side with a confidence score.
 - Uses MediaPipe landmarks with heuristics (ROMs, pelvis displacement, wrist travel) and new view cues:
   - Shoulder yaw (3D angle from left/right shoulder depth).
   - Shoulder z-depth delta (asymmetry).
@@ -103,7 +103,7 @@ streamlit run src/app.py
 **Debugging & tests**
 
 - Lightweight debug logging prints a single `DET DEBUG` line with kinematic and view stats (ROMs, width mean/std, yaw median, z-depth median).
-- Synthetic fixtures for squat/bench/deadlift and front vs side view checks.
+- Synthetic fixtures for squat/bench press/deadlift and front vs side view checks.
 
 ## What’s new in 1.1
 

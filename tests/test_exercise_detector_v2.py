@@ -132,6 +132,43 @@ def _bench_series() -> FeatureSeries:
     return _make_feature_series(data, sr)
 
 
+def _front_squat_series() -> FeatureSeries:
+    sr = 30.0
+    t, n = _timebase(sr, 12.0)
+    freq = 0.5
+    knee_left = 155 - 60 * np.sin(2 * np.pi * freq * t)
+    knee_right = 152 - 55 * np.sin(2 * np.pi * freq * t + 0.1)
+    hip_left = 168 - 55 * np.sin(2 * np.pi * freq * t)
+    hip_right = 170 - 52 * np.sin(2 * np.pi * freq * t + 0.05)
+    pelvis_y = 0.52 + 0.085 * (1 - np.cos(2 * np.pi * freq * t))
+    torso_tilt = _base_template(n, 20.0)
+    wrist_x_left = 0.42 + 0.035 * np.sin(2 * np.pi * freq * t)
+    wrist_x_right = 0.41 + 0.035 * np.sin(2 * np.pi * freq * t + 0.08)
+
+    data = {
+        "knee_angle_left": knee_left,
+        "knee_angle_right": knee_right,
+        "hip_angle_left": hip_left,
+        "hip_angle_right": hip_right,
+        "elbow_angle_left": _base_template(n, 150.0),
+        "elbow_angle_right": _base_template(n, 149.0),
+        "shoulder_angle_left": _base_template(n, 128.0),
+        "shoulder_angle_right": _base_template(n, 129.0),
+        "pelvis_y": pelvis_y,
+        "torso_length": _base_template(n, 0.50),
+        "wrist_left_x": wrist_x_left,
+        "wrist_right_x": wrist_x_right,
+        "wrist_left_y": 0.44 + 0.02 * np.sin(2 * np.pi * freq * t),
+        "wrist_right_y": 0.43 + 0.02 * np.sin(2 * np.pi * freq * t + 0.08),
+        "shoulder_width_norm": _base_template(n, 0.64),
+        "ankle_width_norm": _base_template(n, 0.59),
+        "shoulder_yaw_deg": _base_template(n, 10.0),
+        "shoulder_z_delta_abs": _base_template(n, 0.02),
+        "torso_tilt_deg": torso_tilt,
+    }
+    return _make_feature_series(data, sr)
+
+
 def _deadlift_series() -> FeatureSeries:
     sr = 30.0
     t, n = _timebase(sr, 14.0)
@@ -181,7 +218,7 @@ def test_synthetic_squat_detection():
 def test_synthetic_bench_detection():
     features = _bench_series()
     label, _, confidence = classify_features(features)
-    assert label == "bench"
+    assert label == "bench_press"
     assert confidence >= 0.70
 
 
@@ -190,6 +227,13 @@ def test_synthetic_deadlift_detection():
     label, _, confidence = classify_features(features)
     assert label == "deadlift"
     assert confidence >= 0.70
+
+
+def test_front_squat_not_misclassified_as_bench_press():
+    features = _front_squat_series()
+    label, _, confidence = classify_features(features)
+    assert label == "squat"
+    assert confidence >= 0.60
 
 
 def test_ambiguous_patterns_yield_unknown():
