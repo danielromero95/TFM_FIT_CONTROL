@@ -613,37 +613,62 @@ def _classify_view(
     side_score = 0.0
     evidence = 0
 
+    front_votes = 0
+    side_votes = 0
+
     if np.isfinite(yaw_med):
         front_score += _score_inverse(yaw_med, YAW_FRONT_MAX_DEG, scale=2.0)
+        if yaw_med <= YAW_FRONT_MAX_DEG * 1.05:
+            front_votes += 1
+        if yaw_med >= YAW_SIDE_MIN_DEG * 0.9:
+            side_votes += 1
         evidence += 1
     if np.isfinite(yaw_p75):
         side_score += _score(yaw_p75, YAW_SIDE_MIN_DEG, scale=2.0)
+        if yaw_p75 >= YAW_SIDE_MIN_DEG:
+            side_votes += 1
 
     if np.isfinite(z_med):
         front_score += _score_inverse(z_med, Z_DELTA_FRONT_MAX, scale=2.0)
         side_score += _score(z_med, Z_DELTA_FRONT_MAX * 1.6, scale=2.0)
+        if z_med <= Z_DELTA_FRONT_MAX * 1.05:
+            front_votes += 1
+        if z_med >= Z_DELTA_FRONT_MAX * 1.6:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_mean):
         front_score += _score(width_mean, VIEW_FRONT_WIDTH_THRESHOLD, scale=2.0)
         side_score += _score_inverse(width_mean, SIDE_WIDTH_MAX, scale=2.0)
+        if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD * 0.96:
+            front_votes += 1
+        if width_mean <= SIDE_WIDTH_MAX * 1.04:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_std):
         front_score += _score_inverse(width_std, VIEW_WIDTH_STD_THRESHOLD, scale=2.0)
         side_score += _score(width_std, VIEW_WIDTH_STD_THRESHOLD * 0.9, scale=2.0)
+        if width_std <= VIEW_WIDTH_STD_THRESHOLD * 0.9:
+            front_votes += 1
+        if width_std >= VIEW_WIDTH_STD_THRESHOLD * 1.05:
+            side_votes += 1
         evidence += 1
 
     if np.isfinite(width_p10):
         front_score += _score(width_p10, VIEW_FRONT_WIDTH_THRESHOLD * 0.9, scale=1.8)
         side_score += _score_inverse(width_p10, SIDE_WIDTH_MAX * 1.1, scale=1.8)
+        if width_p10 >= VIEW_FRONT_WIDTH_THRESHOLD * 0.85:
+            front_votes += 1
+        if width_p10 <= SIDE_WIDTH_MAX * 1.1:
+            side_votes += 1
 
     scores = {"front": float(front_score), "side": float(side_score)}
     view = _pick_view_label(scores, evidence)
 
     logger.info(
         "VIEW DEBUG — scores=%s evidence=%d yawMed=%.1f yawP75=%.1f zMed=%.3f widthMean=%.3f "
-        "widthStd=%.3f widthP10=%.3f",
+        "widthStd=%.3f widthP10=%.3f frontVotes=%d sideVotes=%d",
         scores,
         evidence,
         float(yaw_med) if np.isfinite(yaw_med) else float("nan"),
@@ -652,6 +677,8 @@ def _classify_view(
         float(width_mean) if np.isfinite(width_mean) else float("nan"),
         float(width_std) if np.isfinite(width_std) else float("nan"),
         float(width_p10) if np.isfinite(width_p10) else float("nan"),
+        front_votes,
+        side_votes,
     )
 
     if view == "unknown":
