@@ -4,7 +4,7 @@ import hashlib
 
 import streamlit as st
 
-from src.ui.state import Step, get_state, go_to, reset_state
+from src.ui.state import Step, get_state, go_to, reset_state, trigger_rerun
 from src.ui.steps.utils import ensure_video_path
 
 
@@ -47,7 +47,4 @@ def _upload_step() -> None:
             and uploader_state in (None, "")
         ):
             reset_state()
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
+            trigger_rerun()
