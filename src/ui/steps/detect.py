@@ -37,7 +37,7 @@ def _detect_step() -> None:
         render_uniform_video(
             str(video_path),
             key="detect_video",
-            bottom_margin=0.15,
+            bottom_margin=0.0,
         )
 
     step = state.step or Step.UPLOAD
@@ -125,7 +125,7 @@ def _detect_step() -> None:
     actions_placeholder = st.empty()
     if is_active:
         with actions_placeholder.container():
-            back_col, continue_col = st.columns([1, 2])
+            back_col, continue_col = st.columns(2)
             with back_col:
                 if st.button(
                     "Back",

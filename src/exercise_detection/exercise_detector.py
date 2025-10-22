@@ -681,13 +681,6 @@ def _classify_view(
         side_votes,
     )
 
-    vote_margin = front_votes - side_votes
-
-    if vote_margin >= 2 and front_score >= side_score * 0.6:
-        return "front"
-    if vote_margin <= -2 and side_score >= front_score * 0.6:
-        return "side"
-
     if view == "unknown":
         if np.isfinite(yaw_med):
             if yaw_med <= VIEW_FRONT_FALLBACK_YAW_DEG:
@@ -701,10 +694,5 @@ def _classify_view(
                 return "side"
         if np.isfinite(width_mean):
             return "front" if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD else "side"
-
-    if view == "side" and vote_margin >= 1 and front_score >= side_score * 0.85:
-        return "front"
-    if view == "front" and vote_margin <= -1 and side_score >= front_score * 0.85:
-        return "side"
 
     return view
