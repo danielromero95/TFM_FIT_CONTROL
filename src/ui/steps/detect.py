@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.core.types import ExerciseType
 from src.exercise_detection.exercise_detector import detect_exercise
-from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to
+from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, trigger_rerun
 from src.ui.video import render_uniform_video
 
 
@@ -134,10 +134,7 @@ def _detect_step() -> None:
                 ):
                     state.detect_result = None
                     go_to(Step.UPLOAD)
-                    try:
-                        st.rerun()
-                    except Exception:
-                        st.experimental_rerun()
+                    trigger_rerun()
             with continue_col:
                 if st.button(
                     "Continue",
@@ -190,10 +187,7 @@ def _detect_step() -> None:
                                             "accepted": False,
                                             "token": token,
                                         }
-                                try:
-                                    st.rerun()
-                                except Exception:
-                                    st.experimental_rerun()
+                                trigger_rerun()
                     else:
                         state.detect_result = None
                         go_to(Step.CONFIGURE)

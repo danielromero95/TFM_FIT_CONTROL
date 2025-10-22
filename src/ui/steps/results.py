@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
 
 import pandas as pd
 import streamlit as st
@@ -11,11 +11,17 @@ from src.ui.state import get_state
 from src.ui.video import render_uniform_video
 
 
-def _results_panel() -> Dict[str, bool]:
+@dataclass
+class ResultsActions:
+    adjust: bool = False
+    reset: bool = False
+
+
+def _results_panel() -> ResultsActions:
     st.markdown('<div class="results-panel">', unsafe_allow_html=True)
     st.markdown("### 5. Results")
 
-    actions: Dict[str, bool] = {"adjust": False, "reset": False}
+    actions = ResultsActions()
 
     state = get_state()
 
@@ -153,10 +159,10 @@ def _results_panel() -> Dict[str, bool]:
     adjust_col, reset_col = st.columns(2)
     with adjust_col:
         if st.button("Adjust configuration and re-run", key="results_adjust"):
-            actions["adjust"] = True
+            actions.adjust = True
     with reset_col:
         if st.button("Back to start", key="results_reset"):
-            actions["reset"] = True
+            actions.reset = True
 
     st.markdown("</div>", unsafe_allow_html=True)
 
