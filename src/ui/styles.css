@@ -9,24 +9,24 @@ header[data-testid="stHeader"] {
     position: relative;
     display: flex;
     align-items: center;
+    z-index: 1000;
 }
-header[data-testid="stHeader"]::before {
-    content: "Exercise Performance Analicer" !important;
+
+/* Título real dentro del header */
+.app-toolbar-title {
     position: absolute;
     left: 16px;
     top: 50%;
     transform: translateY(-50%);
-    color: #e5e7eb !important;
-    font-weight: 700 !important;
-    font-size: 18px !important;
-    letter-spacing: .2px !important;
+    color: #e5e7eb;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: .2px;
     pointer-events: none;
     max-width: calc(100% - 180px);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: block;
-    z-index: 2;
 }
 
 .form-label {
@@ -111,17 +111,13 @@ header[data-testid="stHeader"]::before {
     height: .5rem;
 }
 
-/* Keep title above content and safe on very narrow viewports */
-header[data-testid="stHeader"] {
-    z-index: 1000;
-}
 @media (max-width: 520px) {
-    header[data-testid="stHeader"] .app-toolbar-title {
+    .app-toolbar-title {
         font-size: 16px;
     }
 }
 @media (max-width: 420px) {
-    header[data-testid="stHeader"] .app-toolbar-title {
+    .app-toolbar-title {
         display: none;
     }
 }
@@ -158,16 +154,47 @@ main [data-testid="stVerticalBlock"] {
 main [data-testid="stVerticalBlock"] > div:first-child {
     margin-top: 0 !important;
 }
-main [data-testid="stHorizontalBlock"] {
-    margin-top: 0 !important;
-    align-items: flex-start !important;
+
+/* --- Streamlit native video widget spacing tweaks --- */
+/* Remove the bottom margin from Streamlit video widgets */
+[data-testid="stVideo"] {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
 }
-main [data-testid="column"] {
-    padding-top: 0 !important;
+
+/* Optional Chrome/Edge helper; functionality must not rely on it */
+:where(section.main .block-container) div.element-container:has([data-testid="stVideo"]) {
+    margin-bottom: 0 !important;
 }
-main [data-testid="column"] > div {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
+
+/* Prevent stray gaps caused by inline video baselines */
+video {
+    display: block;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* --- Video spacing fixes (cross-browser) --- */
+#video-block .element-container {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+#video-block [data-testid="stHorizontalBlock"] {
+    gap: 0 !important;
+}
+
+#video-block [data-testid="stVideo"] {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    line-height: 0 !important;
+}
+
+#video-block video {
+    display: block;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 0 !important;
 }
 
 /* Ensure the results column aligns with step 4 content */
@@ -202,10 +229,6 @@ main [data-testid="column"] > div {
 .results-panel h4 {
     margin-top: .75rem !important;
     margin-bottom: .5rem !important;
-}
-
-.app-step-detect iframe {
-    margin-bottom: 0 !important;
 }
 
 .app-step-detect .form-label--inline {
