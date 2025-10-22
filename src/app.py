@@ -40,6 +40,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import streamlit as st
+
+
+# Ensure Streamlit's configuration is applied before any other interaction.
+st.set_page_config(
+    page_title="FIT CONTROL v2.3",
+    page_icon="🏋️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# importa después de set_page_config cualquier módulo que haga llamadas a st.*
+from src.ui.assets import ensure_toolbar_title
+
+
+def inject_styles() -> None:
+    """Inject custom CSS rules for Streamlit widgets."""
+
+    css_path = Path("src/ui/styles.css")
+    if css_path.exists():
+        st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
+
+
+# Apply custom styles immediately after configuring the page.
+inject_styles()
+
 from src.config.settings import configure_environment
 from src.ui.assets import inject_css, inject_js
 from src.ui.state import AppState, Step, get_state, go_to, reset_state, safe_rerun
