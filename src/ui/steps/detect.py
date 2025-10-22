@@ -126,7 +126,6 @@ def _detect_step() -> None:
     actions_placeholder = st.empty()
     if is_active:
         with actions_placeholder.container():
-            st.markdown('<div class="app-nav-buttons">', unsafe_allow_html=True)
             back_col, continue_col = st.columns(2)
             with back_col:
                 if st.button(
