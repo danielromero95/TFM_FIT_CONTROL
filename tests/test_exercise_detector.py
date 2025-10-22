@@ -101,7 +101,7 @@ def test_classify_bench_like_features() -> None:
     features = _make_feature_series(data)
     label, view, confidence = classify_features(features)
 
-    assert label == "bench"
+    assert label == "bench_press"
     assert view == "side"
     assert confidence >= 0.6
 

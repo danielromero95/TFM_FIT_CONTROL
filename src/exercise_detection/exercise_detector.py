@@ -29,6 +29,9 @@ SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG = 18.0
 BENCH_ELBOW_ROM_THRESHOLD_DEG = 55.0
 BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.08
 BENCH_TORSO_TILT_THRESHOLD_DEG = 40.0  # degrees away from vertical
+BENCH_TORSO_MIN_DEG = 55.0
+BENCH_PELVIS_DROP_NORM_MAX = 0.12
+BENCH_LOWER_ROM_MAX_DEG = 25.0
 
 DEADLIFT_HIP_ROM_THRESHOLD_DEG = 40.0
 DEADLIFT_WRIST_VERTICAL_THRESHOLD = 0.12
@@ -605,6 +608,19 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         + 0.25 * cadence_adjust(cadence_hz, (0.4, 1.2), 1.5)
     )
 
+    bench_gate = min(
+        _score(torso_tilt_mean, BENCH_TORSO_MIN_DEG, scale=1.0),
+        _score_inverse(max(pelvis_drop_norm, 1e-6), BENCH_PELVIS_DROP_NORM_MAX, scale=1.0),
+        _score_inverse(max(knee_rom, 1e-6), BENCH_LOWER_ROM_MAX_DEG, scale=1.0),
+        _score_inverse(max(hip_rom, 1e-6), BENCH_LOWER_ROM_MAX_DEG, scale=1.0),
+    )
+    bench_gate = max(0.0, min(1.0, bench_gate))
+
+    bench_score = max(0.0, bench_score * (0.25 + 0.75 * bench_gate))
+    bench_score -= 0.3 * _score(knee_rom, BENCH_LOWER_ROM_MAX_DEG * 1.5)
+    bench_score -= 0.3 * _score(hip_rom, BENCH_LOWER_ROM_MAX_DEG * 1.5)
+    bench_score = max(0.0, bench_score)
+
     deadlift_upright_bonus = max(0.0, DEADLIFT_TORSO_UPRIGHT_TARGET_DEG - torso_tilt_mean)
     deadlift_score = (
         _score(hip_rom, DEADLIFT_HIP_ROM_THRESHOLD_DEG)
@@ -616,7 +632,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     scores = {
         "squat": float(squat_score),
-        "bench": float(bench_score),
+        "bench_press": float(bench_score),
         "deadlift": float(deadlift_score),
     }
 
