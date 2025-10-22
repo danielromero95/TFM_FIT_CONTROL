@@ -65,6 +65,27 @@ def test_classify_squat_like_features() -> None:
     assert confidence >= 0.6
 
 
+def test_classify_squat_like_features_side_view() -> None:
+    length = 48
+    data = _base_feature_data(length)
+    data["knee_angle_left"] = np.linspace(85.0, 155.0, length)
+    data["knee_angle_right"] = np.linspace(87.0, 153.0, length)
+    data["hip_angle_left"] = np.linspace(65.0, 120.0, length)
+    data["hip_angle_right"] = np.linspace(63.0, 118.0, length)
+    data["pelvis_y"] = np.linspace(0.46, 0.64, length)
+    data["shoulder_width_norm"] = np.full(length, 0.38)
+    data["shoulder_yaw_deg"] = np.full(length, 38.0)
+    data["shoulder_z_delta_abs"] = np.full(length, 0.16)
+    data["torso_tilt_deg"] = np.full(length, 18.0)
+
+    features = _make_feature_series(data)
+    label, view, confidence = classify_features(features)
+
+    assert label == "squat"
+    assert view == "side"
+    assert confidence >= 0.55
+
+
 def test_classify_bench_like_features() -> None:
     length = 40
     data = _base_feature_data(length)
