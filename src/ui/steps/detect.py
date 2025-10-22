@@ -30,6 +30,7 @@ EXERCISE_WIDGET_KEY = "exercise_select_value"
 
 
 def _detect_step() -> None:
+    st.markdown('<div class="app-step app-step-detect">', unsafe_allow_html=True)
     st.markdown("### 2. Detect the exercise")
     state = get_state()
     video_path = state.video_path
@@ -37,7 +38,7 @@ def _detect_step() -> None:
         render_uniform_video(
             str(video_path),
             key="detect_video",
-            bottom_margin=0.15,
+            bottom_margin=0.0,
         )
 
     step = state.step or Step.UPLOAD
@@ -125,7 +126,8 @@ def _detect_step() -> None:
     actions_placeholder = st.empty()
     if is_active:
         with actions_placeholder.container():
-            back_col, continue_col = st.columns([1, 2])
+            st.markdown('<div class="app-nav-buttons">', unsafe_allow_html=True)
+            back_col, continue_col = st.columns(2)
             with back_col:
                 if st.button(
                     "Back",
@@ -197,5 +199,7 @@ def _detect_step() -> None:
                     else:
                         state.detect_result = None
                         go_to(Step.CONFIGURE)
+            st.markdown("</div>", unsafe_allow_html=True)
     else:
         actions_placeholder.empty()
+    st.markdown("</div>", unsafe_allow_html=True)
