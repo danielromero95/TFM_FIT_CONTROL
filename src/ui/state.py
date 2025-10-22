@@ -104,3 +104,12 @@ def reset_state(*, preserve_upload: bool = False) -> None:
         state.upload_data = None
         state.upload_token = None
     state.active_upload_token = None
+
+
+def safe_rerun() -> None:
+    """Attempt to rerun the Streamlit script using the stable API first."""
+
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
