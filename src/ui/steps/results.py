@@ -6,7 +6,7 @@ from typing import Dict
 import pandas as pd
 import streamlit as st
 
-from src.pipeline import Report
+from src.pipeline_data import Report
 from src.ui.state import get_state
 from src.ui.video import render_uniform_video
 
