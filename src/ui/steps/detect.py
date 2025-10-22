@@ -30,6 +30,7 @@ EXERCISE_WIDGET_KEY = "exercise_select_value"
 
 
 def _detect_step() -> None:
+    st.markdown('<div class="app-step app-step-detect">', unsafe_allow_html=True)
     st.markdown("### 2. Detect the exercise")
     state = get_state()
     video_path = state.video_path
@@ -197,5 +198,7 @@ def _detect_step() -> None:
                     else:
                         state.detect_result = None
                         go_to(Step.CONFIGURE)
+            st.markdown("</div>", unsafe_allow_html=True)
     else:
         actions_placeholder.empty()
+    st.markdown("</div>", unsafe_allow_html=True)

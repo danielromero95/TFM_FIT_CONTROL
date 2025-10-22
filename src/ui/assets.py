@@ -168,6 +168,80 @@ _INLINE_CSS = """
     margin-top: 0 !important;
   }
 
+  .app-step-detect iframe {
+    margin-bottom: 0 !important;
+  }
+
+  .app-step-detect .form-label--inline {
+    min-height: auto;
+  }
+
+  .app-step-detect [data-testid="stHorizontalBlock"] {
+    margin-top: .25rem !important;
+    align-items: center !important;
+  }
+
+  .app-step-detect [data-testid="column"] > div {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  .app-step-detect .app-nav-buttons {
+    margin-top: .75rem;
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
+    margin-top: 0 !important;
+    gap: .75rem !important;
+    align-items: stretch !important;
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="column"] > div {
+    width: 100%;
+  }
+
+  .app-step-detect .app-nav-buttons button {
+    border-radius: 12px !important;
+    min-height: 44px;
+    width: 100%;
+    font-weight: 600;
+    font-size: .95rem;
+    letter-spacing: .01em;
+    border: 1px solid transparent;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="column"]:first-child button {
+    background: transparent !important;
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, .6) !important;
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="column"]:first-child button:hover:not(:disabled) {
+    background: rgba(239, 68, 68, .10) !important;
+    border-color: rgba(239, 68, 68, .9) !important;
+    transform: translateY(-1px);
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="column"]:last-child button {
+    background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
+    color: #ecfdf5 !important;
+    border-color: rgba(34, 197, 94, .8) !important;
+    box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
+  }
+
+  .app-step-detect .app-nav-buttons [data-testid="column"]:last-child button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
+  }
+
+  .app-step-detect .app-nav-buttons button:disabled {
+    opacity: .55 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
+  }
+
   /* Ensure the results column aligns with step 4 content */
   .results-panel {
     margin-top: 0 !important;
@@ -287,61 +361,6 @@ _APP_ENHANCER = """
 
     function applyEnhancements() {
       ensureToolbarTitle(false);
-      applyNavButtonClasses();
-      tagDetectStep();
-    }
-
-    function applyNavButtonClasses() {
-      const wrappers = doc.querySelectorAll('div[data-testid="stButton"]');
-      wrappers.forEach((wrapper) => {
-        wrapper.classList.remove('app-button-wrapper');
-      });
-
-      const buttons = doc.querySelectorAll('div[data-testid="stButton"] button');
-      buttons.forEach((button) => {
-        const text = (button.textContent || '').trim().toLowerCase();
-        button.classList.remove('app-button', 'app-button--back', 'app-button--continue', 'app-button--disabled');
-        if (!text) {
-          return;
-        }
-
-        if (text === 'back') {
-          button.classList.add('app-button', 'app-button--back');
-          const wrapper = button.closest('div[data-testid="stButton"]');
-          if (wrapper) {
-            wrapper.classList.add('app-button-wrapper');
-          }
-        }
-
-        if (text === 'continue') {
-          button.classList.add('app-button', 'app-button--continue');
-          const wrapper = button.closest('div[data-testid="stButton"]');
-          if (wrapper) {
-            wrapper.classList.add('app-button-wrapper');
-          }
-        }
-
-        if (button.disabled) {
-          button.classList.add('app-button--disabled');
-        }
-      });
-    }
-
-    function tagDetectStep() {
-      doc.querySelectorAll('.app-step-detect').forEach((node) => {
-        node.classList.remove('app-step-detect');
-      });
-      const headings = Array.from(doc.querySelectorAll('h3'));
-      for (const heading of headings) {
-        const label = (heading.textContent || '').trim().toLowerCase();
-        if (!label.startsWith('2. detect the exercise')) {
-          continue;
-        }
-        const block = heading.closest('[data-testid="stVerticalBlock"]');
-        if (block) {
-          block.classList.add('app-step-detect');
-        }
-      }
     }
 
     function init() {
