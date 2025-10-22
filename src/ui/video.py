@@ -97,7 +97,7 @@ def render_uniform_video(
     format: str | None = None,
     start_time: int = 0,
     key: str | None = None,
-    bottom_margin: float = 1.25,
+    bottom_margin: float = 0.0,
 ) -> None:
     """Render ``data`` inside a responsive 16:9 viewport."""
 
@@ -109,8 +109,8 @@ def render_uniform_video(
 
     st.markdown(f'<div id="{marker_id}"></div>', unsafe_allow_html=True)
 
-    padding = 24
-    initial_height = int(round(720 * 9 / 16)) + padding
+    padding = 0
+    initial_height = int(round(720 * 9 / 16))
     html_kwargs: dict[str, object] = {"height": initial_height, "scrolling": False}
     try:
         signature = inspect.signature(html)
@@ -144,7 +144,7 @@ def render_uniform_video(
             if (!inner || !video) return;
             const fit = () => {{
               const w = inner.clientWidth || 720;
-              const h = Math.round(w * 9 / 16) + pad;
+              const h = Math.round(w * 9 / 16) + pad; // pad is 0; no extra space
               if (window.frameElement) {{
                 window.frameElement.style.height = h + 'px';
               }}
@@ -172,21 +172,29 @@ def render_uniform_video(
     )
 
     margin_value = max(bottom_margin, 0.0)
+    extra_margin_css = ""
+    if margin_value > 0:
+        extra_margin_css = (
+            f"\n        #{marker_id} + iframe {{\n"
+            f"          margin-bottom: {margin_value:.2f}rem !important;\n"
+            "        }}\n"
+        )
     st.markdown(
         f"""
         <style>
         #{marker_id} + iframe {{
           width: min(100%, 720px) !important;
-          margin: 0 auto {margin_value:.2f}rem auto !important;
+          margin: 0 auto 0rem auto !important;
           display: block !important;
           border-radius: 12px !important;
           background: #000 !important;
           overflow: hidden !important;
-          box-shadow: 0 18px 36px rgba(15, 23, 42, 0.35);
+          box-shadow: none;
         }}
         #{marker_id} + iframe > iframe {{
           border-radius: 12px !important;
         }}
+        {extra_margin_css}
         </style>
         """,
         unsafe_allow_html=True,

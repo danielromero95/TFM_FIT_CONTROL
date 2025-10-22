@@ -204,8 +204,19 @@ main [data-testid="column"] > div {
     margin-bottom: .5rem !important;
 }
 
-.app-step-detect iframe {
+
+.app-step-detect iframe,
+.results-panel iframe {
     margin-bottom: 0 !important;
+}
+
+.app-step-detect [data-testid="stVerticalBlock"],
+.results-panel [data-testid="stVerticalBlock"] {
+    row-gap: 0rem !important;
+}
+
+main .block-container {
+    padding-bottom: 0 !important;
 }
 
 .app-step-detect .form-label--inline {
@@ -278,6 +289,7 @@ main [data-testid="column"] > div {
     cursor: not-allowed !important;
 }
 
+/* Legacy video container styles (retained for reference; not used by current renderer) */
 /*
   This is the main container for our videos. It creates the black frame.
 */

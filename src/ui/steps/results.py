@@ -43,7 +43,7 @@ def _results_panel() -> Dict[str, bool]:
             render_uniform_video(
                 str(report.debug_video_path),
                 key="results_debug_video",
-                bottom_margin=0.18,
+                bottom_margin=0.0,
             )
 
         if metrics_df is not None:
@@ -108,7 +108,7 @@ def _results_panel() -> Dict[str, bool]:
                 render_uniform_video(
                     str(state.video_path),
                     key="results_original_video",
-                    bottom_margin=0.25,
+                    bottom_margin=0.0,
                 )
 
         if state.metrics_path is not None:
