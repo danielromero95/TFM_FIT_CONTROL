@@ -40,13 +40,11 @@ def _results_panel() -> Dict[str, bool]:
         if report.debug_video_path and bool(
             (state.configure_values or {}).get("debug_video", True)
         ):
-            with st.container():
-                st.markdown('<div id="video-block">', unsafe_allow_html=True)
-                render_uniform_video(
-                    str(report.debug_video_path),
-                    key="results_debug_video",
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+            render_uniform_video(
+                str(report.debug_video_path),
+                key="results_debug_video",
+                bottom_margin=0.18,
+            )
 
         if metrics_df is not None:
             st.markdown(
@@ -107,13 +105,11 @@ def _results_panel() -> Dict[str, bool]:
 
             if state.video_path:
                 st.markdown("### Original video")
-                with st.container():
-                    st.markdown('<div id="video-block">', unsafe_allow_html=True)
-                    render_uniform_video(
-                        str(state.video_path),
-                        key="results_original_video",
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
+                render_uniform_video(
+                    str(state.video_path),
+                    key="results_original_video",
+                    bottom_margin=0.25,
+                )
 
         if state.metrics_path is not None:
             metrics_data = None
