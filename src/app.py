@@ -9,12 +9,36 @@ import threading
 from enum import Enum
 from pathlib import Path
 
-import streamlit as st
-
-# Ensure the project root is available on the import path when Streamlit executes the app
+# --- Ensure the repository root is on sys.path before importing src.* modules ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+import streamlit as st
+
+
+# Ensure Streamlit's configuration is applied before any other interaction.
+st.set_page_config(
+    page_title="FIT CONTROL v2.3",
+    page_icon="🏋️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# importa después de set_page_config cualquier módulo que haga llamadas a st.*
+from src.ui.assets import ensure_toolbar_title
+
+
+def inject_styles() -> None:
+    """Inject custom CSS rules for Streamlit widgets."""
+
+    css_path = Path("src/ui/styles.css")
+    if css_path.exists():
+        st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
+
+
+# Apply custom styles immediately after configuring the page.
+inject_styles()
 
 from src.config.settings import configure_environment
 from src.ui.assets import inject_css, inject_js
@@ -26,7 +50,6 @@ from src.ui.steps.running import _running_step
 from src.ui.steps.upload import _upload_step
 
 configure_environment()
-st.set_page_config(layout="wide", page_title="Exercise Performance Analyzer")
 
 ENABLE_JS_ENHANCEMENTS = os.getenv("ENABLE_JS_ENHANCEMENTS", "1") == "1"
 
@@ -87,6 +110,9 @@ def _reset_app() -> None:
 
 
 def main() -> None:
+    # Inserta el título en la barra superior (visible)
+    ensure_toolbar_title("FIT CONTROL v2.3")
+
     if threading.current_thread() is threading.main_thread():
         inject_css()
         inject_js(enable=ENABLE_JS_ENHANCEMENTS)

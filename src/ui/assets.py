@@ -5,6 +5,35 @@ from __future__ import annotations
 from pathlib import Path
 
 import streamlit as st
+from streamlit.components.v1 import html
+
+
+def ensure_toolbar_title(title: str) -> None:
+    """Ensure the Streamlit toolbar shows the provided title."""
+
+    html(
+        f"""
+    <script>
+      (function() {{
+        const mount = () => {{
+          const header = parent.document.querySelector('header[data-testid="stHeader"]');
+          if (!header) return;
+          let el = header.querySelector('.app-toolbar-title');
+          if (!el) {{
+            el = parent.document.createElement('span');
+            el.className = 'app-toolbar-title';
+            header.appendChild(el);
+          }}
+          el.textContent = {title!r};
+        }};
+        mount();
+        const obs = new MutationObserver(mount);
+        obs.observe(parent.document.body, {{ childList: true, subtree: true }});
+      })();
+    </script>
+    """,
+        height=0,
+    )
 
 
 _ASSETS_DIR = Path(__file__).resolve().parent
@@ -20,35 +49,6 @@ def _load_css(path: str) -> str:
 
 _INLINE_CSS = """
 <style>
-  /* --- Top header with inline title --- */
-  header[data-testid="stHeader"] {
-    background: #0f172a;
-    border-bottom: 1px solid #1f2937;
-    height: 48px;
-    padding-right: 140px;
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-  header[data-testid="stHeader"]::before {
-    content: "Exercise Performance Analyzer" !important;
-    position: absolute;
-    left: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #e5e7eb !important;
-    font-weight: 700 !important;
-    font-size: 18px !important;
-    letter-spacing: .2px !important;
-    pointer-events: none;
-    max-width: calc(100% - 180px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-    z-index: 2;
-  }
-
   .form-label {
     color: #e5e7eb;
     font-weight: 600;
@@ -115,15 +115,6 @@ _INLINE_CSS = """
 
   .spacer-sm { height: .5rem; }
 
-  /* Keep title above content and safe on very narrow viewports */
-  header[data-testid="stHeader"] { z-index: 1000; }
-  @media (max-width: 520px) {
-    header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
-  }
-  @media (max-width: 420px) {
-    header[data-testid="stHeader"] .app-toolbar-title { display: none; }
-  }
-
   /* Pull content closer to the toolbar */
   section[data-testid="stMain"],
   main {
@@ -166,10 +157,6 @@ _INLINE_CSS = """
   main [data-testid="column"] > div {
     padding-top: 0 !important;
     margin-top: 0 !important;
-  }
-
-  .app-step-detect iframe {
-    margin-bottom: 0 !important;
   }
 
   .app-step-detect .form-label--inline {
@@ -271,7 +258,6 @@ _INLINE_CSS = """
 _APP_ENHANCER = """
 <script>
   (() => {
-    const TITLE = "Exercise Performance Analyzer";
     const ENHANCER_KEY = '__appEnhancer';
     const doc = (window.parent && window.parent.document) ? window.parent.document : document;
     if (!doc) {
@@ -284,58 +270,11 @@ _APP_ENHANCER = """
       return;
     }
 
-    const headerObserver = new MutationObserver(() => {
-      ensureToolbarTitle(false);
-    });
-
     const mainObserver = new MutationObserver(() => {
       scheduleEnhancements();
     });
 
     let enhancementFrame = null;
-
-    function ensureToolbarTitle(reattach = true) {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) {
-        return false;
-      }
-      let title = header.querySelector('.app-toolbar-title');
-      if (!title) {
-        title = doc.createElement('div');
-        title.className = 'app-toolbar-title';
-        header.insertBefore(title, header.firstChild);
-      }
-      if (title.textContent !== TITLE) {
-        title.textContent = TITLE;
-      }
-      if (reattach) {
-        attachHeaderObserver();
-      }
-      return true;
-    }
-
-    function ensureToolbarTitleWithRetry() {
-      if (ensureToolbarTitle()) {
-        return;
-      }
-      const retryInterval = setInterval(() => {
-        if (ensureToolbarTitle()) {
-          clearInterval(retryInterval);
-        }
-      }, 150);
-      setTimeout(() => clearInterval(retryInterval), 5000);
-    }
-
-    function attachHeaderObserver() {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) {
-        headerObserver.disconnect();
-        return false;
-      }
-      headerObserver.disconnect();
-      headerObserver.observe(header, { childList: true });
-      return true;
-    }
 
     function attachMainObserver() {
       const main = doc.querySelector('main');
@@ -360,12 +299,11 @@ _APP_ENHANCER = """
     }
 
     function applyEnhancements() {
-      ensureToolbarTitle(false);
+      // The toolbar title is now managed via ensure_toolbar_title() in app.py.
+      // Add future DOM tweaks for other components here.
     }
 
     function init() {
-      ensureToolbarTitleWithRetry();
-      attachHeaderObserver();
       attachMainObserver();
       applyEnhancements();
     }
@@ -378,9 +316,8 @@ _APP_ENHANCER = """
 
     doc[ENHANCER_KEY] = {
       init,
-      ensure: ensureToolbarTitleWithRetry,
+      ensure: applyEnhancements,
     };
-    doc.__appToolbarTitleInit = doc[ENHANCER_KEY];
   })();
 </script>
 """
