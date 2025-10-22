@@ -35,13 +35,11 @@ def _detect_step() -> None:
     state = get_state()
     video_path = state.video_path
     if video_path:
-        with st.container():
-            st.markdown('<div id="video-block">', unsafe_allow_html=True)
-            render_uniform_video(
-                str(video_path),
-                key="detect_video",
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
+        render_uniform_video(
+            str(video_path),
+            key="detect_video",
+            bottom_margin=0.0,
+        )
 
     step = state.step or Step.UPLOAD
     is_active = (step == Step.DETECT) and (video_path is not None)
