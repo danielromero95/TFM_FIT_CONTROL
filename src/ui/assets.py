@@ -63,44 +63,44 @@ _INLINE_CSS = """
     min-height: 38px;
   }
 
-  /* Target the Streamlit button that follows our marker */
-  .btn-danger + div .stButton > button,
-  .btn-danger + div button {
+  /* Styled navigation buttons */
+  .app-button {
     border-radius: 12px !important;
-    min-height: 40px;
-    min-width: 140px;
-    background: transparent !important;
-    color: #ef4444 !important;
-    border: 1px solid rgba(239, 68, 68, .6) !important;
+    min-height: 44px;
+    width: 100%;
+    font-weight: 600;
+    font-size: .95rem;
+    letter-spacing: .01em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
     transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
   }
-  .btn-danger + div .stButton > button:hover,
-  .btn-danger + div button:hover {
-    background: rgba(239,68,68,.10) !important;
-    border-color: rgba(239,68,68,.9) !important;
+
+  .app-button--back {
+    background: transparent !important;
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, .6) !important;
+  }
+  .app-button--back:hover {
+    background: rgba(239, 68, 68, .10) !important;
+    border-color: rgba(239, 68, 68, .9) !important;
     transform: translateY(-1px);
   }
 
-  .btn-success + div .stButton > button,
-  .btn-success + div button {
-    border-radius: 12px !important;
-    min-height: 40px;
-    min-width: 140px;
+  .app-button--continue {
     background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
     color: #ecfdf5 !important;
-    border: 1px solid rgba(34, 197, 94, .8) !important;
+    border-color: rgba(34, 197, 94, .8) !important;
     box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
-    transition: transform .15s ease, box-shadow .15s ease;
   }
-  .btn-success + div .stButton > button:hover,
-  .btn-success + div button:hover {
+  .app-button--continue:hover {
     transform: translateY(-1px);
     box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
   }
 
-  /* Disabled state */
-  .btn-danger + div .stButton > button[disabled],
-  .btn-success + div .stButton > button[disabled] {
+  .app-button--disabled {
     opacity: .55 !important;
     transform: none !important;
     box-shadow: none !important;
