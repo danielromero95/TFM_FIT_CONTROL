@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.state import CONFIG_DEFAULTS, Step, get_state, go_to
+from src.ui.state import CONFIG_DEFAULTS, Step, get_state, go_to, trigger_rerun
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
@@ -111,7 +111,4 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             ):
                 state.configure_values = current_values
                 go_to(Step.RUNNING)
-                try:
-                    st.rerun()
-                except Exception:
-                    st.experimental_rerun()
+                trigger_rerun()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -194,6 +195,9 @@ _INLINE_CSS = """
 """
 
 
+_JS_FEATURE_FLAG = "STREAMLIT_ENABLE_UI_JS"
+
+
 _APP_ENHANCER = """
 <script>
   (() => {
@@ -380,8 +384,18 @@ def inject_css() -> None:
     st.markdown(_INLINE_CSS, unsafe_allow_html=True)
 
 
-def inject_js(enable: bool = True) -> None:
+def is_js_feature_enabled() -> bool:
+    """Return whether the UI enhancer JavaScript should be injected."""
+
+    value = os.environ.get(_JS_FEATURE_FLAG, "1").strip().lower()
+    return value not in {"0", "false", "off", "no"}
+
+
+def inject_js(enable: bool | None = None) -> None:
     """Inject the app enhancer script if enabled."""
+
+    if enable is None:
+        enable = is_js_feature_enabled()
     if not enable:
         return
     st.markdown(_APP_ENHANCER, unsafe_allow_html=True)
