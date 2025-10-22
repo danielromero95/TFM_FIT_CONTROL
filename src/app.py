@@ -5,12 +5,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-import threading
-
-# Ensure the project root is available on the import path when Streamlit executes the app
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 
@@ -26,6 +20,11 @@ from src.ui.steps.upload import _upload_step
 st.set_page_config(layout="wide", page_title="Exercise Performance Analyzer")
 
 configure_environment()
+
+# Ensure the project root is available on the import path when Streamlit executes the app
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 def _reset_app() -> None:
     reset_state()
