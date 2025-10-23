@@ -32,8 +32,7 @@ def _build_payload(
 
     if "frame_idx" in df.columns:
         frame_idx = pd.to_numeric(df["frame_idx"], errors="coerce")
-        # FutureWarning: usar ffill/bfill en vez de fillna(method=...)
-        frame_idx = frame_idx.ffill().bfill()
+        frame_idx = frame_idx.fillna(method="ffill").fillna(method="bfill")
         times_series = frame_idx.astype(float) / fps
         x_mode = "time"
     else:

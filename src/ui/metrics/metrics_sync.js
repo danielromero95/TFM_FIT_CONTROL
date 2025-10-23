@@ -35,24 +35,15 @@
   }));
 
   const layout = {
-    // margen inferior extra para que la leyenda no se recorte
-    margin: { l: 56, r: 24, t: 10, b: 96 },
-    // forzar tema claro y colores por defecto legibles
-    template: "plotly_white",
-    paper_bgcolor: "#ffffff",
-    plot_bgcolor: "#ffffff",
-    font: {
-      family: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
-      size: 12,
-      color: "#111827" // gris muy oscuro
-    },
+    margin: { l: 56, r: 24, t: 10, b: 84 },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "#ffffff",             // fondo claro
     showlegend: true,
     legend: {
       orientation: "h",
       x: 0.5, xanchor: "center",
-      y: -0.22, yanchor: "top",
-      bgcolor: "rgba(0,0,0,0)",
-      bordercolor: "rgba(0,0,0,0)"
+      y: -0.28, yanchor: "top",
+      font: { color: "#111827", size: 12 } // gray-900
     },
     hovermode: "x unified",
     xaxis: {
@@ -60,25 +51,15 @@
       zeroline: false,
       showgrid: true,
       gridcolor: "#e5e7eb",
-      showticklabels: true,
       tickfont:  { size: 12, color: "#111827" },
       titlefont: { size: 12, color: "#111827" },
-      ticks: "outside",
-      tickcolor: "#111827",
-      ticklen: 4,
-      tickwidth: 1,
       tickformat: (DATA.x_mode === "time") ? ".1f" : null
     },
     yaxis: {
       zeroline: false,
       showgrid: true,
       gridcolor: "#e5e7eb",
-      showticklabels: true,
-      tickfont: { size: 12, color: "#111827" },
-      ticks: "outside",
-      tickcolor: "#111827",
-      ticklen: 4,
-      tickwidth: 1
+      tickfont: { size: 12, color: "#111827" }
     },
     shapes: [cursor, ...bands]
   };
