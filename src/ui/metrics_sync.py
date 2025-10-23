@@ -66,7 +66,7 @@ def render_video_with_metrics_sync(
     scroll_zoom: bool = True,
     key: str = "video_metrics_sync",
     max_width_px: int = 720,
-    bottom_margin_rem: float = 1.0,
+    bottom_margin_rem: float = 0.0,
 ) -> None:
     """
     Visor combinado: vídeo + gráfica Plotly con cursor sincronizado.
@@ -101,6 +101,8 @@ def render_video_with_metrics_sync(
     video_id = f"vmx-video-{uuid.uuid4().hex}"
     plot_id = f"vmx-plot-{uuid.uuid4().hex}"
     wrapper_id = f"vmx-wrap-{uuid.uuid4().hex}"
+
+    bottom_margin_value = max(float(bottom_margin_rem), 0.0)
 
     template = Template(
         """
@@ -249,7 +251,7 @@ def render_video_with_metrics_sync(
             data_json=data_json,
             plot_config_json=plot_config_json,
             max_width=max_width_px,
-            bottom_margin=f"{bottom_margin_rem:.2f}rem",
+            bottom_margin=f"{bottom_margin_value:.2f}rem",
         ),
         **html_kwargs,
     )

@@ -138,7 +138,11 @@ main > div:first-child {
 }
 main .block-container {
     padding-top: 0 !important;
+    padding-bottom: 0 !important;
     margin-top: 0 !important;
+}
+div[data-testid="stVideo"] {
+    margin-bottom: 0 !important;
 }
 main .block-container > div:first-child {
     padding-top: 0 !important;
@@ -186,6 +190,15 @@ main [data-testid="column"] > div {
 .results-panel video {
     border-radius: 12px;
 }
+.results-panel iframe,
+.results-panel div[data-testid="stVideo"] {
+    margin-bottom: 0 !important;
+}
+.results-panel [data-testid="stVerticalBlock"],
+.app-step-detect [data-testid="stVerticalBlock"] {
+    row-gap: 0 !important;
+    gap: 0 !important;
+}
 .results-panel [data-testid="stHorizontalBlock"] {
     gap: .5rem !important;
 }
@@ -204,10 +217,10 @@ main [data-testid="column"] > div {
     margin-bottom: .5rem !important;
 }
 
-.app-step-detect iframe {
+.app-step-detect iframe,
+.app-step-detect div[data-testid="stVideo"] {
     margin-bottom: 0 !important;
 }
-
 .app-step-detect .form-label--inline {
     min-height: auto;
 }
@@ -278,6 +291,7 @@ main [data-testid="column"] > div {
     cursor: not-allowed !important;
 }
 
+/* legacy, no usado */
 /*
   This is the main container for our videos. It creates the black frame.
 */

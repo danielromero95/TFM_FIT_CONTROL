@@ -182,7 +182,7 @@ def _results_panel() -> Dict[str, bool]:
                             rep_intervals=rep_intervals,
                             start_at_s=start_at_s,
                             key="results_video_metrics_sync",
-                            bottom_margin_rem=0.18,
+                            bottom_margin_rem=0.0,
                         )
                         rendered_sync_viewer = True
                     else:
@@ -204,7 +204,7 @@ def _results_panel() -> Dict[str, bool]:
             render_uniform_video(
                 preferred_video_path,
                 key="results_video_fallback",
-                bottom_margin=0.18,
+                bottom_margin=0.0,
             )
 
         stats_rows = [
@@ -251,7 +251,7 @@ def _results_panel() -> Dict[str, bool]:
                 render_uniform_video(
                     str(state.video_path),
                     key="results_original_video",
-                    bottom_margin=0.25,
+                    bottom_margin=0.0,
                 )
 
         if state.metrics_path is not None:
