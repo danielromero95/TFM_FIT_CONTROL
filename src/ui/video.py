@@ -91,6 +91,16 @@ def _video_source(
     return _data_uri(str(path), mtime=mtime, mime=mime), mime
 
 
+def get_video_source(
+    data: VideoData,
+    *,
+    format: str | None = None,
+) -> tuple[str, str]:
+    """Public wrapper around _video_source for reuse in other modules."""
+
+    return _video_source(data, format=format)
+
+
 def render_uniform_video(
     data: VideoData,
     *,
