@@ -17,13 +17,17 @@ class PoseEstimator:
         self.pose = self.mp_pose.Pose(static_image_mode=static_image_mode, model_complexity=model_complexity, min_detection_confidence=min_detection_confidence)
     def estimate(self, image):
         results = self.pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        if not results.pose_landmarks: return None, image
+        if not results.pose_landmarks: return None, image, None
         landmarks = [{'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility} for lm in results.pose_landmarks.landmark]
         annotated_image = image.copy()
         self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, POSE_CONNECTIONS)
-        return landmarks, annotated_image
+        return landmarks, annotated_image, None
     def close(self):
         self.pose.close()
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 class CroppedPoseEstimator:
     def __init__(self, static_image_mode=True, model_complexity=MODEL_COMPLEXITY, min_detection_confidence=MIN_DETECTION_CONFIDENCE, crop_margin=0.15, target_size=(256, 256)):
@@ -56,3 +60,7 @@ class CroppedPoseEstimator:
         return landmarks_crop, annotated_crop, crop_box
     def close(self):
         self.pose_full.close(); self.pose_crop.close()
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
