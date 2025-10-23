@@ -7,7 +7,7 @@ from typing import Callable, List, Tuple
 import cv2
 
 from src import config
-from .video_metadata import get_video_rotation
+from .video_metadata import read_video_file_info
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,19 @@ def extract_and_preprocess_frames(
     if ext not in config.VIDEO_EXTENSIONS:
         raise ValueError(f"Unsupported video extension: '{ext}'.")
 
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be a positive integer")
+
+    info = read_video_file_info(video_path)
+    fps_from_metadata = float(info.fps or 0.0)
+
     # Auto-detect rotation when not provided explicitly.
     if rotate is None:
-        rotate = get_video_rotation(video_path)
+        rotate = int(info.rotation or 0)
+
+    logger.info(
+        "Metadata summary: fps=%.2f rotation=%s", fps_from_metadata, rotate
+    )
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -64,5 +74,7 @@ def extract_and_preprocess_frames(
         idx += 1
 
     cap.release()
+    if progress_callback and frame_count > 0 and last_percent_done < 100:
+        progress_callback(100)
     logger.info("Process complete. Extracted %d frames into memory.", len(original_frames))
     return original_frames, fps
