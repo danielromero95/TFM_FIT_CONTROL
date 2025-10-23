@@ -85,7 +85,7 @@ streamlit run src/app.py
 
 - Results UX improvements. Metric selection is persisted, frame_idx is hidden from the picker, and the app gracefully falls back to the legacy video renderer when metrics are unavailable or unselected.
 
-- Modular architecture. New src/ui/metrics_sync.py component encapsulates the viewer and can be reused across screens.
+- Modular architecture. New src/ui/metrics/metrics_sync.py component encapsulates the viewer and can be reused across screens.
 
 
 ## What’s new in 2.3

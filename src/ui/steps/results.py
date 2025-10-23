@@ -15,7 +15,7 @@ from src.D_modeling.count_reps import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.state import get_state
 from src.ui.video import render_uniform_video
-from src.ui.metrics_sync import render_video_with_metrics_sync
+from src.ui.metrics import render_video_with_metrics_sync
 
 
 def _compute_rep_intervals(
