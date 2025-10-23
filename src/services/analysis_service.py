@@ -13,7 +13,7 @@ import cv2
 from src import config
 from src.config.constants import MIN_DETECTION_CONFIDENCE
 from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
-from src.A_preprocessing.video_metadata import get_video_rotation, probe_video_metadata
+from src.A_preprocessing.video_metadata import read_video_file_info
 from src.B_pose_estimation.processing import (
     calculate_metrics_from_sequence,
     extract_landmarks_from_frames,
@@ -65,13 +65,25 @@ def run_pipeline(
 
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
-    fps_original, _frame_count, fps_warning, prefer_reader_fps = probe_video_metadata(video_path)
+    info = read_video_file_info(video_path)
+
+    # Derivar variables equivalentes para el plan de muestreo
+    fps_original = float(info.fps or 0.0)
+
+    # Reconstituir un mensaje de warning similar cuando el FPS no es "metadata"
+    fps_warning = None
+    prefer_reader_fps = False
+    if info.fps_source == "estimated":
+        fps_warning = f"Invalid metadata FPS. Estimated from video duration ({fps_original:.2f} fps)."
+    elif info.fps_source == "reader":
+        fps_warning = "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
+        prefer_reader_fps = True
 
     initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
 
     rotate = cfg.pose.rotate
     if rotate is None:
-        rotate = get_video_rotation(video_path)
+        rotate = int(info.rotation or 0)
 
     frames, fps_from_reader = extract_and_preprocess_frames(
         video_path=video_path,
@@ -352,8 +364,7 @@ def _plan_sampling(
     return sample_rate, float(fps_effective), float(fps_base), warnings
 
 
-# (moved) probe_video_metadata and _estimate_duration_seconds now live in:
-# src/A_preprocessing/video_metadata.py
+# Video metadata handled by: src/A_preprocessing/video_metadata.read_video_file_info
 
 def _apply_settings(cfg: config.Config, settings: Dict[str, Any]) -> None:
     """Bridge legacy dictionary settings into the structured ``Config`` object."""

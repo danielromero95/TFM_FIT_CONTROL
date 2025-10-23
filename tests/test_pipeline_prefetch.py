@@ -1,11 +1,14 @@
 # tests/test_pipeline_prefetch.py
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from src import config
 from src.D_modeling.count_reps import CountingDebugInfo
 from src.services.analysis_service import run_pipeline
+from src.A_preprocessing.video_metadata import VideoInfo
 
 
 def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
@@ -23,8 +26,18 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(20)]
 
     monkeypatch.setattr(
-        "src.services.analysis_service._probe_video_metadata",
-        lambda _path: (30.0, 600, None, False),
+        "src.services.analysis_service.read_video_file_info",
+        lambda _path: VideoInfo(
+            path=Path(_path),
+            width=640,
+            height=480,
+            fps=30.0,
+            frame_count=600,
+            duration_sec=20.0,
+            rotation=0,
+            codec="H264",
+            fps_source="metadata",
+        ),
     )
 
     monkeypatch.setattr(
