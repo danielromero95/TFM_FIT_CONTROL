@@ -1,14 +1,121 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
 
-from src.pipeline_data import Report
+try:  # SciPy is available in the runtime that executes the pipeline.
+    from scipy.signal import find_peaks
+except Exception:  # pragma: no cover - gracefully handle stripped environments
+    find_peaks = None  # type: ignore
+
+from src.D_modeling.count_reps import count_repetitions_with_config
+from src.pipeline_data import Report, RunStats
 from src.ui.state import get_state
 from src.ui.video import render_uniform_video
+from src.ui.metrics_sync import render_video_with_metrics_sync
+
+
+def _compute_rep_intervals(
+    metrics_df: pd.DataFrame,
+    report: Report,
+    stats: RunStats,
+    numeric_columns: List[str],
+) -> List[Tuple[int, int]]:
+    if metrics_df.empty:
+        return []
+
+    fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
+    fps = fps if fps > 0 else 1.0
+
+    df = metrics_df.reset_index(drop=True)
+    if "frame_idx" in df.columns:
+        frame_values = pd.to_numeric(df["frame_idx"], errors="coerce")
+        fallback_index = pd.Series(range(len(df)))
+        frame_values = frame_values.where(~frame_values.isna(), fallback_index)
+    else:
+        frame_values = pd.Series(range(len(df)))
+
+    if frame_values.empty:
+        return []
+
+    first_frame = int(frame_values.iloc[0])
+    last_frame = int(frame_values.iloc[-1]) if len(frame_values) > 1 else first_frame + 1
+
+    candidate_column: Optional[str] = getattr(stats, "primary_angle", None)
+    if not candidate_column or candidate_column not in df.columns:
+        for fallback in ("left_knee", "right_knee"):
+            if fallback in df.columns:
+                candidate_column = fallback
+                break
+    if not candidate_column or candidate_column not in df.columns:
+        candidate_column = numeric_columns[0] if numeric_columns else None
+    if not candidate_column or candidate_column not in df.columns:
+        return []
+
+    valley_indices: List[int] = []
+    counting_cfg = getattr(getattr(report, "config_used", None), "counting", None)
+    if counting_cfg is not None:
+        try:
+            _, debug = count_repetitions_with_config(df, counting_cfg, fps)
+            valley_indices = list(getattr(debug, "valley_indices", []))
+        except Exception:
+            valley_indices = []
+
+    if not valley_indices and find_peaks is not None:
+        series = pd.to_numeric(df[candidate_column], errors="coerce").ffill().bfill()
+        values = series.to_numpy()
+        if values.size:
+            prominence = float(getattr(stats, "min_prominence", 0.0) or 0.0)
+            prominence_param = None if prominence <= 0 else prominence
+            distance_sec = float(getattr(stats, "min_distance_sec", 0.0) or 0.0)
+            distance_frames = max(1, int(round(distance_sec * fps)))
+            valleys, _ = find_peaks(-values, prominence=prominence_param, distance=distance_frames)
+            valley_indices = [int(idx) for idx in valleys]
+            refractory_sec = float(getattr(stats, "refractory_sec", 0.0) or 0.0)
+            if refractory_sec > 0 and valley_indices:
+                refractory_frames = max(1, int(round(refractory_sec * fps)))
+                filtered: List[int] = []
+                for idx in valley_indices:
+                    if filtered and idx - filtered[-1] < refractory_frames:
+                        continue
+                    filtered.append(idx)
+                valley_indices = filtered
+
+    if not valley_indices:
+        return []
+
+    frame_count = len(frame_values)
+    valley_frames: List[int] = []
+    for idx in valley_indices:
+        pos = min(max(idx, 0), frame_count - 1)
+        valley_frames.append(int(frame_values.iloc[pos]))
+
+    valley_frames = sorted(set(valley_frames))
+    if not valley_frames:
+        return []
+
+    total_frames = max(last_frame, first_frame)
+    if total_frames <= first_frame:
+        total_frames = first_frame + max(len(df) - 1, 1)
+
+    intervals: List[Tuple[int, int]] = []
+    for i, frame in enumerate(valley_frames):
+        if i == 0:
+            start_frame = first_frame
+        else:
+            start_frame = int(round((valley_frames[i - 1] + frame) / 2))
+        if i == len(valley_frames) - 1:
+            end_frame = total_frames
+        else:
+            end_frame = int(round((frame + valley_frames[i + 1]) / 2))
+        start_frame = max(first_frame, start_frame)
+        end_frame = max(start_frame, end_frame)
+        intervals.append((start_frame, end_frame))
+
+    return intervals
 
 
 def _results_panel() -> Dict[str, bool]:
@@ -27,24 +134,28 @@ def _results_panel() -> Dict[str, bool]:
         stats = report.stats
         repetitions = report.repetitions
         metrics_df = report.metrics
+        if metrics_df is not None:
+            metrics_df = metrics_df.reset_index(drop=True)
         numeric_columns: list[str] = []
         if metrics_df is not None:
             numeric_columns = [
                 col
                 for col in metrics_df.columns
-                if metrics_df[col].dtype.kind in "fi"
+                if metrics_df[col].dtype.kind in "fi" and col != "frame_idx"
             ]
 
         st.markdown(f"**Detected repetitions:** {repetitions}")
 
-        if report.debug_video_path and bool(
-            (state.configure_values or {}).get("debug_video", True)
-        ):
-            render_uniform_video(
-                str(report.debug_video_path),
-                key="results_debug_video",
-                bottom_margin=0.18,
-            )
+        debug_video_enabled = bool((state.configure_values or {}).get("debug_video", True))
+        debug_video_path = str(report.debug_video_path) if report.debug_video_path else None
+        preferred_video_path = None
+        if debug_video_enabled and debug_video_path:
+            preferred_video_path = debug_video_path
+        elif state.video_path:
+            preferred_video_path = str(state.video_path)
+
+        rendered_sync_viewer = False
+        should_render_fallback_video = metrics_df is None
 
         if metrics_df is not None:
             st.markdown(
@@ -57,12 +168,71 @@ def _results_panel() -> Dict[str, bool]:
                     "View metrics",
                     options=numeric_columns,
                     default=default_selection,
+                    key="metrics_multiselect",
                 )
                 if selected_metrics:
-                    st.line_chart(metrics_df[selected_metrics])
+                    fps_value = float(getattr(stats, "fps_effective", 0.0) or 0.0)
+                    rep_intervals: List[Tuple[int, int]] = []
+                    start_at_s: Optional[float] = None
+                    if preferred_video_path:
+                        rep_intervals = _compute_rep_intervals(
+                            metrics_df,
+                            report,
+                            stats,
+                            numeric_columns,
+                        )
+                        if rep_intervals:
+                            rep_options = list(range(1, len(rep_intervals) + 1))
+                            rep_idx = st.select_slider(
+                                "Go to rep",
+                                options=rep_options,
+                                value=rep_options[0],
+                                key="results_rep_slider",
+                            )
+                            fps_for_slider = fps_value if fps_value > 0 else 1.0
+                            start_at_s = rep_intervals[rep_idx - 1][0] / fps_for_slider
+                    if preferred_video_path:
+                        render_video_with_metrics_sync(
+                            video_path=preferred_video_path,
+                            metrics_df=metrics_df,
+                            selected_metrics=selected_metrics,
+                            fps=fps_value,
+                            rep_intervals=rep_intervals,
+                            start_at_s=start_at_s,
+                            key="results_video_metrics_sync",
+                            bottom_margin_rem=0.18,
+                        )
+                        rendered_sync_viewer = True
+                    else:
+                        st.info("Video not available for sync; showing simple chart.")
+                        st.line_chart(metrics_df[selected_metrics])
+                else:
+                    st.info(
+                        "Select at least one metric to visualize. Showing the video below as a fallback."
+                    )
+                    should_render_fallback_video = True
             else:
                 st.info("No numeric metrics available for charting.")
+                should_render_fallback_video = True
             st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            should_render_fallback_video = True
+
+        if (
+            should_render_fallback_video
+            and not rendered_sync_viewer
+            and preferred_video_path is not None
+        ):
+            fallback_key = (
+                "results_debug_video"
+                if preferred_video_path == debug_video_path and debug_video_enabled
+                else "results_video_fallback"
+            )
+            render_uniform_video(
+                preferred_video_path,
+                key=fallback_key,
+                bottom_margin=0.18,
+            )
 
         stats_rows = [
             {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},

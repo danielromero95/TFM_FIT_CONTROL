@@ -91,6 +91,20 @@ def _video_source(
     return _data_uri(str(path), mtime=mtime, mime=mime), mime
 
 
+def get_video_source(
+    data: VideoData,
+    *,
+    format: str | None = None,
+) -> tuple[str, str]:
+    """Return ``(source_uri, mime_type)`` for ``data``.
+
+    Thin wrapper around :func:`_video_source` to allow reuse without importing a
+    private helper.
+    """
+
+    return _video_source(data, format=format)
+
+
 def render_uniform_video(
     data: VideoData,
     *,
