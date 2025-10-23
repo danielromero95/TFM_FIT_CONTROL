@@ -2,13 +2,14 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.4 (20-10-2025)
+**Version:** 2.5 (23-10-2025)
 
 ---
 
 ## Description
 
-This project delivers an exercise-analysis system powered by computer vision. From strength-training videos (squat, bench press, deadlift), the application—available both as a desktop client and a Streamlit experience—aims to:
+This project delivers an exercise-analysis system powered by computer vision.
+From strength-training videos (squat, bench press, deadlift), the application aims to:
 
 - Detect the exercise type (squat / bench press / deadlift) and camera view (front / side) with confidence scores.
 - Automatically count repetitions.
@@ -68,6 +69,24 @@ streamlit run src/app.py
 5. Results: repetition count, metrics, optional debug video, downloads.
 
 ---
+## What’s new in 2.5
+
+- Synchronized video + metrics viewer (Plotly). A frame-accurate cursor is tied to video playback; clicking on the chart seeks the video to that exact point.
+
+- Repetition awareness. Shaded bands mark each rep and a “Go to rep” slider jumps playback to the start of the selected repetition.
+
+- Fast & smooth rendering. Intelligent downsampling (≈3k points cap) keeps charts responsive while requestAnimationFrame provides smooth cursor updates.
+
+- Better chart navigation. Scroll-to-zoom and double-click to reset the X axis; unified X-axis hover tooltips.
+
+- Robust compatibility. Works with Streamlit 1.50 (graceful handling when components.html doesn’t support key).
+
+- Reusable video helper. Public get_video_source exposes the existing data-URI logic for other modules.
+
+- Results UX improvements. Metric selection is persisted, frame_idx is hidden from the picker, and the app gracefully falls back to the legacy video renderer when metrics are unavailable or unselected.
+
+- Modular architecture. New src/ui/metrics_sync.py component encapsulates the viewer and can be reused across screens.
+
 
 ## What’s new in 2.3
 
