@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src import config
-from src.D_modeling.count_reps import CountingDebugInfo
+from src.C_repetition_analysis.reps.api import CountingDebugInfo
 from src.services.analysis_service import run_pipeline
 from src.A_preprocessing.video_metadata import VideoInfo
 
