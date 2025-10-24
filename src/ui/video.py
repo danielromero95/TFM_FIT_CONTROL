@@ -3,16 +3,174 @@
 from __future__ import annotations
 
 import inspect
+import io
+import math
 import mimetypes
 from base64 import b64encode
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Union
 from uuid import uuid4
 
+import cv2
+import numpy as np
+from PIL import Image
 import streamlit as st
 from streamlit.components.v1 import html
 
+from src.A_preprocessing.video_metadata import read_video_file_info
+
 VideoData = Union[str, bytes, BinaryIO]
+
+
+@dataclass(frozen=True)
+class PortraitPreview:
+    """Container with a pre-rendered portrait preview and metadata."""
+
+    image_bytes: bytes
+    used_smart_center: bool
+
+
+def _apply_rotation(frame: np.ndarray, rotation: int) -> np.ndarray:
+    rotation = rotation % 360
+    if rotation == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if rotation == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    if rotation == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
+
+
+def _weighted_center(weights: np.ndarray) -> tuple[float | None, float]:
+    if weights.size == 0:
+        return None, 0.0
+    total = float(weights.sum())
+    if not math.isfinite(total) or total <= 0.0:
+        return None, 0.0
+    positions = np.arange(weights.size, dtype=np.float64)
+    center = float(np.dot(positions, weights) / total)
+    peak_ratio = float(weights.max() / total) if total else 0.0
+    return center, peak_ratio
+
+
+@st.cache_data(show_spinner=False)
+def detect_video_orientation(path: str | Path) -> str:
+    """Return ``horizontal`` or ``vertical`` based on the video dimensions."""
+
+    info = read_video_file_info(path)
+    width = info.width or 0
+    height = info.height or 0
+    rotation = info.rotation or 0
+    if rotation in (90, 270):
+        width, height = height, width
+    if width <= 0 or height <= 0:
+        return "unknown"
+    return "vertical" if height >= width else "horizontal"
+
+
+@st.cache_data(show_spinner=False)
+def generate_portrait_preview(
+    path: str | Path,
+    *,
+    width: int = 270,
+    sample_frames: int = 8,
+) -> PortraitPreview | None:
+    """Return a portrait (9:16) preview cropped using a smart center heuristic."""
+
+    p = Path(path)
+    if not p.exists():
+        return None
+
+    cap = cv2.VideoCapture(str(p))
+    if not cap.isOpened():
+        return None
+
+    try:
+        try:
+            info = read_video_file_info(p, cap=cap)
+        except Exception:
+            info = None
+
+        rotation = (info.rotation if info else 0) or 0
+
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if frame_count > 0 and sample_frames > 0:
+            indices = np.linspace(0, max(frame_count - 1, 0), num=sample_frames, dtype=int)
+        else:
+            indices = np.arange(min(sample_frames, max(frame_count, 1)))
+
+        col_energy: np.ndarray | None = None
+        row_energy: np.ndarray | None = None
+        preview_frame: np.ndarray | None = None
+
+        for idx in indices:
+            if frame_count > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            frame = _apply_rotation(frame, rotation)
+            if preview_frame is None:
+                preview_frame = frame.copy()
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, 32, 128)
+
+            cols = edges.sum(axis=0).astype(np.float64)
+            rows = edges.sum(axis=1).astype(np.float64)
+            col_energy = cols if col_energy is None else col_energy + cols
+            row_energy = rows if row_energy is None else row_energy + rows
+
+        if preview_frame is None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                return None
+            preview_frame = _apply_rotation(frame, rotation)
+
+        frame_h, frame_w = preview_frame.shape[:2]
+        target_ratio = 9 / 16
+
+        center_x, peak_x = _weighted_center(col_energy) if col_energy is not None else (None, 0.0)
+        center_y, peak_y = _weighted_center(row_energy) if row_energy is not None else (None, 0.0)
+
+        smart_x = center_x is not None and peak_x >= 0.01
+        smart_y = center_y is not None and peak_y >= 0.01
+
+        cx = float(center_x) if smart_x else frame_w / 2.0
+        cy = float(center_y) if smart_y else frame_h / 2.0
+
+        if frame_w / frame_h >= target_ratio:
+            crop_w = int(round(frame_h * target_ratio))
+            crop_w = min(max(crop_w, 1), frame_w)
+            x0 = int(round(cx - crop_w / 2))
+            x0 = max(0, min(x0, frame_w - crop_w))
+            y0 = 0
+            crop_h = frame_h
+        else:
+            crop_h = int(round(frame_w / target_ratio))
+            crop_h = min(max(crop_h, 1), frame_h)
+            y0 = int(round(cy - crop_h / 2))
+            y0 = max(0, min(y0, frame_h - crop_h))
+            x0 = 0
+            crop_w = frame_w
+
+        crop = preview_frame[y0 : y0 + crop_h, x0 : x0 + crop_w]
+        if crop.size == 0:
+            crop = preview_frame
+
+        target_height = max(1, int(round(width * 16 / 9)))
+        resized = cv2.resize(crop, (int(width), target_height), interpolation=cv2.INTER_AREA)
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+
+        image = Image.fromarray(rgb)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return PortraitPreview(buffer.getvalue(), used_smart_center=smart_x or smart_y)
+    finally:
+        cap.release()
 
 
 @st.cache_data(show_spinner=False)

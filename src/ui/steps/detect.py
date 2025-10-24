@@ -13,7 +13,12 @@ from src.ui.state import (
     go_to,
     safe_rerun,
 )
-from src.ui.video import render_uniform_video
+from src.ui.video import (
+    PortraitPreview,
+    detect_video_orientation,
+    generate_portrait_preview,
+    render_uniform_video,
+)
 
 
 def _exercise_display_name(ex_type: ExerciseType) -> str:
@@ -35,9 +40,8 @@ CONFIG_TO_LABEL: Dict[str, str] = {key: lbl for (lbl, key) in EXERCISE_CHOICES i
 FALLBACK_MANUAL_CONFIG = next((key for (_, key) in EXERCISE_CHOICES if key), "squat")
 EXERCISE_WIDGET_KEY = "exercise_select_value"
 
-VIEW_EMPTY_LABEL = ""
 VIEW_CHOICES: List[Tuple[str, str]] = [
-    (VIEW_EMPTY_LABEL, "unknown"),
+    ("Auto-Detect", "auto"),
     ("Front View", "front"),
     ("Lateral View", "lateral"),
 ]
@@ -46,6 +50,12 @@ VIEW_TO_KEY: Dict[str, str] = {lbl: key for (lbl, key) in VIEW_CHOICES}
 KEY_TO_VIEW_LABEL: Dict[str, str] = {key: lbl for (lbl, key) in VIEW_CHOICES}
 VIEW_WIDGET_KEY = "view_select_value"
 
+ORIENTATION_DISPLAY = {
+    "horizontal": ("Horizontal video", "horizontal"),
+    "vertical": ("Vertical video", "vertical"),
+    "unknown": ("Orientation unknown", "unknown"),
+}
+
 
 def _view_display(key: str | None) -> str:
     normalized = (key or "").strip().lower()
@@ -53,6 +63,8 @@ def _view_display(key: str | None) -> str:
         return "Front View"
     if normalized in ("side", "lateral"):
         return "Lateral View"
+    if normalized in ("auto",):
+        return "Auto-Detect"
     if not normalized or normalized == "unknown":
         return "Unknown View"
     return normalized.replace("_", " ").title()
@@ -83,16 +95,24 @@ def _detect_step() -> None:
         current_exercise_state = DEFAULT_EXERCISE_LABEL
         state.exercise = current_exercise_state
 
-    default_ui_exercise = (
-        current_exercise_state
-        if current_exercise_state in EXERCISE_LABELS
-        else EXERCISE_EMPTY_LABEL
-    )
-
     session_exercise = st.session_state.get(EXERCISE_WIDGET_KEY)
-    if session_exercise not in EXERCISE_LABELS:
-        session_exercise = default_ui_exercise
-        st.session_state[EXERCISE_WIDGET_KEY] = session_exercise
+    if session_exercise not in VALID_EXERCISE_LABELS:
+        st.session_state[EXERCISE_WIDGET_KEY] = current_exercise
+    else:
+        current_exercise = session_exercise
+        state.exercise = current_exercise
+
+    orientation_key = "unknown"
+    portrait_preview: PortraitPreview | None = None
+    if video_path:
+        try:
+            orientation_key = detect_video_orientation(str(video_path))
+        except Exception:
+            orientation_key = "unknown"
+        try:
+            portrait_preview = generate_portrait_preview(str(video_path))
+        except Exception:
+            portrait_preview = None
 
     detected_view_label = VIEW_LABELS[0]
     if detect_result and detect_result.get("view"):
@@ -106,94 +126,119 @@ def _detect_step() -> None:
         if session_view not in VIEW_LABELS:
             st.session_state[VIEW_WIDGET_KEY] = detected_view_label
 
-    session_view_label = st.session_state.get(VIEW_WIDGET_KEY, VIEW_LABELS[0])
-    if session_view_label not in VIEW_LABELS:
-        session_view_label = VIEW_LABELS[0]
-        st.session_state[VIEW_WIDGET_KEY] = session_view_label
+    video_col, panel_col = st.columns([3, 2], gap="large")
 
-    if video_path:
-        render_uniform_video(
-            str(video_path),
-            key="detect_video",
-            bottom_margin=0.0,
-            max_width=None,
-            viewport_height=360,
-        )
-    else:
-        st.info("Upload a workout video to enable detection.")
-
-    auto_clicked = st.button(
-        "Auto-Detect",
-        key="detect_auto",
-        use_container_width=True,
-        type="primary",
-        disabled=not is_active,
-    )
-
-    exercise_label_col, exercise_input_col = st.columns([1, 4], gap="medium")
-    with exercise_label_col:
-        st.markdown('<div class="form-label form-label--inline">Exercise</div>', unsafe_allow_html=True)
-    with exercise_input_col:
-        selected_exercise_label = st.selectbox(
-            "Select exercise",
-            options=EXERCISE_LABELS,
-            index=EXERCISE_LABELS.index(session_exercise),
-            key=EXERCISE_WIDGET_KEY,
-            label_visibility="collapsed",
-            disabled=not is_active,
-        )
-
-    view_label_col, view_input_col = st.columns([1, 4], gap="medium")
-    with view_label_col:
-        st.markdown('<div class="form-label form-label--inline">View</div>', unsafe_allow_html=True)
-    with view_input_col:
-        selected_view_label = st.selectbox(
-            "Select view",
-            options=VIEW_LABELS,
-            index=VIEW_LABELS.index(session_view_label),
-            key=VIEW_WIDGET_KEY,
-            label_visibility="collapsed",
-            disabled=not is_active,
-        )
-
-    state.exercise = (
-        selected_exercise_label if selected_exercise_label else DEFAULT_EXERCISE_LABEL
-    )
-
-    selected_view_key = VIEW_TO_KEY.get(selected_view_label, "unknown")
-
-    detect_result_local = detect_result
-    if state.exercise != DEFAULT_EXERCISE_LABEL and detect_result_local is not None:
-        state.detect_result = None
-        detect_result_local = None
-        detect_result = None
-
-    feedback_container = st.container()
-    if detect_result_local:
-        if detect_result_local.get("error"):
-            feedback_container.error(
-                "Automatic exercise detection failed: "
-                f"{detect_result_local.get('error')}"
-            )
-            feedback_container.info(
-                "You can adjust the selection manually or try detecting again."
+    with video_col:
+        if video_path:
+            render_uniform_video(
+                str(video_path),
+                key="detect_video",
+                bottom_margin=0.0,
             )
         else:
-            label_key = detect_result_local.get("label", "unknown")
-            label_display = CONFIG_TO_LABEL.get(
-                label_key,
-                label_key.replace("_", " ").title(),
+            st.info("Upload a workout video to enable detection.")
+
+    with panel_col:
+        st.markdown('<div class="detect-panel-card-anchor"></div>', unsafe_allow_html=True)
+        panel_container = st.container()
+        with panel_container:
+            orientation_text, orientation_variant = ORIENTATION_DISPLAY.get(
+                orientation_key, ORIENTATION_DISPLAY["unknown"]
             )
-            view_display = _view_display(detect_result_local.get("view"))
-            confidence = float(detect_result_local.get("confidence", 0.0))
-            feedback_container.success(
-                f"Detected exercise: {label_display} – {view_display}"
-                f" ({confidence:.0%} confidence)."
+            st.markdown(
+                f"<div class='detect-panel-header'>"
+                f"<span class='orientation-pill orientation-pill--{orientation_variant}'>"
+                f"{orientation_text}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
             )
-            if not detect_result_local.get("accepted"):
-                feedback_container.info(
-                    "Click Continue to accept this detection or choose an exercise manually."
+
+            auto_clicked = st.button(
+                "Auto-Detect",
+                key="detect_auto",
+                use_container_width=True,
+                type="primary",
+                disabled=not is_active,
+            )
+
+            st.markdown('<div class="form-label">Select exercise</div>', unsafe_allow_html=True)
+            selected_exercise = st.selectbox(
+                "Select exercise",
+                options=EXERCISE_LABELS,
+                index=EXERCISE_LABELS.index(st.session_state[EXERCISE_WIDGET_KEY]),
+                key=EXERCISE_WIDGET_KEY,
+                label_visibility="collapsed",
+                disabled=not is_active,
+            )
+
+            st.markdown('<div class="form-label">Select view</div>', unsafe_allow_html=True)
+            selected_view = st.selectbox(
+                "Select view",
+                options=VIEW_LABELS,
+                index=VIEW_LABELS.index(st.session_state.get(VIEW_WIDGET_KEY, VIEW_LABELS[0])),
+                key=VIEW_WIDGET_KEY,
+                label_visibility="collapsed",
+                disabled=not is_active,
+            )
+
+            current_exercise = selected_exercise
+            state.exercise = current_exercise
+
+            detect_result_local = detect_result
+            if current_exercise != DEFAULT_EXERCISE_LABEL and detect_result_local is not None:
+                state.detect_result = None
+                detect_result_local = None
+                detect_result = None
+
+            feedback_container = st.container()
+            if detect_result_local:
+                if detect_result_local.get("error"):
+                    feedback_container.error(
+                        "Automatic exercise detection failed: "
+                        f"{detect_result_local.get('error')}"
+                    )
+                    feedback_container.info(
+                        "You can adjust the selection manually or try detecting again."
+                    )
+                else:
+                    label_key = detect_result_local.get("label", "unknown")
+                    label_display = CONFIG_TO_LABEL.get(
+                        label_key,
+                        label_key.replace("_", " ").title(),
+                    )
+                    view_display = _view_display(detect_result_local.get("view"))
+                    confidence = float(detect_result_local.get("confidence", 0.0))
+                    feedback_container.success(
+                        f"Detected exercise: {label_display} – {view_display}"
+                        f" ({confidence:.0%} confidence)."
+                    )
+                    if not detect_result_local.get("accepted"):
+                        feedback_container.info(
+                            "Click Continue to accept this detection or choose an exercise manually."
+                        )
+
+        if portrait_preview is not None:
+            st.markdown('<div class="portrait-preview-anchor"></div>', unsafe_allow_html=True)
+            preview_container = st.container()
+            with preview_container:
+                st.markdown(
+                    "<div class='portrait-preview-title'>Portrait preview</div>",
+                    unsafe_allow_html=True,
                 )
+                st.image(
+                    portrait_preview.image_bytes,
+                    use_column_width=True,
+                    output_format="PNG",
+                )
+                if portrait_preview.used_smart_center:
+                    st.caption("Smart center framing active")
+                else:
+                    st.caption("Centered crop preview")
+
+    selected_view_key = VIEW_TO_KEY.get(
+        st.session_state.get(VIEW_WIDGET_KEY, VIEW_LABELS[0]),
+        "auto",
+    )
 
     if video_path and auto_clicked:
         with st.spinner("Detecting exercise…"):
@@ -218,10 +263,11 @@ def _detect_step() -> None:
                     detected_view_key,
                     VIEW_LABELS[0],
                 )
-            st.session_state[EXERCISE_WIDGET_KEY] = EXERCISE_EMPTY_LABEL
+            st.session_state[EXERCISE_WIDGET_KEY] = DEFAULT_EXERCISE_LABEL
             state.exercise = DEFAULT_EXERCISE_LABEL
         safe_rerun()
 
+    st.markdown('<div class="app-nav-buttons-anchor"></div>', unsafe_allow_html=True)
     nav_container = st.container()
     with nav_container:
         back_col, continue_col = st.columns(2, gap="large")
@@ -256,7 +302,7 @@ def _detect_step() -> None:
                             current_exercise_label,
                         )
                         state.exercise_pending_update = mapped_label
-                        if selected_view_key != "unknown":
+                        if selected_view_key != "auto":
                             detect_result["view"] = selected_view_key
                         detect_result["accepted"] = True
                         go_to(Step.CONFIGURE)
@@ -291,12 +337,15 @@ def _detect_step() -> None:
                                     )
                             safe_rerun()
                 else:
+                    manual_view_value = (
+                        selected_view_key if selected_view_key != "auto" else "unknown"
+                    )
                     state.detect_result = {
                         "label": EXERCISE_TO_CONFIG.get(
                             current_exercise_label,
-                            FALLBACK_MANUAL_CONFIG,
+                            EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
                         ),
-                        "view": selected_view_key,
+                        "view": manual_view_value,
                         "confidence": 1.0,
                         "accepted": True,
                         "token": token,
