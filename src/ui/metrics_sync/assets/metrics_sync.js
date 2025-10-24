@@ -13,12 +13,27 @@
     return;
   }
 
+  const isTime = (DATA.x_mode === "time");
+
+  function secondsToLabel(sec) {
+    if (sec < 60) return sec.toFixed(2);
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  const formattedHoverX = x.map((value) => (isTime ? secondsToLabel(value) : Math.round(value)));
+  const hoverTemplate = isTime
+    ? "%{y:.2f}<extra>Time: %{customdata}</extra>"
+    : "%{y:.2f}<extra>Frame: %{customdata}</extra>";
+
   const traces = names.map((name) => ({
     x: x,
     y: DATA.series[name],
     mode: "lines",
     name,
-    hovertemplate: "%{y:.2f}<extra>%{x:.2f}</extra>"
+    hovertemplate: hoverTemplate,
+    customdata: formattedHoverX.slice()
   }));
 
   const fps = DATA.fps > 0 ? DATA.fps : 1.0;
@@ -26,23 +41,72 @@
   const cursor = { type: "line", x0: 0, x1: 0, y0: 0, y1: 1, xref: "x", yref: "paper", line: { width: 2, dash: "dot", color: "#ef4444" } };
   const bands = (DATA.rep || []).map(([f0, f1]) => ({
     type: "rect", xref: "x", yref: "paper",
-    x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
-    x1: (DATA.x_mode === "time") ? (f1 / fps) : f1,
-    y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.15)", line: {width: 0}
+    x0: isTime ? (f0 / fps) : f0,
+    x1: isTime ? (f1 / fps) : f1,
+    y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.18)", line: {width: 0}
   }));
 
+  const xTitle = isTime ? "Time (s)" : "Frame #";
+
   const layout = {
-    margin: {l: 40, r: 20, t: 10, b: 40},
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(0,0,0,0)",
+    uirevision: "keep",
+    margin: { l: 56, r: 24, t: 16, b: 88 },
+    paper_bgcolor: "#ffffff",
+    plot_bgcolor: "#ffffff",
+    font: { color: "#111827", size: 12 },
     showlegend: true,
     hovermode: "x unified",
-    xaxis: { title: (DATA.x_mode === "time") ? "Time (s)" : "Frame", zeroline: false },
-    yaxis: { zeroline: false },
+    hoverlabel: { bgcolor: "#ffffff", bordercolor: "#94a3b8", font: { color: "#111827" } },
+    xaxis: {
+      title: xTitle,
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(0,0,0,0.06)",
+      linecolor: "#94a3b8",
+      ticks: "outside",
+      tickcolor: "#94a3b8",
+      tickformat: isTime ? ".2f" : null
+    },
+    yaxis: {
+      title: "Angle (°)",
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(0,0,0,0.06)",
+      linecolor: "#94a3b8",
+      ticks: "outside",
+      tickcolor: "#94a3b8"
+    },
+    legend: {
+      orientation: "h",
+      x: 0.5,
+      xanchor: "center",
+      y: -0.25,
+      yanchor: "top"
+    },
     shapes: [cursor, ...bands]
   };
 
-  Plotly.newPlot(plot, traces, layout, CFG);
+  let fitScheduled = false;
+  function fit() {
+    if (fitScheduled) return;
+    fitScheduled = true;
+    (window.requestAnimationFrame || function(cb){ return setTimeout(cb, 16); })(() => {
+      fitScheduled = false;
+      if (window.frameElement && wrapper) {
+        window.frameElement.style.height = (wrapper.scrollHeight + 24) + "px";
+      }
+    });
+  }
+
+  Plotly.newPlot(plot, traces, layout, CFG).then(() => {
+    fit();
+    plot.on("plotly_relayout", fit);
+    plot.on("plotly_afterplot", fit);
+    plot.on("plotly_restyle", fit);
+    plot.on("plotly_update", fit);
+    plot.on("plotly_legendclick", () => { setTimeout(fit, 0); });
+    plot.on("plotly_legenddoubleclick", () => { setTimeout(fit, 0); });
+  });
 
   let lastT = -1;
   function updateCursorFromVideo() {
@@ -53,6 +117,7 @@
     lastT = t;
     const xVal = (DATA.x_mode === "time") ? t : frame;
     Plotly.relayout(plot, {"shapes[0].x0": xVal, "shapes[0].x1": xVal});
+    fit();
   }
 
   ["timeupdate","seeked"].forEach((ev) => video.addEventListener(ev, updateCursorFromVideo));
@@ -86,11 +151,9 @@
 
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));
 
-  if (window.frameElement && wrapper) {
-    const fit = () => { window.frameElement.style.height = (wrapper.scrollHeight + 24) + "px"; };
-    const ro = (typeof ResizeObserver !== "undefined") ? new ResizeObserver(fit) : null;
-    if (ro) ro.observe(wrapper);
-    window.addEventListener("load", fit, { once: true });
-    setTimeout(fit, 50);
+  if (typeof ResizeObserver !== "undefined" && wrapper) {
+    new ResizeObserver(fit).observe(wrapper);
   }
+  window.addEventListener("load", fit, { once: true });
+  setTimeout(fit, 50);
 })();
