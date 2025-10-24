@@ -16,6 +16,7 @@ from .metrics import (
     extract_joint_angles,
     normalize_landmarks,
 )
+from src.config.constants import MIN_DETECTION_CONFIDENCE
 
 logger = logging.getLogger(__name__)
 
@@ -23,64 +24,76 @@ logger = logging.getLogger(__name__)
 def extract_landmarks_from_frames(
     frames: Iterable[np.ndarray],
     use_crop: bool = False,
-    visibility_threshold: float = 0.5,
+    *,
+    min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
+    min_visibility: float = 0.5,
 ) -> pd.DataFrame:
     """Extract pose landmarks frame by frame and return a raw DataFrame."""
     frames = list(frames)
     logger.info("Extracting landmarks from %d frames. Using crop: %s", len(frames), use_crop)
-    estimator = (
-        CroppedPoseEstimator(min_detection_confidence=visibility_threshold)
-        if use_crop
-        else PoseEstimator(min_detection_confidence=visibility_threshold)
-    )
+    estimator_cls = CroppedPoseEstimator if use_crop else PoseEstimator
 
     rows: list[dict[str, float]] = []
-    for index, image in enumerate(frames):
-        crop_box = None
-        if use_crop:
-            landmarks, _, crop_box = estimator.estimate(image)
-        else:
-            landmarks, _ = estimator.estimate(image)
-            # When no crop is used the crop box corresponds to the full image.
-            # This ensures the renderer always receives bounding box metadata.
-            if landmarks:
-                height, width, _ = image.shape
+    with estimator_cls(min_detection_confidence=min_detection_confidence) as estimator:
+        for index, image in enumerate(frames):
+            height, width = image.shape[0], image.shape[1]
+            landmarks, _annotated, crop_box = estimator.estimate(image)
+            if landmarks and crop_box is None:
                 crop_box = [0, 0, width, height]
 
-        row: dict[str, float] = {"frame_idx": index}
-        if landmarks:
-            for landmark_index, point in enumerate(landmarks):
-                row.update(
-                    {
-                        f"x{landmark_index}": point["x"],
-                        f"y{landmark_index}": point["y"],
-                        f"z{landmark_index}": point["z"],
-                        f"v{landmark_index}": point["visibility"],
-                    }
-                )
+            row: dict[str, float] = {"frame_idx": index}
+            if landmarks:
+                crop_values = crop_box if crop_box else [0, 0, width, height]
+                crop_x1, crop_y1, crop_x2, crop_y2 = crop_values
+                crop_width = max(crop_x2 - crop_x1, 0)
+                crop_height = max(crop_y2 - crop_y1, 0)
 
-            if crop_box:
-                row.update(
-                    {
-                        "crop_x1": crop_box[0],
-                        "crop_y1": crop_box[1],
-                        "crop_x2": crop_box[2],
-                        "crop_y2": crop_box[3],
-                    }
-                )
-        else:
-            for landmark_index in range(33):
-                row.update(
-                    {
-                        f"x{landmark_index}": np.nan,
-                        f"y{landmark_index}": np.nan,
-                        f"z{landmark_index}": np.nan,
-                        f"v{landmark_index}": np.nan,
-                    }
-                )
-        rows.append(row)
+                for landmark_index, point in enumerate(landmarks):
+                    visibility = point["visibility"]
+                    x_value = point["x"]
+                    y_value = point["y"]
 
-    estimator.close()
+                    if use_crop:
+                        if crop_width > 0 and crop_height > 0:
+                            x_value = (x_value * crop_width + crop_x1) / width
+                            y_value = (y_value * crop_height + crop_y1) / height
+                        else:
+                            x_value = np.nan
+                            y_value = np.nan
+
+                    if visibility < min_visibility:
+                        x_value = np.nan
+                        y_value = np.nan
+
+                    row.update(
+                        {
+                            f"x{landmark_index}": x_value,
+                            f"y{landmark_index}": y_value,
+                            f"z{landmark_index}": point["z"],
+                            f"v{landmark_index}": visibility,
+                        }
+                    )
+
+                row.update(
+                    {
+                        "crop_x1": float(crop_x1),
+                        "crop_y1": float(crop_y1),
+                        "crop_x2": float(crop_x2),
+                        "crop_y2": float(crop_y2),
+                    }
+                )
+            else:
+                for landmark_index in range(33):
+                    row.update(
+                        {
+                            f"x{landmark_index}": np.nan,
+                            f"y{landmark_index}": np.nan,
+                            f"z{landmark_index}": np.nan,
+                            f"v{landmark_index}": np.nan,
+                        }
+                    )
+            rows.append(row)
+
     return pd.DataFrame(rows)
 
 
