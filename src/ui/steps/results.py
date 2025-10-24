@@ -246,14 +246,6 @@ def _results_panel() -> Dict[str, bool]:
             except Exception:
                 st.json({row["Field"]: row["Value"] for row in stats_rows})
 
-            if state.video_path:
-                st.markdown("### Original video")
-                render_uniform_video(
-                    str(state.video_path),
-                    key="results_original_video",
-                    bottom_margin=0.25,
-                )
-
         if state.metrics_path is not None:
             metrics_data = None
             try:
@@ -270,24 +262,6 @@ def _results_panel() -> Dict[str, bool]:
                     data=metrics_data,
                     file_name=f"{Path(state.video_path).stem}_metrics.csv",
                     mime="text/csv",
-                )
-
-        if state.count_path is not None:
-            count_data = None
-            try:
-                count_data = Path(state.count_path).read_text(
-                    encoding="utf-8"
-                )
-            except FileNotFoundError:
-                st.error("The repetition file for download was not found.")
-            except OSError as exc:
-                st.error(f"Could not read the repetition file: {exc}")
-            else:
-                st.download_button(
-                    "Download repetition count",
-                    data=count_data,
-                    file_name=f"{Path(state.video_path).stem}_count.txt",
-                    mime="text/plain",
                 )
 
     else:
