@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import mimetypes
 import inspect
+import mimetypes
 from base64 import b64encode
 from pathlib import Path
 from typing import BinaryIO, Union
@@ -108,8 +108,10 @@ def render_uniform_video(
     start_time: int = 0,
     key: str | None = None,
     bottom_margin: float = 1.25,
+    max_width: int | None = 720,
+    viewport_height: int | None = None,
 ) -> None:
-    """Render ``data`` inside a responsive 16:9 viewport."""
+    """Render ``data`` inside a consistent viewport."""
 
     source, mime = _video_source(data, format=format)
     component_key = key or f"uniform_video_{uuid4().hex}"
@@ -120,7 +122,15 @@ def render_uniform_video(
     st.markdown(f'<div id="{marker_id}"></div>', unsafe_allow_html=True)
 
     padding = 24
-    initial_height = int(round(720 * 9 / 16)) + padding
+    if viewport_height is not None:
+        height = max(int(viewport_height), 120)
+        initial_height = height + padding
+    else:
+        reference_width = max_width or 720
+        initial_height = int(round(reference_width * 9 / 16)) + padding
+        height = None
+    height_expr = str(height) if height is not None else "Math.round(w * 9 / 16)"
+
     html_kwargs: dict[str, object] = {"height": initial_height, "scrolling": False}
     try:
         signature = inspect.signature(html)
@@ -130,10 +140,26 @@ def render_uniform_video(
         if component_key is not None:
             html_kwargs["key"] = component_key
 
+    container_styles = [
+        "position:relative",
+        "width:100%",
+        "background:#000",
+        "border-radius:12px",
+        "overflow:hidden",
+    ]
+    if height is not None:
+        container_styles.append(f"height:{height}px")
+    else:
+        container_styles.append("padding-top:56.25%")
+
+    wrapper_styles = ["width:100%", "margin:0 auto"]
+    if max_width is not None:
+        wrapper_styles.append(f"max-width:{max_width}px")
+
     html(
         f"""
-        <div id="{inner_id}" style="width:100%;max-width:720px;margin:0 auto;">
-          <div style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;">
+        <div id="{inner_id}" style="{';'.join(wrapper_styles)};">
+          <div style="{';'.join(container_styles)};">
             <video
               id="{video_id}"
               controls
@@ -153,8 +179,8 @@ def render_uniform_video(
             const video = document.getElementById('{video_id}');
             if (!inner || !video) return;
             const fit = () => {{
-              const w = inner.clientWidth || 720;
-              const h = Math.round(w * 9 / 16) + pad;
+              const w = inner.clientWidth || {max_width or 720};
+              const h = {height_expr} + pad;
               if (window.frameElement) {{
                 window.frameElement.style.height = h + 'px';
               }}
@@ -182,11 +208,13 @@ def render_uniform_video(
     )
 
     margin_value = max(bottom_margin, 0.0)
+    max_width_css = f"max-width:{max_width}px" if max_width is not None else "max-width:100%"
     st.markdown(
         f"""
         <style>
         #{marker_id} + iframe {{
-          width: min(100%, 720px) !important;
+          width: 100% !important;
+          {max_width_css} !important;
           margin: 0 auto {margin_value:.2f}rem auto !important;
           display: block !important;
           border-radius: 12px !important;
