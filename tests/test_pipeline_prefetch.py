@@ -27,8 +27,8 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(
         "src.services.analysis_service.read_video_file_info",
-        lambda _path: VideoInfo(
-            path=Path(_path),
+        lambda *args, **kwargs: VideoInfo(
+            path=Path(args[0] if args else kwargs.get("path", video_path)),
             width=640,
             height=480,
             fps=30.0,
