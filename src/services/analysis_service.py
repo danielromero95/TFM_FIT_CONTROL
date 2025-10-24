@@ -65,31 +65,48 @@ def run_pipeline(
 
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
-    info = read_video_file_info(video_path)
 
-    # Derivar variables equivalentes para el plan de muestreo
-    fps_original = float(info.fps or 0.0)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError(f"Could not open the video: {video_path}")
 
-    # Reconstituir un mensaje de warning similar cuando el FPS no es "metadata"
-    fps_warning = None
-    prefer_reader_fps = False
-    if info.fps_source == "estimated":
-        fps_warning = f"Invalid metadata FPS. Estimated from video duration ({fps_original:.2f} fps)."
-    elif info.fps_source == "reader":
-        fps_warning = "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
-        prefer_reader_fps = True
+    try:
+        info = read_video_file_info(video_path, cap=cap)
 
-    initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
+        # Derivar variables equivalentes para el plan de muestreo
+        fps_original = float(info.fps or 0.0)
 
-    rotate = cfg.pose.rotate
-    if rotate is None:
-        rotate = int(info.rotation or 0)
+        # Reconstituir un mensaje de warning similar cuando el FPS no es "metadata"
+        fps_warning = None
+        prefer_reader_fps = False
+        if info.fps_source == "estimated":
+            fps_warning = (
+                f"Invalid metadata FPS. Estimated from video duration ({fps_original:.2f} fps)."
+            )
+        elif info.fps_source == "reader":
+            fps_warning = (
+                "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
+            )
+            prefer_reader_fps = True
 
-    frames, fps_from_reader = extract_and_preprocess_frames(
-        video_path=video_path,
-        rotate=rotate,
-        sample_rate=initial_sample_rate,
-    )
+        initial_sample_rate = (
+            _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
+        )
+
+        rotate = cfg.pose.rotate
+        if rotate is None:
+            rotate = int(info.rotation or 0)
+
+        frames, fps_from_reader = extract_and_preprocess_frames(
+            video_path=video_path,
+            rotate=rotate,
+            sample_rate=initial_sample_rate,
+            cap=cap,
+            prefetched_info=info,
+        )
+    finally:
+        cap.release()
+
     if not frames:
         raise ValueError("No frames could be extracted from the video.")
 

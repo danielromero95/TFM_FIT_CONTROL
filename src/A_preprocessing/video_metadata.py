@@ -64,6 +64,8 @@ def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float
     """Best-effort duration inference from the last frame timestamp."""
     if frame_count <= 1:
         return 0.0
+
+    original_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     try:
         last_frame_index = max(frame_count - 1, 0)
         cap.set(cv2.CAP_PROP_POS_FRAMES, last_frame_index)
@@ -72,10 +74,16 @@ def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float
             return float(duration_msec) / 1000.0 if duration_msec > 0 else 0.0
     except Exception:  # pragma: no cover - backend dependent fallbacks
         return 0.0
+    finally:
+        try:
+            if original_pos is not None and original_pos >= 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, original_pos)
+        except Exception:  # pragma: no cover - backend dependent fallbacks
+            pass
     return 0.0
 
 
-def read_video_file_info(path: str | Path) -> VideoInfo:
+def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) -> VideoInfo:
     """
     Read robust video metadata using OpenCV and (optionally) ffprobe.
 
@@ -83,26 +91,33 @@ def read_video_file_info(path: str | Path) -> VideoInfo:
     - If OpenCV-reported FPS is invalid (<=1 or non-finite), try to estimate using (frame_count / duration).
     - If estimation is impossible, leave fps=None and mark fps_source="reader".
     - Rotation is read via ffprobe if available, else defaults to 0 (common convention for pipelines).
+
+    When ``cap`` is provided, reuse that ``VideoCapture`` without taking ownership.
+    The caller remains responsible for managing its lifecycle; this function only
+    resets the frame position to the beginning before returning.
     """
     p = Path(path)
     if not p.exists():
         raise IOError(f"Video path does not exist: {p}")
 
-    cap = cv2.VideoCapture(str(p))
-    if not cap.isOpened():
-        cap.release()
+    cap_local = cap if cap is not None else cv2.VideoCapture(str(p))
+    own_cap = cap is None
+
+    if not cap_local.isOpened():
+        if own_cap:
+            cap_local.release()
         raise IOError(f"Could not open the video: {p}")
 
     try:
         # Dimensions
-        width_val = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-        height_val = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        width_val = int(cap_local.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height_val = int(cap_local.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         width = width_val if width_val > 0 else None
         height = height_val if height_val > 0 else None
 
         # FPS + frame count
-        fps_raw = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
-        frame_count_raw = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps_raw = float(cap_local.get(cv2.CAP_PROP_FPS) or 0.0)
+        frame_count_raw = int(cap_local.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         frame_count = frame_count_raw if frame_count_raw > 0 else None
 
         fps: float | None
@@ -117,7 +132,7 @@ def read_video_file_info(path: str | Path) -> VideoInfo:
             duration = (frame_count_raw / fps_raw) if frame_count_raw > 0 else None
         else:
             # Try estimating duration from last frame timestamp, then FPS = frames/duration
-            duration_est = _estimate_duration_seconds(cap, frame_count_raw)
+            duration_est = _estimate_duration_seconds(cap_local, frame_count_raw)
             if duration_est > 0.0 and frame_count_raw > 0:
                 fps = frame_count_raw / duration_est
                 duration = duration_est
@@ -139,7 +154,7 @@ def read_video_file_info(path: str | Path) -> VideoInfo:
             rotation = 0
 
         # Codec (best-effort from FOURCC)
-        fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC) or 0)
+        fourcc_int = int(cap_local.get(cv2.CAP_PROP_FOURCC) or 0)
         if fourcc_int:
             # Convert int FOURCC to 4-char code
             codec_chars = [
@@ -170,4 +185,10 @@ def read_video_file_info(path: str | Path) -> VideoInfo:
         )
 
     finally:
-        cap.release()
+        if own_cap:
+            cap_local.release()
+        else:
+            try:
+                cap_local.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            except Exception:  # pragma: no cover - backend dependent fallbacks
+                pass

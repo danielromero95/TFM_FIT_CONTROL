@@ -60,8 +60,15 @@ def extract_frames_stream(
     to_gray: bool = False,
     rotate: int | str | None = "auto",
     progress_callback: Callable[[int], None] | None = None,
+    cap: Optional[cv2.VideoCapture] = None,
+    prefetched_info: Optional["VideoInfo"] = None,
 ) -> Iterator[FrameInfo]:
-    """Stream video frames according to the requested sampling strategy."""
+    """Stream video frames according to the requested sampling strategy.
+
+    When ``cap`` is supplied the existing ``VideoCapture`` instance is reused and
+    not released by this function. ``prefetched_info`` allows callers to provide
+    metadata obtained elsewhere to avoid redundant probing.
+    """
 
     if sampling not in ("auto", "time", "index"):
         raise ValueError('sampling must be "auto", "time", or "index"')
@@ -74,26 +81,43 @@ def extract_frames_stream(
     if start_time is not None and end_time is not None and end_time <= start_time:
         raise ValueError("end_time must be greater than start_time")
 
-    p = str(video_path)
-    info = read_video_file_info(p)
-    fps_base = float(info.fps or 0.0)
-    frame_count = int(info.frame_count or 0)
+    path_obj = Path(video_path)
+    p = str(path_obj)
 
-    if rotate == "auto" or rotate is None:
-        rotate_deg = int(info.rotation or 0)
-    else:
-        rotate_deg = int(rotate)
+    cap_obj = cap if cap is not None else cv2.VideoCapture(p)
+    own_cap = cap is None
 
-    cap = cv2.VideoCapture(p)
-    if not cap.isOpened():
+    if not cap_obj.isOpened():
+        if own_cap:
+            cap_obj.release()
         raise IOError(f"Could not open the video: {p}")
 
-    t_start = float(start_time or 0.0)
-    read_idx = int(round(t_start * fps_base)) if fps_base > 0 else 0
-    produced = 0
+    info = prefetched_info
+    frame_count = 0
     last_progress = -1
 
     try:
+        if info is None:
+            info = read_video_file_info(path_obj, cap=cap_obj)
+
+        fps_base = float(info.fps or 0.0)
+        frame_count = int(info.frame_count or 0)
+
+        if rotate == "auto" or rotate is None:
+            rotate_deg = int(info.rotation or 0)
+        else:
+            rotate_deg = int(rotate)
+
+        cap = cap_obj
+        try:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        except Exception:  # pragma: no cover - backend dependent fallbacks
+            pass
+
+        t_start = float(start_time or 0.0)
+        read_idx = int(round(t_start * fps_base)) if fps_base > 0 else 0
+        produced = 0
+
         if t_start > 0:
             _seek_to_msec(cap, t_start * 1000.0)
 
@@ -238,7 +262,8 @@ def extract_frames_stream(
             yield from time_mode_iterator()
 
     finally:
-        cap.release()
+        if own_cap:
+            cap_obj.release()
         if progress_callback and frame_count > 0 and last_progress < 100:
             progress_callback(100)
 
@@ -248,8 +273,15 @@ def extract_and_preprocess_frames(
     sample_rate: int = 1,
     rotate: int | None = None,
     progress_callback: Callable[[int], None] | None = None,
+    *,
+    cap: Optional[cv2.VideoCapture] = None,
+    prefetched_info: Optional["VideoInfo"] = None,
 ) -> Tuple[List, float]:
-    """Extract frames, apply rotation automatically and return full-resolution images."""
+    """Extract frames, apply rotation automatically and return full-resolution images.
+
+    Both ``cap`` and ``prefetched_info`` let callers reuse already-open captures
+    and metadata for efficiency; ownership of ``cap`` remains with the caller.
+    """
     logger.info("Starting extraction for: %s", video_path)
 
     ext = os.path.splitext(video_path)[1].lower()
@@ -259,35 +291,46 @@ def extract_and_preprocess_frames(
     if sample_rate <= 0:
         raise ValueError("sample_rate must be a positive integer")
 
-    info = read_video_file_info(video_path)
-    fps_from_metadata = float(info.fps or 0.0)
+    cap_obj = cap if cap is not None else cv2.VideoCapture(video_path)
+    own_cap = cap is None
 
-    # Auto-detect rotation when not provided explicitly.
-    if rotate is None:
-        rotate = int(info.rotation or 0)
-
-    logger.info(
-        "Metadata summary: fps=%.2f rotation=%s", fps_from_metadata, rotate
-    )
-
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
+    if not cap_obj.isOpened():
+        if own_cap:
+            cap_obj.release()
         raise IOError(f"Could not open the video: {video_path}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    logger.info("Video properties: %d frames, %.2f FPS", frame_count, fps)
-    cap.release()
+    try:
+        info = prefetched_info or read_video_file_info(video_path, cap=cap_obj)
+        fps_from_metadata = float(info.fps or 0.0)
 
-    original_frames: List[np.ndarray] = []
-    for finfo in extract_frames_stream(
-        video_path,
-        sampling="index",
-        every_n=sample_rate,
-        rotate=rotate,
-        progress_callback=progress_callback,
-    ):
-        original_frames.append(finfo.array)
+        # Auto-detect rotation when not provided explicitly.
+        if rotate is None:
+            rotate = int(info.rotation or 0)
 
-    logger.info("Process complete. Extracted %d frames into memory.", len(original_frames))
-    return original_frames, fps
+        logger.info(
+            "Metadata summary: fps=%.2f rotation=%s", fps_from_metadata, rotate
+        )
+
+        fps = cap_obj.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap_obj.get(cv2.CAP_PROP_FRAME_COUNT))
+        logger.info("Video properties: %d frames, %.2f FPS", frame_count, fps)
+
+        original_frames: List[np.ndarray] = []
+        for finfo in extract_frames_stream(
+            video_path,
+            sampling="index",
+            every_n=sample_rate,
+            rotate=rotate,
+            progress_callback=progress_callback,
+            cap=cap_obj,
+            prefetched_info=info,
+        ):
+            original_frames.append(finfo.array)
+
+        logger.info(
+            "Process complete. Extracted %d frames into memory.", len(original_frames)
+        )
+        return original_frames, fps
+    finally:
+        if own_cap:
+            cap_obj.release()
