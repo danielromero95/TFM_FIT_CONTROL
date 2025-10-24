@@ -188,6 +188,7 @@ def calculate_metrics_from_sequence(
         return dfm
 
     angle_columns = ["left_knee", "right_knee", "left_elbow", "right_elbow"]
+    raw_angles = dfm[angle_columns].copy()
     for column in angle_columns:
         dfm[column] = dfm[column].interpolate(method="linear", limit_direction="both")
         if smooth_window >= 3:
@@ -196,10 +197,10 @@ def calculate_metrics_from_sequence(
             dfm[column].tolist(), fps, method=vel_method
         )
 
-    dfm["knee_symmetry"] = dfm.apply(
+    dfm["knee_symmetry"] = raw_angles.apply(
         lambda row: calculate_symmetry(row["left_knee"], row["right_knee"]), axis=1
     )
-    dfm["elbow_symmetry"] = dfm.apply(
+    dfm["elbow_symmetry"] = raw_angles.apply(
         lambda row: calculate_symmetry(row["left_elbow"], row["right_elbow"]), axis=1
     )
     return dfm
