@@ -46,7 +46,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     )
 
     def _fake_extract_landmarks(
-        *, frames, use_crop, min_detection_confidence, min_visibility
+        *, frames, use_crop, **kwargs
     ):  # type: ignore[override]
         length = len(frames)
         return pd.DataFrame({"frame": range(length)})

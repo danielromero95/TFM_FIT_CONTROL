@@ -168,7 +168,7 @@ def run_pipeline(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
-        min_visibility=0.5,
+        min_visibility=0.5,  # si existe en config, cámbialo por ese valor
     )
 
     t2 = time.perf_counter()
@@ -185,6 +185,9 @@ def run_pipeline(
             crop_boxes,
             str(debug_video_path),
             fps_effective,
+            processed_size=(cfg.pose.target_width, cfg.pose.target_height),
+            landmarks_normalized=True,
+            clear_rotation_tag=True,
         )
 
     t3 = time.perf_counter()
