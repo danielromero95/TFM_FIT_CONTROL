@@ -20,7 +20,7 @@ from src.B_pose_estimation.processing import (
     filter_and_interpolate_landmarks,
 )
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
-from src.F_visualization.video_renderer import render_landmarks_on_video_hq
+from src.D_visualization.video_landmarks import render_landmarks_video
 from src.exercise_detection.exercise_detector import DetectionResult, detect_exercise
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
@@ -179,13 +179,18 @@ def run_pipeline(
     if cfg.debug.generate_debug_video:
         notify(65, "EXTRA STAGE: Rendering HQ debug video...")
         debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
-        render_landmarks_on_video_hq(
-            frames,
-            filtered_sequence,
-            crop_boxes,
-            str(debug_video_path),
-            fps_effective,
-        )
+        try:
+            render_landmarks_video(
+                frames,
+                filtered_sequence,
+                crop_boxes,
+                str(debug_video_path),
+                fps_effective,
+                processed_size=(cfg.pose.target_width, cfg.pose.target_height),
+            )
+        except Exception as e:
+            logger.warning("Debug video rendering failed: %s", e)
+            debug_video_path = None
 
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
