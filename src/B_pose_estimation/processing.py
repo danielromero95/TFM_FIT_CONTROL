@@ -8,9 +8,9 @@ from typing import Iterable, Tuple
 import numpy as np
 import pandas as pd
 
-from .estimators import CroppedPoseEstimator, PoseEstimator
+from .estimators import CroppedPoseEstimator, PoseEstimator, RoiPoseEstimator
 from .metrics import (
-    calculate_angular_velocity,
+    angular_velocity,
     calculate_distances,
     calculate_symmetry,
     extract_joint_angles,
@@ -25,13 +25,18 @@ def extract_landmarks_from_frames(
     frames: Iterable[np.ndarray],
     use_crop: bool = False,
     *,
+    use_roi_tracking: bool = False,
     min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
     min_visibility: float = 0.5,
 ) -> pd.DataFrame:
     """Extract pose landmarks frame by frame and return a raw DataFrame."""
     frames = list(frames)
     logger.info("Extracting landmarks from %d frames. Using crop: %s", len(frames), use_crop)
-    estimator_cls = CroppedPoseEstimator if use_crop else PoseEstimator
+    estimator_cls = (
+        RoiPoseEstimator
+        if (use_crop and use_roi_tracking)
+        else (CroppedPoseEstimator if use_crop else PoseEstimator)
+    )
 
     rows: list[dict[str, float]] = []
     with estimator_cls(min_detection_confidence=min_detection_confidence) as estimator:
@@ -53,7 +58,7 @@ def extract_landmarks_from_frames(
                     x_value = point["x"]
                     y_value = point["y"]
 
-                    if use_crop:
+                    if use_crop and not use_roi_tracking:
                         if crop_width > 0 and crop_height > 0:
                             x_value = (x_value * crop_width + crop_x1) / width
                             y_value = (y_value * crop_height + crop_y1) / height
@@ -147,13 +152,19 @@ def filter_and_interpolate_landmarks(
     return np.array(filtered_sequence, dtype=object), crop_coords
 
 
-def calculate_metrics_from_sequence(sequence: np.ndarray, fps: float) -> pd.DataFrame:
+def calculate_metrics_from_sequence(
+    sequence: np.ndarray,
+    fps: float,
+    *,
+    smooth_window: int = 0,
+    vel_method: str = "forward",
+) -> pd.DataFrame:
     """Compute biomechanical metrics for the provided landmark sequence."""
     logger.info("Computing metrics for a sequence of %d frames.", len(sequence))
     all_metrics: list[dict[str, float]] = []
     for index, frame_landmarks in enumerate(sequence):
         row: dict[str, float] = {"frame_idx": index}
-        if frame_landmarks is None or any(np.isnan(lm["x"]) for lm in frame_landmarks):
+        if frame_landmarks is None:
             row.update(
                 {
                     "left_knee": np.nan,
@@ -176,9 +187,14 @@ def calculate_metrics_from_sequence(sequence: np.ndarray, fps: float) -> pd.Data
     if dfm.empty:
         return dfm
 
-    dfm_filled = dfm.ffill().bfill()
-    for column in ["left_knee", "right_knee", "left_elbow", "right_elbow"]:
-        dfm[f"ang_vel_{column}"] = calculate_angular_velocity(dfm_filled[column].tolist(), fps)
+    angle_columns = ["left_knee", "right_knee", "left_elbow", "right_elbow"]
+    for column in angle_columns:
+        dfm[column] = dfm[column].interpolate(method="linear", limit_direction="both")
+        if smooth_window >= 3:
+            dfm[column] = dfm[column].rolling(smooth_window, center=True, min_periods=1).mean()
+        dfm[f"ang_vel_{column}"] = angular_velocity(
+            dfm[column].tolist(), fps, method=vel_method
+        )
 
     dfm["knee_symmetry"] = dfm.apply(
         lambda row: calculate_symmetry(row["left_knee"], row["right_knee"]), axis=1
