@@ -38,6 +38,8 @@ class AppState:
     video_path: Optional[str] = None
     exercise: str = DEFAULT_EXERCISE_LABEL
     exercise_pending_update: Optional[str] = None
+    view: str = ""  # "", "front", "side"
+    view_pending_update: Optional[str] = None
     detect_result: Optional[Dict[str, Any]] = None
     configure_values: Dict[str, float | str | bool] = field(
         default_factory=lambda: CONFIG_DEFAULTS.copy()
@@ -97,6 +99,8 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.run_id = None
     state.exercise = DEFAULT_EXERCISE_LABEL
     state.exercise_pending_update = None
+    state.view = ""
+    state.view_pending_update = None
     state.detect_result = None
     state.configure_values = CONFIG_DEFAULTS.copy()
     state.step = Step.UPLOAD

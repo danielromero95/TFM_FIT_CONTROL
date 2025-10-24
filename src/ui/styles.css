@@ -199,6 +199,33 @@ main [data-testid="column"] > div {
 .results-panel .results-metrics-block [data-baseweb="select"] {
     margin-top: 0 !important;
 }
+
+/* Step 2 — acercar título al vídeo y quitar huecos */
+.app-step-detect h3, .app-step-detect .stMarkdown h3 {
+    margin-bottom: .4rem !important;
+}
+.app-step-detect iframe { margin-bottom: 0 !important; }
+
+/* Botón Auto-Detect a ancho completo y pegado al vídeo */
+.app-step-detect .autodetect-btn > button {
+    width: 100% !important;
+    border-radius: 12px !important;
+    min-height: 44px;
+    font-weight: 600;
+}
+
+/* Grid simple de etiqueta | control */
+.app-step-detect .form-row {
+    display: grid; grid-template-columns: 1fr 2fr; gap: .5rem; align-items: center;
+    margin-top: .5rem;
+}
+.app-step-detect .form-label { margin: 0; }
+
+/* Fila Back | Continue */
+.app-step-detect .app-nav-buttons { margin-top: .75rem; }
+.app-step-detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
+    gap: .75rem !important;
+}
 .results-panel h4 {
     margin-top: .75rem !important;
     margin-bottom: .5rem !important;

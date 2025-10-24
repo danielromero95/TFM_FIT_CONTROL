@@ -108,8 +108,9 @@ def render_uniform_video(
     start_time: int = 0,
     key: str | None = None,
     bottom_margin: float = 1.25,
+    fixed_height_px: int | None = 400,
 ) -> None:
-    """Render ``data`` inside a responsive 16:9 viewport."""
+    """Render ``data`` inside a viewport with fixed height and full width."""
 
     source, mime = _video_source(data, format=format)
     component_key = key or f"uniform_video_{uuid4().hex}"
@@ -120,7 +121,8 @@ def render_uniform_video(
     st.markdown(f'<div id="{marker_id}"></div>', unsafe_allow_html=True)
 
     padding = 24
-    initial_height = int(round(720 * 9 / 16)) + padding
+    fixed_h = int(fixed_height_px or 400)
+    initial_height = fixed_h + padding
     html_kwargs: dict[str, object] = {"height": initial_height, "scrolling": False}
     try:
         signature = inspect.signature(html)
@@ -132,8 +134,8 @@ def render_uniform_video(
 
     html(
         f"""
-        <div id="{inner_id}" style="width:100%;max-width:720px;margin:0 auto;">
-          <div style="position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;">
+        <div id="{inner_id}" style="width:100%;margin:0 auto;">
+          <div style="position:relative;width:100%;height:{fixed_h}px;background:#000;border-radius:12px;overflow:hidden;">
             <video
               id="{video_id}"
               controls
@@ -151,10 +153,9 @@ def render_uniform_video(
             const pad = {padding};
             const inner = document.getElementById('{inner_id}');
             const video = document.getElementById('{video_id}');
-            if (!inner || !video) return;
+            if (!inner) return;
             const fit = () => {{
-              const w = inner.clientWidth || 720;
-              const h = Math.round(w * 9 / 16) + pad;
+              const h = {fixed_h} + pad;
               if (window.frameElement) {{
                 window.frameElement.style.height = h + 'px';
               }}
@@ -162,19 +163,21 @@ def render_uniform_video(
             if (typeof ResizeObserver !== 'undefined') {{
               new ResizeObserver(() => fit()).observe(inner);
             }} else {{
-              window.addEventListener('resize', () => fit());
+              window.addEventListener('resize', fit);
             }}
             fit();
             window.addEventListener('load', () => fit(), {{ once: true }});
-            const start = Math.max({start_time}, 0);
-            video.addEventListener('loadedmetadata', () => {{
-              if (!start) return;
-              try {{
-                video.currentTime = start;
-              }} catch (err) {{
-                console.warn('Unable to seek video start time', err);
-              }}
-            }}, {{ once: true }});
+            if (video) {{
+              const start = Math.max({start_time}, 0);
+              video.addEventListener('loadedmetadata', () => {{
+                if (!start) return;
+                try {{
+                  video.currentTime = start;
+                }} catch (err) {{
+                  console.warn('Unable to seek video start time', err);
+                }}
+              }}, {{ once: true }});
+            }}
           }})();
         </script>
         """,
@@ -186,7 +189,7 @@ def render_uniform_video(
         f"""
         <style>
         #{marker_id} + iframe {{
-          width: min(100%, 720px) !important;
+          width: 100% !important;
           margin: 0 auto {margin_value:.2f}rem auto !important;
           display: block !important;
           border-radius: 12px !important;
