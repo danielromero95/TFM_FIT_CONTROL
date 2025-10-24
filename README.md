@@ -2,7 +2,7 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.5 (23-10-2025)
+**Version:** 2.6 (24-10-2025)
 
 ---
 
@@ -21,7 +21,7 @@ The core workflow includes:
 
 - **Video preprocessing:** frame extraction, resizing, normalization, filtering (Gaussian, CLAHE), and ROI cropping.
 - **Pose estimation:** MediaPipe Pose for landmark extraction and angle / angular-velocity / symmetry calculations.
-- **Analysis:** repetition detection, metric aggregation, and alerting on technique deviations.
+- **Analysis:** repetition detection, metric aggregation, and (to develop) alerting on technique deviations.
 
 ---
 
@@ -69,6 +69,24 @@ streamlit run src/app.py
 5. Results: repetition count, metrics, optional debug video, downloads.
 
 ---
+## What’s new in 2.6
+
+- Single source of truth for repetition counting
+
+- New package: src/C_repetition_analysis/ with reps/api.py.
+
+- Removed legacy src/D_modeling/ package and unused fault_detection.py.
+
+- Robust valley-based repetition counter
+
+- Valley detection on inverted angle sequence with prominence and min distance thresholds.
+
+- Refractory window consolidation: clusters close valleys and keeps the most prominent per window.
+
+- Aligned debug output: CountingDebugInfo(valley_indices, prominences) stays consistent after filtering.
+
+
+
 ## What’s new in 2.5
 
 - Synchronized video + metrics viewer (Plotly). A frame-accurate cursor is tied to video playback; clicking on the chart seeks the video to that exact point.
