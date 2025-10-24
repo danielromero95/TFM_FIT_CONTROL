@@ -48,10 +48,12 @@ except Exception:  # pragma: no cover
 
 # Visualization helpers ---------------------------------------------------------
 try:  # pragma: no cover - visualization may be optional in some deployments
-    from .pose_visualization import (
+    from .video_landmarks_visualization import (
         POSE_CONNECTIONS,
         LANDMARK_COLOR,
         CONNECTION_COLOR,
+        THICKNESS_DEFAULT,
+        RADIUS_DEFAULT,
     )
 except Exception:  # pragma: no cover
     try:
@@ -60,6 +62,8 @@ except Exception:  # pragma: no cover
         POSE_CONNECTIONS = None  # type: ignore
     LANDMARK_COLOR = None  # type: ignore
     CONNECTION_COLOR = None  # type: ignore
+    THICKNESS_DEFAULT = None  # type: ignore
+    RADIUS_DEFAULT = None  # type: ignore
 
 __all__ = [
     # Models
@@ -85,4 +89,6 @@ __all__ = [
     "POSE_CONNECTIONS",
     "LANDMARK_COLOR",
     "CONNECTION_COLOR",
+    "THICKNESS_DEFAULT",
+    "RADIUS_DEFAULT",
 ]

@@ -20,7 +20,9 @@ from src.B_pose_estimation.processing import (
     filter_and_interpolate_landmarks,
 )
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
-from src.D_visualization.video_landmarks import render_landmarks_video
+from src.D_visualization.video_landmarks import (
+    render_landmarks_video_streaming,
+)
 from src.exercise_detection.exercise_detector import DetectionResult, detect_exercise
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
@@ -180,16 +182,18 @@ def run_pipeline(
         notify(65, "EXTRA STAGE: Rendering HQ debug video...")
         debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
         try:
-            render_landmarks_video(
-                frames,
+            render_landmarks_video_streaming(
+                video_path,
                 filtered_sequence,
                 crop_boxes,
                 str(debug_video_path),
                 fps_effective,
                 processed_size=(cfg.pose.target_width, cfg.pose.target_height),
+                sample_rate=sample_rate,
+                rotate=rotate,
             )
         except Exception as e:
-            logger.warning("Debug video rendering failed: %s", e)
+            logger.warning("Debug video streaming failed: %s", e)
             debug_video_path = None
 
     t3 = time.perf_counter()
