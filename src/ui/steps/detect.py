@@ -29,9 +29,46 @@ CONFIG_TO_LABEL: Dict[str, str] = {key: lbl for (lbl, key) in EXERCISE_CHOICES}
 EXERCISE_WIDGET_KEY = "exercise_select_value"
 
 
+def _trigger_rerun() -> None:
+    try:  # pragma: no cover - streamlit rerun flow
+        st.rerun()
+    except Exception:  # pragma: no cover - legacy API fallback
+        st.experimental_rerun()
+
+
+def _perform_detection(state, video_path, token) -> bool:
+    if not video_path:
+        st.warning("Please upload a video before continuing.")
+        return False
+
+    with st.spinner("Detecting exercise…"):
+        try:
+            label_key, detected_view, confidence = detect_exercise(str(video_path))
+        except Exception as exc:  # pragma: no cover - UI feedback
+            state.detect_result = {
+                "error": str(exc),
+                "accepted": False,
+                "token": token,
+            }
+            return False
+        else:
+            state.detect_result = {
+                "label": label_key,
+                "view": detected_view,
+                "confidence": float(confidence),
+                "accepted": False,
+                "token": token,
+            }
+            return True
+
+
 def _detect_step() -> None:
     st.markdown('<div class="app-step app-step-detect">', unsafe_allow_html=True)
     st.markdown("### 2. Detect the exercise")
+    st.markdown(
+        "<p class=\"app-step__lead\">Review the uploaded video, then choose the exercise manually or let the system detect it for you.</p>",
+        unsafe_allow_html=True,
+    )
     state = get_state()
     video_path = state.video_path
     if video_path:
@@ -72,56 +109,102 @@ def _detect_step() -> None:
         state.detect_result = None
         detect_result = None
 
-    select_col_label, select_col_control = st.columns([1, 2], gap="small")
-    with select_col_label:
+    st.divider()
+
+    selection_card = st.container()
+    with selection_card:
         st.markdown(
-            '<div class="form-label form-label--inline">Select the exercise</div>',
+            "<div class=\"form-card\">",
             unsafe_allow_html=True,
         )
-    with select_col_control:
-        select_index = EXERCISE_LABELS.index(current_exercise)
-        selected_exercise = st.selectbox(
-            "Select the exercise",
-            options=EXERCISE_LABELS,
-            index=select_index,
-            key=EXERCISE_WIDGET_KEY,
-            label_visibility="collapsed",
-            disabled=not is_active,
+        st.markdown(
+            "<div class=\"form-card__header\">Exercise selection</div>",
+            unsafe_allow_html=True,
         )
-        if selected_exercise != current_exercise:
-            state.exercise = selected_exercise
-            current_exercise = selected_exercise
+        st.markdown(
+            "<p class=\"form-card__description\">Choose the exercise manually or stay on Auto-Detect to let the system decide. You can re-run detection at any time.</p>",
+            unsafe_allow_html=True,
+        )
+
+        select_col_label, select_col_control = st.columns([1, 2], gap="small")
+        with select_col_label:
+            st.markdown(
+                '<div class="form-label form-label--inline">Select the exercise</div>',
+                unsafe_allow_html=True,
+            )
+        with select_col_control:
+            select_index = EXERCISE_LABELS.index(current_exercise)
+            selected_exercise = st.selectbox(
+                "Select the exercise",
+                options=EXERCISE_LABELS,
+                index=select_index,
+                key=EXERCISE_WIDGET_KEY,
+                label_visibility="collapsed",
+                disabled=not is_active,
+            )
+            if selected_exercise != current_exercise:
+                state.exercise = selected_exercise
+                current_exercise = selected_exercise
+
+        detect_col, status_col = st.columns([1, 1])
 
     detect_result = state.detect_result
     if detect_result is not None and detect_result.get("token") != token:
         detect_result = None
         state.detect_result = None
 
-    info_container = st.container()
-    if detect_result:
-        if detect_result.get("error"):
-            info_container.error(
-                "Automatic exercise detection failed: " f"{detect_result.get('error')}"
-            )
+    with detect_col:
+        detect_button_disabled = not is_active or current_exercise != DEFAULT_EXERCISE_LABEL
+        if st.button(
+            "Run Auto-Detect",
+            key="detect_run_auto",
+            use_container_width=True,
+            disabled=detect_button_disabled,
+        ):
+            if _perform_detection(state, video_path, token):
+                _trigger_rerun()
+
+    with status_col:
+        info_container = st.container()
+        if current_exercise != DEFAULT_EXERCISE_LABEL:
             info_container.info(
-                "You can adjust the selection manually or try detecting again."
+                f"Manual selection: {current_exercise}",
+                icon="📝",
             )
-        else:
-            label_key = detect_result.get("label", "unknown")
-            label_display = CONFIG_TO_LABEL.get(
-                label_key,
-                label_key.replace("_", " ").title(),
-            )
-            view_display = detect_result.get("view", "unknown").replace("_", " ").title()
-            confidence = float(detect_result.get("confidence", 0.0))
-            info_container.success(
-                "Detected exercise: "
-                f"{label_display} – {view_display} view ({confidence:.0%} confidence)."
-            )
-            if not detect_result.get("accepted"):
-                info_container.info(
-                    "Click Continue to accept this detection or choose an exercise manually."
+        elif detect_result:
+            if detect_result.get("error"):
+                info_container.error(
+                    "Automatic exercise detection failed: "
+                    f"{detect_result.get('error')}",
                 )
+                info_container.info(
+                    "You can adjust the selection manually or try detecting again.",
+                )
+            else:
+                label_key = detect_result.get("label", "unknown")
+                label_display = CONFIG_TO_LABEL.get(
+                    label_key,
+                    label_key.replace("_", " ").title(),
+                )
+                view_display = detect_result.get("view", "unknown").replace(
+                    "_",
+                    " ",
+                ).title()
+                confidence = float(detect_result.get("confidence", 0.0))
+                info_container.success(
+                    "Detected exercise: "
+                    f"{label_display} – {view_display} view ({confidence:.0%} confidence).",
+                )
+                if not detect_result.get("accepted"):
+                    info_container.info(
+                        "Click Continue to accept this detection or choose an exercise manually.",
+                    )
+        else:
+            info_container.info(
+                "Auto-Detect is ready. Run detection now or continue when you're ready.",
+            )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     actions_placeholder = st.empty()
     if is_active:
@@ -135,10 +218,7 @@ def _detect_step() -> None:
                 ):
                     state.detect_result = None
                     go_to(Step.UPLOAD)
-                    try:
-                        st.rerun()
-                    except Exception:
-                        st.experimental_rerun()
+                    _trigger_rerun()
             with continue_col:
                 if st.button(
                     "Continue",
@@ -169,32 +249,8 @@ def _detect_step() -> None:
                             detect_result["accepted"] = True
                             go_to(Step.CONFIGURE)
                         else:
-                            if not video_path:
-                                st.warning("Please upload a video before continuing.")
-                            else:
-                                with st.spinner("Detecting exercise…"):
-                                    try:
-                                        label_key, detected_view, confidence = detect_exercise(
-                                            str(video_path)
-                                        )
-                                    except Exception as exc:  # pragma: no cover - UI feedback
-                                        state.detect_result = {
-                                            "error": str(exc),
-                                            "accepted": False,
-                                            "token": token,
-                                        }
-                                    else:
-                                        state.detect_result = {
-                                            "label": label_key,
-                                            "view": detected_view,
-                                            "confidence": float(confidence),
-                                            "accepted": False,
-                                            "token": token,
-                                        }
-                                try:
-                                    st.rerun()
-                                except Exception:
-                                    st.experimental_rerun()
+                            if _perform_detection(state, video_path, token):
+                                _trigger_rerun()
                     else:
                         state.detect_result = None
                         go_to(Step.CONFIGURE)
