@@ -167,8 +167,7 @@ def run_pipeline(
     df_raw_landmarks = extract_landmarks_from_frames(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
-        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
-        min_visibility=0.5,  # si existe en config, cámbialo por ese valor
+        visibility_threshold=MIN_DETECTION_CONFIDENCE,
     )
 
     t2 = time.perf_counter()
