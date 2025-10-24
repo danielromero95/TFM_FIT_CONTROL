@@ -1,30 +1,34 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Callable, Iterable, Mapping, Sequence, Tuple, Optional
+
 import logging
 import math
+from dataclasses import dataclass
+from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
 
-from src import config
-
-try:
-    # Prefer central style if available
-    from src.config.pose_visualization import LANDMARK_COLOR as _LM, CONNECTION_COLOR as _CN
-except Exception:
-    _LM, _CN = config.LANDMARK_COLOR, config.CONNECTION_COLOR
+from src.config import video_landmarks_visualization as vlv
 
 
 logger = logging.getLogger(__name__)
 
 
+__all__ = [
+    "OverlayStyle",
+    "RenderStats",
+    "draw_pose_on_frame",
+    "render_landmarks_video",
+    "render_landmarks_video_streaming",
+]
+
+
 @dataclass(frozen=True)
 class OverlayStyle:
-    connection_thickness: int = 2
-    landmark_radius: int = 4
-    connection_bgr: Tuple[int, int, int] = tuple(_CN)  # type: ignore
-    landmark_bgr: Tuple[int, int, int] = tuple(_LM)  # type: ignore
+    connection_thickness: int = vlv.THICKNESS_DEFAULT
+    landmark_radius: int = vlv.RADIUS_DEFAULT
+    connection_bgr: Tuple[int, int, int] = tuple(vlv.CONNECTION_COLOR)
+    landmark_bgr: Tuple[int, int, int] = tuple(vlv.LANDMARK_COLOR)
 
 
 @dataclass(frozen=True)
@@ -79,7 +83,7 @@ def draw_pose_on_frame(
     frame: np.ndarray,
     points_xy: Mapping[int, tuple[int, int]],
     *,
-    connections: Sequence[tuple[int, int]] = tuple(config.POSE_CONNECTIONS),
+    connections: Sequence[tuple[int, int]] = tuple(vlv.POSE_CONNECTIONS),
     style: OverlayStyle = OverlayStyle(),
 ) -> None:
     for a, b in connections:
@@ -93,9 +97,159 @@ def _open_writer(path: str, fps: float, size: tuple[int, int], prefs: Sequence[s
     for code in prefs:
         writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*code), max(fps, 1.0), size)
         if writer.isOpened():
+            logger.info(
+                "Opened VideoWriter fourcc=%s size=%s fps=%.2f path=%s",
+                code,
+                size,
+                max(fps, 1.0),
+                path,
+            )
             return writer, code
+        logger.info("VideoWriter open failed with fourcc=%s; trying next...", code)
         writer.release()
     raise RuntimeError(f"Could not open VideoWriter for path={path} with prefs={prefs}")
+
+
+def render_landmarks_video_streaming(
+    video_path: str,
+    landmarks_sequence,
+    crop_boxes,
+    out_path: str,
+    fps: float,
+    *,
+    processed_size: tuple[int, int],
+    sample_rate: int = 1,
+    rotate: int = 0,  # 0|90|180|270
+    style: OverlayStyle | None = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
+    codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
+) -> RenderStats:
+    """
+    Stream frames from `video_path` applying `sample_rate` and `rotate`, overlay landmarks, and write `out_path`.
+    The i-th element of `landmarks_sequence` and `crop_boxes` corresponds to the i-th kept (sampled) frame.
+    `processed_size` is the (width, height) used during pose processing (needed for scaling back).
+    """
+    import time
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError(f"Could not open the video for streaming: {video_path}")
+
+    def _rotate(f, deg):
+        if not deg:
+            return f
+        if deg == 90:
+            return cv2.rotate(f, cv2.ROTATE_90_CLOCKWISE)
+        if deg == 180:
+            return cv2.rotate(f, cv2.ROTATE_180)
+        if deg == 270:
+            return cv2.rotate(f, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return f
+
+    ok, first_raw = cap.read()
+    if not ok:
+        cap.release()
+        return RenderStats(0, 0, 0, 0.0, "")
+
+    first = _rotate(first_raw, rotate)
+    orig_h, orig_w = first.shape[:2]
+    try:
+        writer, used_fourcc = _open_writer(
+            out_path, fps if fps > 0 else 1.0, (orig_w, orig_h), codec_preference
+        )
+    except Exception:
+        cap.release()
+        raise
+
+    t0 = time.perf_counter()
+    frames_in = frames_written = skipped = 0
+    style_obj = style or OverlayStyle()
+
+    def _get(seq, i):
+        try:
+            return seq[i]
+        except Exception:
+            return None
+
+    def _handle_one(idx, fr):
+        nonlocal frames_written, skipped
+        h, w = fr.shape[:2]
+        if (w, h) != (orig_w, orig_h):
+            fr = cv2.resize(fr, (orig_w, orig_h))
+        cb = _get(crop_boxes, idx) if crop_boxes is not None else None
+        if cb is not None and hasattr(cb, "all") and np.isnan(cb).all():
+            cb = None
+        pts = _normalize_points_for_frame(
+            _get(landmarks_sequence, idx), cb, orig_w, orig_h, processed_size[0], processed_size[1]
+        )
+        if not pts:
+            skipped += 1
+            writer.write(fr)
+            frames_written += 1
+            return
+        fr_ann = fr.copy()
+        draw_pose_on_frame(fr_ann, pts, style=style_obj)
+        writer.write(fr_ann)
+        frames_written += 1
+
+    try:
+        # Sampled frame index 0
+        _handle_one(0, first)
+        frames_in += 1
+        if progress_cb:
+            try:
+                progress_cb(frames_written, frames_in)
+            except Exception:
+                pass
+
+        # Keep every `sample_rate`-th raw frame
+        raw_skip = max(0, int(sample_rate) - 1)
+        while True:
+            if cancelled and cancelled():
+                break
+            for _ in range(raw_skip):
+                ok, _ = cap.read()
+                if not ok:
+                    raw_skip = 0
+                    break
+            ok, raw = cap.read()
+            if not ok:
+                break
+            fr = _rotate(raw, rotate)
+            frames_in += 1
+            _handle_one(frames_in - 1, fr)
+            if progress_cb and (frames_in % 10 == 0):
+                try:
+                    progress_cb(frames_written, frames_in)
+                except Exception:
+                    pass
+    finally:
+        writer.release()
+        cap.release()
+
+    dt_ms = (time.perf_counter() - t0) * 1000.0
+    if progress_cb:
+        try:
+            progress_cb(frames_written, frames_in)
+        except Exception:
+            pass
+    logger.info(
+        "Rendered debug video (streaming): frames_in=%d written=%d skipped=%d fourcc=%s ms=%.1f path=%s",
+        frames_in,
+        frames_written,
+        skipped,
+        used_fourcc,
+        dt_ms,
+        out_path,
+    )
+    return RenderStats(
+        frames_in=frames_in,
+        frames_written=frames_written,
+        skipped_empty=skipped,
+        duration_ms=dt_ms,
+        used_fourcc=used_fourcc,
+    )
 
 
 def render_landmarks_video(
@@ -111,7 +265,11 @@ def render_landmarks_video(
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
 ) -> RenderStats:
-    """Stream frames -> overlay -> write. UI-agnostic."""
+    """Iterate in-memory frames -> overlay -> write. UI-agnostic.
+
+    `landmarks_sequence[i]` and `crop_boxes[i]` correspond to the i-th kept (sampled) frame.
+    `processed_size` is the (width, height) used during pose processing (needed for scaling back).
+    """
     import time
 
     t0 = time.perf_counter()
@@ -174,4 +332,24 @@ def render_landmarks_video(
     finally:
         writer.release()
     dt_ms = (time.perf_counter() - t0) * 1000.0
-    return RenderStats(frames_in, frames_written, skipped, dt_ms, used_code)
+    if progress_cb:
+        try:
+            progress_cb(frames_written, frames_in)
+        except Exception:
+            pass
+    logger.info(
+        "Rendered debug video (in-memory): frames_in=%d written=%d skipped=%d fourcc=%s ms=%.1f path=%s",
+        frames_in,
+        frames_written,
+        skipped,
+        used_code,
+        dt_ms,
+        out_path,
+    )
+    return RenderStats(
+        frames_in=frames_in,
+        frames_written=frames_written,
+        skipped_empty=skipped,
+        duration_ms=dt_ms,
+        used_fourcc=used_code,
+    )
