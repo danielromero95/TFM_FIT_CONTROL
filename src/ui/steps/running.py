@@ -18,63 +18,52 @@ from src.ui_controller.analysis_controller import (
     start_run,
 )
 from src.ui_controller.progress import phase_for
-from src.ui.steps.utils import ensure_video_path, prepare_pipeline_inputs
+from .utils import ensure_video_path, prepare_pipeline_inputs, step_container
 
 
 def _running_step() -> None:
-    st.markdown("### 4. Running the analysis")
-    progress_queue = get_progress_queue()
+    with step_container("running"):
+        st.markdown("### 4. Running the analysis")
+        progress_queue = get_progress_queue()
 
-    def _drain_progress_queue() -> None:
-        while True:
+        def _drain_progress_queue() -> None:
+            while True:
+                try:
+                    progress_queue.get_nowait()
+                except Empty:
+                    break
+
+        def _make_handle(run_id: Optional[str], future) -> Optional[RunHandle]:
+            if run_id and future:
+                return RunHandle(run_id=run_id, future=future)
+            return None
+
+        state = get_state()
+        if state.analysis_future and state.analysis_future.done():
+            state.analysis_future = None
             try:
-                progress_queue.get_nowait()
-            except Empty:
-                break
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
+            return
 
-    def _make_handle(run_id: Optional[str], future) -> Optional[RunHandle]:
-        if run_id and future:
-            return RunHandle(run_id=run_id, future=future)
-        return None
+        cancel_disabled = not state.analysis_future or state.analysis_future.done()
+        if st.button("Cancel analysis", disabled=cancel_disabled):
+            handle = _make_handle(state.run_id, state.analysis_future)
+            if handle:
+                cancel_run(handle)
+            state.run_id = None
+            state.last_run_success = False
+            state.pipeline_error = "Analysis canceled by the user."
 
-    state = get_state()
-    if state.analysis_future and state.analysis_future.done():
-        state.analysis_future = None
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
-        return
+        debug_enabled = bool((state.configure_values or {}).get("debug_video", True))
 
-    cancel_disabled = not state.analysis_future or state.analysis_future.done()
-    if st.button("Cancel analysis", disabled=cancel_disabled):
-        handle = _make_handle(state.run_id, state.analysis_future)
-        if handle:
-            cancel_run(handle)
-        state.run_id = None
         state.last_run_success = False
-        state.pipeline_error = "Analysis canceled by the user."
 
-    debug_enabled = bool((state.configure_values or {}).get("debug_video", True))
-
-    state.last_run_success = False
-
-    ensure_video_path()
-    state = get_state()
-    if not state.video_path:
-        state.pipeline_error = "The video to process was not found."
-        go_to(Step.RESULTS)
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
-        return
-
-    if state.analysis_future is None:
-        try:
-            video_path, cfg, prefetched_detection = prepare_pipeline_inputs(state)
-        except ValueError as exc:
-            state.pipeline_error = str(exc)
+        ensure_video_path()
+        state = get_state()
+        if not state.video_path:
+            state.pipeline_error = "The video to process was not found."
             go_to(Step.RESULTS)
             try:
                 st.rerun()
@@ -82,84 +71,52 @@ def _running_step() -> None:
                 st.experimental_rerun()
             return
 
-        state.pipeline_error = None
-        state.report = None
-        state.count_path = None
-        state.metrics_path = None
-        state.cfg_fingerprint = None
-        state.progress_value_from_cb = 0
-        state.phase_text_from_cb = phase_for(0, debug_enabled=debug_enabled)
-
-        _drain_progress_queue()
-
-        handle = start_run(
-            video_path=video_path,
-            cfg=cfg,
-            prefetched_detection=prefetched_detection,
-            debug_enabled=debug_enabled,
-        )
-        state.run_id = handle.run_id
-        state.analysis_future = handle.future
-        try:
-            st.rerun()
-        except Exception:
-            st.experimental_rerun()
-        return
-
-    future = state.analysis_future
-    with st.status("Analyzing video...", expanded=True) as status:
-        latest_progress = getattr(state, "progress_value_from_cb", 0)
-        latest_phase = getattr(
-            state,
-            "phase_text_from_cb",
-            phase_for(latest_progress, debug_enabled=debug_enabled),
-        )
-        bar = st.progress(latest_progress)
-        progress_message = status.empty()
-
-        status.update(
-            label=f"Analyzing video... {latest_progress}%",
-            state="running",
-            expanded=True,
-        )
-        bar.progress(latest_progress)
-        progress_message.markdown(
-            f"**Current phase:** {latest_phase} ({latest_progress}%)"
-        )
-
-        while future and not future.done():
-            state = get_state()
-            if state.run_id is None:
-                state.report = None
-                state.count_path = None
-                state.metrics_path = None
-                state.cfg_fingerprint = None
-                state.last_run_success = False
-                state.progress_value_from_cb = latest_progress
-                state.phase_text_from_cb = latest_phase
-                state.analysis_future = None
-                state.pipeline_error = "Analysis canceled by the user."
+        if state.analysis_future is None:
+            try:
+                video_path, cfg, prefetched_detection = prepare_pipeline_inputs(state)
+            except ValueError as exc:
+                state.pipeline_error = str(exc)
                 go_to(Step.RESULTS)
-                _drain_progress_queue()
                 try:
                     st.rerun()
                 except Exception:
                     st.experimental_rerun()
                 return
 
-            current_future = state.analysis_future
-            if current_future is None:
-                break
+            state.pipeline_error = None
+            state.report = None
+            state.count_path = None
+            state.metrics_path = None
+            state.cfg_fingerprint = None
+            state.progress_value_from_cb = 0
+            state.phase_text_from_cb = phase_for(0, debug_enabled=debug_enabled)
 
-            handle = _make_handle(state.run_id, current_future)
-            if handle:
-                latest_progress, latest_phase = poll_progress(
-                    handle,
-                    latest_progress,
-                    debug_enabled=debug_enabled,
-                )
-                state.progress_value_from_cb = latest_progress
-                state.phase_text_from_cb = latest_phase
+            _drain_progress_queue()
+
+            handle = start_run(
+                video_path=video_path,
+                cfg=cfg,
+                prefetched_detection=prefetched_detection,
+                debug_enabled=debug_enabled,
+            )
+            state.run_id = handle.run_id
+            state.analysis_future = handle.future
+            try:
+                st.rerun()
+            except Exception:
+                st.experimental_rerun()
+            return
+
+        future = state.analysis_future
+        with st.status("Analyzing video...", expanded=True) as status:
+            latest_progress = getattr(state, "progress_value_from_cb", 0)
+            latest_phase = getattr(
+                state,
+                "phase_text_from_cb",
+                phase_for(latest_progress, debug_enabled=debug_enabled),
+            )
+            bar = st.progress(latest_progress)
+            progress_message = status.empty()
 
             status.update(
                 label=f"Analyzing video... {latest_progress}%",
@@ -170,34 +127,78 @@ def _running_step() -> None:
             progress_message.markdown(
                 f"**Current phase:** {latest_phase} ({latest_progress}%)"
             )
-            time.sleep(0.2)
-            future = state.analysis_future
 
-        state = get_state()
-        current_future = state.analysis_future
-        if not current_future:
-            latest_phase = "Canceled"
-            state.pipeline_error = "Analysis canceled by the user."
-            state.report = None
-            state.count_path = None
-            state.metrics_path = None
-            state.cfg_fingerprint = None
-            state.last_run_success = False
-            state.progress_value_from_cb = latest_progress
-            state.phase_text_from_cb = latest_phase
-            status.update(label="Analysis canceled", state="error", expanded=True)
-            bar.progress(latest_progress)
-            progress_message.markdown(
-                f"**Current phase:** {latest_phase} ({latest_progress}%)"
-            )
-            _drain_progress_queue()
-            state.run_id = None
-            go_to(Step.RESULTS)
-            try:
-                st.rerun()
-            except Exception:
-                st.experimental_rerun()
-            return
+            while future and not future.done():
+                state = get_state()
+                if state.run_id is None:
+                    state.report = None
+                    state.count_path = None
+                    state.metrics_path = None
+                    state.cfg_fingerprint = None
+                    state.last_run_success = False
+                    state.progress_value_from_cb = latest_progress
+                    state.phase_text_from_cb = latest_phase
+                    state.analysis_future = None
+                    state.pipeline_error = "Analysis canceled by the user."
+                    go_to(Step.RESULTS)
+                    _drain_progress_queue()
+                    try:
+                        st.rerun()
+                    except Exception:
+                        st.experimental_rerun()
+                    return
+
+                current_future = state.analysis_future
+                if current_future is None:
+                    break
+
+                handle = _make_handle(state.run_id, current_future)
+                if handle:
+                    latest_progress, latest_phase = poll_progress(
+                        handle,
+                        latest_progress,
+                        debug_enabled=debug_enabled,
+                    )
+                    state.progress_value_from_cb = latest_progress
+                    state.phase_text_from_cb = latest_phase
+
+                status.update(
+                    label=f"Analyzing video... {latest_progress}%",
+                    state="running",
+                    expanded=True,
+                )
+                bar.progress(latest_progress)
+                progress_message.markdown(
+                    f"**Current phase:** {latest_phase} ({latest_progress}%)"
+                )
+                time.sleep(0.2)
+                future = state.analysis_future
+
+            state = get_state()
+            current_future = state.analysis_future
+            if not current_future:
+                latest_phase = "Canceled"
+                state.pipeline_error = "Analysis canceled by the user."
+                state.report = None
+                state.count_path = None
+                state.metrics_path = None
+                state.cfg_fingerprint = None
+                state.last_run_success = False
+                state.progress_value_from_cb = latest_progress
+                state.phase_text_from_cb = latest_phase
+                status.update(label="Analysis canceled", state="error", expanded=True)
+                bar.progress(latest_progress)
+                progress_message.markdown(
+                    f"**Current phase:** {latest_phase} ({latest_progress}%)"
+                )
+                _drain_progress_queue()
+                state.run_id = None
+                go_to(Step.RESULTS)
+                try:
+                    st.rerun()
+                except Exception:
+                    st.experimental_rerun()
+                return
 
         handle = _make_handle(state.run_id, current_future)
         try:

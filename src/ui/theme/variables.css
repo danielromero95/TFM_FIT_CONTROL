@@ -1,0 +1,23 @@
+:root {
+  /* Colors */
+  --fc-bg: #0f172a;
+  --fc-surface: #111827;
+  --fc-border: #1f2937;
+  --fc-accent: #10b981;
+  --fc-accent-2: #22c55e;
+  --fc-danger: #ef4444;
+  --fc-text-1: #e5e7eb;
+  --fc-text-2: #cbd5e1;
+
+  /* Effects */
+  --fc-shadow-1: 0 12px 24px rgba(16, 185, 129, .35);
+  --fc-shadow-1h: 0 16px 28px rgba(16, 185, 129, .45);
+
+  /* Shape & spacing */
+  --fc-radius: 12px;
+  --fc-gap-sm: .5rem;
+  --fc-gap: .75rem;
+
+  /* Typography */
+  --fc-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+}

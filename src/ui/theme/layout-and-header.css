@@ -1,0 +1,35 @@
+html, body { font-family: var(--fc-font-sans); }
+header[data-testid="stHeader"] {
+  background: var(--fc-bg);
+  border-bottom: 1px solid var(--fc-border);
+  height: 48px;
+  padding-right: 140px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  z-index: 1000;
+}
+
+/* Pack content closer to header: keep Streamlit paddings minimal */
+section[data-testid="stMain"], main { padding-top: 0 !important; }
+section[data-testid="stMain"] > div:first-child,
+main > div:first-child,
+main .block-container,
+main .block-container > div:first-child,
+main [data-testid="stToolbar"],
+main [data-testid="stToolbar"] + div,
+main [data-testid="stVerticalBlock"],
+main [data-testid="stVerticalBlock"] > div:first-child,
+main [data-testid="stHorizontalBlock"],
+main [data-testid="column"],
+main [data-testid="column"] > div {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+@media (max-width: 520px) {
+  header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
+}
+@media (max-width: 420px) {
+  header[data-testid="stHeader"] .app-toolbar-title { display: none; }
+}

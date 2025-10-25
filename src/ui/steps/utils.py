@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
+import streamlit as st
+
 from src import config
 from src.ui.state import AppState, CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, get_state
-from src.ui.steps.detect import EXERCISE_TO_CONFIG
+
+
+@contextmanager
+def step_container(name: str):
+    st.markdown(f"<div class='step step--{name}'>", unsafe_allow_html=True)
+    try:
+        yield
+    finally:
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def ensure_video_path() -> None:
@@ -41,6 +52,8 @@ def ensure_video_path() -> None:
 def prepare_pipeline_inputs(
     state: AppState,
 ) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
+    from src.ui.steps.detect import EXERCISE_TO_CONFIG
+
     video_path = state.video_path
     if not video_path:
         raise ValueError("The video to process was not found.")

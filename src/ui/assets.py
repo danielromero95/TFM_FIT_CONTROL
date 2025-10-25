@@ -8,7 +8,20 @@ import streamlit as st
 
 
 _ASSETS_DIR = Path(__file__).resolve().parent
-_CSS_FILE = _ASSETS_DIR / "styles.css"
+_THEME_DIR = _ASSETS_DIR / "theme"
+_STEPS_DIR = _ASSETS_DIR / "steps"
+
+_CSS_FILES = [
+    _THEME_DIR / "variables.css",
+    _THEME_DIR / "layout-and-header.css",
+    _THEME_DIR / "ui-components.css",
+    _ASSETS_DIR / "styles.css",
+    _STEPS_DIR / "configure" / "configure.css",
+    _STEPS_DIR / "detect" / "detect.css",
+    _STEPS_DIR / "results" / "results.css",
+    _STEPS_DIR / "upload" / "upload.css",
+    _STEPS_DIR / "running" / "running.css",
+]
 
 
 @st.cache_data(show_spinner=False)
@@ -16,256 +29,6 @@ def _load_css(path: str) -> str:
     """Load the CSS file content from disk and cache it."""
     css_path = Path(path)
     return css_path.read_text(encoding="utf-8")
-
-
-_INLINE_CSS = """
-<style>
-  /* --- Top header with inline title --- */
-  header[data-testid="stHeader"] {
-    background: #0f172a;
-    border-bottom: 1px solid #1f2937;
-    height: 48px;
-    padding-right: 140px;
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-  header[data-testid="stHeader"]::before {
-    content: "Exercise Performance Analyzer" !important;
-    position: absolute;
-    left: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #e5e7eb !important;
-    font-weight: 700 !important;
-    font-size: 18px !important;
-    letter-spacing: .2px !important;
-    pointer-events: none;
-    max-width: calc(100% - 180px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-    z-index: 2;
-  }
-
-  .form-label {
-    color: #e5e7eb;
-    font-weight: 600;
-    font-size: 0.875rem;
-    margin-bottom: .25rem;
-  }
-
-  .form-label--inline {
-    margin-bottom: 0;
-    display: flex;
-    align-items: center;
-    min-height: 38px;
-  }
-
-  /* Styled navigation buttons */
-  .app-button {
-    border-radius: 12px !important;
-    min-height: 44px;
-    width: 100%;
-    font-weight: 600;
-    font-size: .95rem;
-    letter-spacing: .01em;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
-  }
-
-  .app-button--back {
-    background: transparent !important;
-    color: #ef4444 !important;
-    border-color: rgba(239, 68, 68, .6) !important;
-  }
-  .app-button--back:hover {
-    background: rgba(239, 68, 68, .10) !important;
-    border-color: rgba(239, 68, 68, .9) !important;
-    transform: translateY(-1px);
-  }
-
-  .app-button--continue {
-    background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
-    color: #ecfdf5 !important;
-    border-color: rgba(34, 197, 94, .8) !important;
-    box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
-  }
-  .app-button--continue:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
-  }
-
-  .app-button--disabled {
-    opacity: .55 !important;
-    transform: none !important;
-    box-shadow: none !important;
-    cursor: not-allowed !important;
-  }
-
-  .chip {display:inline-block;padding:.2rem .5rem;border-radius:9999px;font-size:.8rem;
-         margin-right:.25rem}
-  .chip.ok {background:#065f46;color:#ecfdf5;}      /* green */
-  .chip.warn {background:#7c2d12;color:#ffedd5;}    /* amber/brown */
-  .chip.info {background:#1e293b;color:#e2e8f0;}    /* slate */
-
-  .spacer-sm { height: .5rem; }
-
-  /* Keep title above content and safe on very narrow viewports */
-  header[data-testid="stHeader"] { z-index: 1000; }
-  @media (max-width: 520px) {
-    header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
-  }
-  @media (max-width: 420px) {
-    header[data-testid="stHeader"] .app-toolbar-title { display: none; }
-  }
-
-  /* Pull content closer to the toolbar */
-  section[data-testid="stMain"],
-  main {
-    padding-top: 0 !important;
-  }
-  section[data-testid="stMain"] > div:first-child,
-  main > div:first-child {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-  }
-  main .block-container {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-  }
-  main .block-container > div:first-child {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-  }
-  main [data-testid="stToolbar"] {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-  }
-  main [data-testid="stToolbar"] + div {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-  }
-  main [data-testid="stVerticalBlock"] {
-    padding-top: 0 !important;
-  }
-  main [data-testid="stVerticalBlock"] > div:first-child {
-    margin-top: 0 !important;
-  }
-  main [data-testid="stHorizontalBlock"] {
-    margin-top: 0 !important;
-    align-items: flex-start !important;
-  }
-  main [data-testid="column"] {
-    padding-top: 0 !important;
-  }
-  main [data-testid="column"] > div {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-  }
-
-  .app-step-detect iframe {
-    margin-bottom: 0 !important;
-  }
-
-  .app-step-detect .form-label--inline {
-    min-height: auto;
-  }
-
-  .app-step-detect [data-testid="stHorizontalBlock"] {
-    margin-top: .25rem !important;
-    align-items: center !important;
-  }
-
-  .app-step-detect [data-testid="column"] > div {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-  }
-
-  .app-step-detect .app-nav-buttons {
-    margin-top: .75rem;
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
-    margin-top: 0 !important;
-    gap: .75rem !important;
-    align-items: stretch !important;
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="column"] > div {
-    width: 100%;
-  }
-
-  .app-step-detect .app-nav-buttons button {
-    border-radius: 12px !important;
-    min-height: 44px;
-    width: 100%;
-    font-weight: 600;
-    font-size: .95rem;
-    letter-spacing: .01em;
-    border: 1px solid transparent;
-    transition: background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="column"]:first-child button {
-    background: transparent !important;
-    color: #ef4444 !important;
-    border-color: rgba(239, 68, 68, .6) !important;
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="column"]:first-child button:hover:not(:disabled) {
-    background: rgba(239, 68, 68, .10) !important;
-    border-color: rgba(239, 68, 68, .9) !important;
-    transform: translateY(-1px);
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="column"]:last-child button {
-    background: linear-gradient(135deg, rgba(34, 197, 94, .95), rgba(16, 185, 129, .95)) !important;
-    color: #ecfdf5 !important;
-    border-color: rgba(34, 197, 94, .8) !important;
-    box-shadow: 0 12px 24px rgba(16, 185, 129, .35);
-  }
-
-  .app-step-detect .app-nav-buttons [data-testid="column"]:last-child button:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 16px 28px rgba(16, 185, 129, .45);
-  }
-
-  .app-step-detect .app-nav-buttons button:disabled {
-    opacity: .55 !important;
-    transform: none !important;
-    box-shadow: none !important;
-    cursor: not-allowed !important;
-  }
-
-  /* Ensure the results column aligns with step 4 content */
-  .results-panel {
-    margin-top: 0 !important;
-    display: flex;
-    flex-direction: column;
-    gap: .75rem;
-  }
-  .results-panel h3:first-child {
-    margin-top: 0 !important;
-  }
-  .results-panel .stDataFrame {
-    margin-bottom: .25rem;
-  }
-  .results-panel video {
-    border-radius: 12px;
-  }
-  .results-panel [data-testid="stHorizontalBlock"] {
-    gap: .5rem !important;
-  }
-  .results-panel [data-testid="column"] .stButton > button {
-    width: 100%;
-  }
-</style>
-"""
 
 
 _APP_ENHANCER = """
@@ -388,15 +151,23 @@ _APP_ENHANCER = """
 
 def inject_css() -> None:
     """Inject the cached CSS content and inline styles into the Streamlit app."""
-    try:
-        css_content = _load_css(str(_CSS_FILE))
-    except FileNotFoundError:
-        st.error(
-            "Custom CSS file not found. Please check the path.",
-        )
-    else:
-        st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
-    st.markdown(_INLINE_CSS, unsafe_allow_html=True)
+    css_fragments: list[str] = []
+    missing_files: list[Path] = []
+
+    for css_path in _CSS_FILES:
+        try:
+            css_fragments.append(_load_css(str(css_path)))
+        except FileNotFoundError:
+            missing_files.append(css_path)
+
+    if missing_files:
+        missing = ", ".join(path.name for path in missing_files)
+        st.error(f"Custom CSS file(s) not found: {missing}.")
+
+    if css_fragments:
+        combined_css = "\n\n".join(fragment for fragment in css_fragments if fragment.strip())
+        if combined_css:
+            st.markdown(f"<style>{combined_css}</style>", unsafe_allow_html=True)
 
 
 def inject_js(enable: bool = True) -> None:
