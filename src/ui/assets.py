@@ -37,9 +37,7 @@ _APP_ENHANCER_TEMPLATE = """
     const TITLE = __APP_TITLE__;
     const ENHANCER_KEY = '__appEnhancer';
     const doc = (window.parent && window.parent.document) ? window.parent.document : document;
-    if (!doc) {
-      return;
-    }
+    if (!doc) { return; }
 
     const existingEnhancer = doc[ENHANCER_KEY];
     if (existingEnhancer && typeof existingEnhancer.init === 'function') {
@@ -47,54 +45,36 @@ _APP_ENHANCER_TEMPLATE = """
       return;
     }
 
-    const headerObserver = new MutationObserver(() => {
-      ensureToolbarTitle(false);
-    });
-
-    const mainObserver = new MutationObserver(() => {
-      scheduleEnhancements();
-    });
+    const headerObserver = new MutationObserver(() => { ensureToolbarTitle(false); });
+    const mainObserver = new MutationObserver(() => { scheduleEnhancements(); });
 
     let enhancementFrame = null;
 
     function ensureToolbarTitle(reattach = true) {
       const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) {
-        return false;
-      }
+      if (!header) { return false; }
       let title = header.querySelector('.app-toolbar-title');
       if (!title) {
         title = doc.createElement('div');
         title.className = 'app-toolbar-title';
         header.insertBefore(title, header.firstChild);
       }
-      if (title.textContent !== TITLE) {
-        title.textContent = TITLE;
-      }
-      if (reattach) {
-        attachHeaderObserver();
-      }
+      if (title.textContent !== TITLE) { title.textContent = TITLE; }
+      if (reattach) { attachHeaderObserver(); }
       return true;
     }
 
     function ensureToolbarTitleWithRetry() {
-      if (ensureToolbarTitle()) {
-        return;
-      }
+      if (ensureToolbarTitle()) { return; }
       const retryInterval = setInterval(() => {
-        if (ensureToolbarTitle()) {
-          clearInterval(retryInterval);
-        }
+        if (ensureToolbarTitle()) { clearInterval(retryInterval); }
       }, 150);
       setTimeout(() => clearInterval(retryInterval), 5000);
     }
 
     function attachHeaderObserver() {
       const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) {
-        headerObserver.disconnect();
-        return false;
-      }
+      if (!header) { headerObserver.disconnect(); return false; }
       headerObserver.disconnect();
       headerObserver.observe(header, { childList: true });
       return true;
@@ -102,29 +82,19 @@ _APP_ENHANCER_TEMPLATE = """
 
     function attachMainObserver() {
       const main = doc.querySelector('main');
-      if (!main) {
-        mainObserver.disconnect();
-        return false;
-      }
+      if (!main) { mainObserver.disconnect(); return false; }
       mainObserver.disconnect();
       mainObserver.observe(main, { childList: true, subtree: true });
       return true;
     }
 
     function scheduleEnhancements() {
-      if (enhancementFrame !== null) {
-        return;
-      }
+      if (enhancementFrame !== null) { return; }
       const requestFrame = window.requestAnimationFrame || function (cb) { return setTimeout(cb, 16); };
-      enhancementFrame = requestFrame(() => {
-        enhancementFrame = null;
-        applyEnhancements();
-      });
+      enhancementFrame = requestFrame(() => { enhancementFrame = null; applyEnhancements(); });
     }
 
-    function applyEnhancements() {
-      ensureToolbarTitle(false);
-    }
+    function applyEnhancements() { ensureToolbarTitle(false); }
 
     function init() {
       ensureToolbarTitleWithRetry();
@@ -139,10 +109,7 @@ _APP_ENHANCER_TEMPLATE = """
       init();
     }
 
-    doc[ENHANCER_KEY] = {
-      init,
-      ensure: ensureToolbarTitleWithRetry,
-    };
+    doc[ENHANCER_KEY] = { init, ensure: ensureToolbarTitleWithRetry };
     doc.__appToolbarTitleInit = doc[ENHANCER_KEY];
   })();
 </script>
@@ -174,7 +141,6 @@ def inject_js(title: str, enable: bool = True) -> None:
     """Inject the app enhancer script if enabled."""
     if not enable:
         return
-    # Safely JSON-encode the title to embed in JS
-    title_js = json.dumps(title)
+    title_js = json.dumps(title)  # safe JSON encoding
     script = _APP_ENHANCER_TEMPLATE.replace("__APP_TITLE__", title_js)
     st.markdown(script, unsafe_allow_html=True)
