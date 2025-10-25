@@ -1,0 +1,4 @@
+/* Upload step minimal tweaks */
+.step--upload .stAlert { margin-top: .35rem; }
+.step--upload .stButton > button { border-radius: var(--fc-radius) !important; }
+.step--upload [data-testid="stHorizontalBlock"] { gap: var(--fc-gap); }
