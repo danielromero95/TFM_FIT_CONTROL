@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import streamlit as st
@@ -15,7 +16,6 @@ _CSS_FILES = [
     _THEME_DIR / "variables.css",
     _THEME_DIR / "layout-and-header.css",
     _THEME_DIR / "ui-components.css",
-    _ASSETS_DIR / "styles.css",
     _STEPS_DIR / "configure" / "configure.css",
     _STEPS_DIR / "detect" / "detect.css",
     _STEPS_DIR / "results" / "results.css",
@@ -31,10 +31,10 @@ def _load_css(path: str) -> str:
     return css_path.read_text(encoding="utf-8")
 
 
-_APP_ENHANCER = """
+_APP_ENHANCER_TEMPLATE = """
 <script>
   (() => {
-    const TITLE = "Exercise Performance Analyzer";
+    const TITLE = __APP_TITLE__;
     const ENHANCER_KEY = '__appEnhancer';
     const doc = (window.parent && window.parent.document) ? window.parent.document : document;
     if (!doc) {
@@ -162,7 +162,7 @@ def inject_css() -> None:
 
     if missing_files:
         missing = ", ".join(path.name for path in missing_files)
-        st.error(f"Custom CSS file(s) not found: {missing}.")
+        st.warning(f"Custom CSS file(s) not found: {missing}.")
 
     if css_fragments:
         combined_css = "\n\n".join(fragment for fragment in css_fragments if fragment.strip())
@@ -170,8 +170,11 @@ def inject_css() -> None:
             st.markdown(f"<style>{combined_css}</style>", unsafe_allow_html=True)
 
 
-def inject_js(enable: bool = True) -> None:
+def inject_js(title: str, enable: bool = True) -> None:
     """Inject the app enhancer script if enabled."""
     if not enable:
         return
-    st.markdown(_APP_ENHANCER, unsafe_allow_html=True)
+    # Safely JSON-encode the title to embed in JS
+    title_js = json.dumps(title)
+    script = _APP_ENHANCER_TEMPLATE.replace("__APP_TITLE__", title_js)
+    st.markdown(script, unsafe_allow_html=True)
