@@ -211,7 +211,7 @@ main [data-testid="column"] > div {
 .app-step-detect .autodetect-btn > button {
     width: 100% !important;
     border-radius: 12px !important;
-    min-height: 44px;
+    min-height: 40px;
     font-weight: 600;
 }
 
@@ -225,7 +225,7 @@ main [data-testid="column"] > div {
 /* Fila Back | Continue */
 .app-step-detect .app-nav-buttons { margin-top: .5rem; }
 .app-step-detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
-    gap: .75rem !important;
+    gap: .6rem !important;
 }
 .results-panel h4 {
     margin-top: .75rem !important;
@@ -245,6 +245,11 @@ main [data-testid="column"] > div {
     align-items: center !important;
 }
 
+/* Selects (BaseWeb) sin margen superior adicional */
+.app-step-detect [data-baseweb="select"] {
+    margin-top: 0 !important;
+}
+
 .app-step-detect [data-testid="column"] > div {
     margin-top: 0 !important;
     padding-top: 0 !important;
@@ -256,7 +261,7 @@ main [data-testid="column"] > div {
 
 .app-step-detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
     margin-top: 0 !important;
-    gap: .75rem !important;
+    gap: .6rem !important;
     align-items: stretch !important;
 }
 
