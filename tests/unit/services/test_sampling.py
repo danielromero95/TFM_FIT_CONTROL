@@ -6,7 +6,51 @@ from types import ModuleType, SimpleNamespace
 
 # Provide lightweight stubs for heavy optional dependencies so analysis_service imports cleanly.
 if "cv2" not in sys.modules:
-    sys.modules["cv2"] = types.SimpleNamespace(resize=lambda frame, size: frame)
+    class _FakeVideoCapture:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self._opened = False
+
+        def isOpened(self) -> bool:
+            return self._opened
+
+        def release(self) -> None:  # pragma: no cover - not exercised
+            self._opened = False
+
+        def set(self, *_args: object, **_kwargs: object) -> bool:  # pragma: no cover - stubbed
+            return False
+
+        def read(self) -> tuple[bool, object]:  # pragma: no cover - not exercised
+            return False, None
+
+        def get(self, *_args: object, **_kwargs: object) -> float:  # pragma: no cover - stubbed
+            return 0.0
+
+    class _FakeCv2(ModuleType):
+        ROTATE_90_CLOCKWISE = 0
+        ROTATE_180 = 1
+        ROTATE_90_COUNTERCLOCKWISE = 2
+        CAP_PROP_POS_MSEC = 0
+        CAP_PROP_POS_FRAMES = 1
+        COLOR_BGR2GRAY = 10
+        INTER_AREA = 0
+
+        def __init__(self) -> None:
+            super().__init__("cv2")
+            self.VideoCapture = _FakeVideoCapture
+
+        @staticmethod
+        def rotate(frame: object, _rot: object) -> object:  # pragma: no cover - stubbed
+            return frame
+
+        @staticmethod
+        def resize(frame: object, _size: object, *, interpolation: object = None) -> object:  # pragma: no cover - stubbed
+            return frame
+
+        @staticmethod
+        def cvtColor(frame: object, _code: object) -> object:  # pragma: no cover - stubbed
+            return frame
+
+    sys.modules["cv2"] = _FakeCv2()
 
 if "numpy" not in sys.modules:
     fake_numpy = ModuleType("numpy")
@@ -46,55 +90,71 @@ if "scipy" not in sys.modules:
         raise NotImplementedError("scipy stub")
 
     fake_signal.find_peaks = _stub_scipy
+    fake_signal.savgol_filter = _stub_scipy
     fake_scipy.signal = fake_signal
     sys.modules["scipy"] = fake_scipy
     sys.modules["scipy.signal"] = fake_signal
 
-from src.services.analysis_service import _plan_sampling
+from src.services.analysis_service import SamplingPlan, make_sampling_plan
 
 
 def make_cfg(target_fps=None, manual_sample_rate=None):
-    # Duck-typing: sólo necesitamos .video.target_fps y .video.manual_sample_rate
+    # Duck-typing: only ``video.target_fps`` and ``video.manual_sample_rate`` are required.
     return SimpleNamespace(
         video=SimpleNamespace(target_fps=target_fps, manual_sample_rate=manual_sample_rate)
     )
 
 
-def test_plan_sampling_metadata_valid_with_target_fps():
-    cfg = make_cfg(target_fps=30.0)
-    sample_rate, fps_eff, fps_base, warnings = _plan_sampling(
-        fps_metadata=60.0,
+def test_make_sampling_plan_metadata_target_downsamples_correctly():
+    cfg = make_cfg(target_fps=10.0)
+    plan = make_sampling_plan(
+        fps_metadata=30.0,
         fps_from_reader=0.0,
         prefer_reader_fps=False,
         initial_sample_rate=1,
         cfg=cfg,
         fps_warning=None,
     )
-    assert sample_rate == 2
-    assert math.isclose(fps_eff, 30.0, rel_tol=1e-6)
-    assert math.isclose(fps_base, 60.0, rel_tol=1e-6)
-    assert warnings == []
+    assert isinstance(plan, SamplingPlan)
+    assert plan.sample_rate == 3
+    assert math.isclose(plan.fps_effective, 10.0, rel_tol=1e-6)
+    assert math.isclose(plan.fps_base, 30.0, rel_tol=1e-6)
+    assert plan.warnings == []
 
 
-def test_plan_sampling_prefers_reader_when_metadata_invalid():
-    cfg = make_cfg(target_fps=None)
-    sample_rate, fps_eff, fps_base, warnings = _plan_sampling(
+def test_make_sampling_plan_respects_existing_stride():
+    cfg = make_cfg(target_fps=10.0)
+    plan = make_sampling_plan(
+        fps_metadata=30.0,
+        fps_from_reader=0.0,
+        prefer_reader_fps=False,
+        initial_sample_rate=3,
+        cfg=cfg,
+        fps_warning=None,
+    )
+    assert plan.sample_rate == 3
+    assert math.isclose(plan.fps_effective, 10.0, rel_tol=1e-6)
+
+
+def test_make_sampling_plan_prefers_reader_fps_when_requested():
+    cfg = make_cfg(target_fps=10.0)
+    plan = make_sampling_plan(
         fps_metadata=0.0,
-        fps_from_reader=29.97,
+        fps_from_reader=25.0,
         prefer_reader_fps=True,
         initial_sample_rate=1,
         cfg=cfg,
-        fps_warning=None,
+        fps_warning="Reader FPS selected",
     )
-    assert sample_rate == 1
-    assert math.isclose(fps_eff, 29.97, rel_tol=1e-6)
-    assert math.isclose(fps_base, 29.97, rel_tol=1e-6)
-    assert warnings == []
+    assert math.isclose(plan.fps_base, 25.0, rel_tol=1e-6)
+    assert plan.sample_rate == 2  # round(25/10) == 2
+    assert math.isclose(plan.fps_effective, 12.5, rel_tol=1e-6)
+    assert any("Using FPS value" in warning for warning in plan.warnings)
 
 
-def test_plan_sampling_fallback_to_one_fps_when_both_invalid():
-    cfg = make_cfg(target_fps=30.0)  # con 1 fps, sample_rate se queda en 1 (max(1, round(1/30)))
-    sample_rate, fps_eff, fps_base, warnings = _plan_sampling(
+def test_make_sampling_plan_falls_back_to_single_fps_with_warning():
+    cfg = make_cfg(target_fps=15.0)
+    plan = make_sampling_plan(
         fps_metadata=0.0,
         fps_from_reader=0.0,
         prefer_reader_fps=False,
@@ -102,40 +162,7 @@ def test_plan_sampling_fallback_to_one_fps_when_both_invalid():
         cfg=cfg,
         fps_warning=None,
     )
-    assert sample_rate == 1
-    assert math.isclose(fps_eff, 1.0, rel_tol=1e-6)
-    assert math.isclose(fps_base, 1.0, rel_tol=1e-6)
-    assert any("Unable to determine a valid FPS" in w for w in warnings)
-
-
-def test_plan_sampling_respects_initial_sample_rate_gt_one():
-    cfg = make_cfg(target_fps=10.0)
-    sample_rate, fps_eff, fps_base, _ = _plan_sampling(
-        fps_metadata=60.0,
-        fps_from_reader=0.0,
-        prefer_reader_fps=False,
-        initial_sample_rate=3,  # ya extrajimos con stride 3
-        cfg=cfg,
-        fps_warning=None,
-    )
-    # No debe re-submuestrear; se mantiene el initial_sample_rate
-    assert sample_rate == 3
-    assert math.isclose(fps_base, 60.0, rel_tol=1e-6)
-    assert math.isclose(fps_eff, 60.0 / 3.0, rel_tol=1e-6)
-
-
-def test_plan_sampling_appends_fps_warning_message():
-    cfg = make_cfg(target_fps=None)
-    msg = "Invalid metadata FPS. Estimated from video duration (25.00 fps)."
-    sample_rate, fps_eff, fps_base, warnings = _plan_sampling(
-        fps_metadata=25.0,
-        fps_from_reader=0.0,
-        prefer_reader_fps=False,
-        initial_sample_rate=1,
-        cfg=cfg,
-        fps_warning=msg,
-    )
-    assert sample_rate == 1
-    assert math.isclose(fps_base, 25.0, rel_tol=1e-6)
-    assert math.isclose(fps_eff, 25.0, rel_tol=1e-6)
-    assert any("FPS final utilizado" in w for w in warnings)
+    assert plan.sample_rate == 1
+    assert math.isclose(plan.fps_base, 1.0, rel_tol=1e-6)
+    assert math.isclose(plan.fps_effective, 1.0, rel_tol=1e-6)
+    assert any("Unable to determine a valid FPS" in warning for warning in plan.warnings)
