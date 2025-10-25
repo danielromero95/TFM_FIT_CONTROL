@@ -16,7 +16,7 @@ from src.pipeline_data import Report, RunStats
 from src.ui.state import get_state
 from src.ui.video import render_uniform_video
 from src.ui.metrics_sync import render_video_with_metrics_sync
-from .utils import step_container
+from ..utils import step_container
 
 
 def _compute_rep_intervals(

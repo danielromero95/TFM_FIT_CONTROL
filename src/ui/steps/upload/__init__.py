@@ -5,7 +5,7 @@ import hashlib
 import streamlit as st
 
 from src.ui.state import Step, get_state, go_to, reset_state
-from .utils import ensure_video_path, step_container
+from ..utils import ensure_video_path, step_container
 
 
 def _upload_step() -> None:

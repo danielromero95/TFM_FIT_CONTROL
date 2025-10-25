@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from src.ui.state import CONFIG_DEFAULTS, Step, get_state, go_to
-from .utils import step_container
+from ..utils import step_container
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
