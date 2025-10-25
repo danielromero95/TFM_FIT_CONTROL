@@ -89,10 +89,7 @@ def _detect_step() -> None:
                     state.ui_rev += 1
 
                     if current_ex_label and current_view_label:
-                        st.success(
-                            f"Detected: **{current_ex_label}** — **{current_view_label}** view "
-                            f"({float(confidence):.0%} confidence)."
-                        )
+                        st.success(f"Detected: **{current_ex_label}** — **{current_view_label}** view.")
 
     # --- Form rows (usar index derivado del estado; NO escribir a session_state)
     # Claves versionadas para recrear selectboxes tras Auto-Detect
