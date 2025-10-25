@@ -35,6 +35,7 @@ class AppState:
     upload_data: Optional[Dict[str, Any]] = None
     upload_token: Optional[Tuple[str, int, str]] = None
     active_upload_token: Optional[Tuple[str, int, str]] = None
+    ui_rev: int = 0
     video_path: Optional[str] = None
     exercise: str = DEFAULT_EXERCISE_LABEL
     exercise_pending_update: Optional[str] = None
@@ -103,6 +104,7 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.view_pending_update = None
     state.detect_result = None
     state.configure_values = CONFIG_DEFAULTS.copy()
+    state.ui_rev = 0
     state.step = Step.UPLOAD
     if not preserve_upload:
         state.upload_data = None
