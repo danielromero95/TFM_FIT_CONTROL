@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union
 import time
 
 import cv2
@@ -13,7 +14,7 @@ import cv2
 from src import config
 from src.config.constants import MIN_DETECTION_CONFIDENCE
 from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
-from src.A_preprocessing.video_metadata import read_video_file_info
+from src.A_preprocessing.video_metadata import VideoInfo, read_video_file_info
 from src.B_pose_estimation.processing import (
     calculate_metrics_from_sequence,
     extract_landmarks_from_frames,
@@ -26,19 +27,35 @@ from src.D_visualization.video_landmarks import (
 from src.exercise_detection.exercise_detector import DetectionResult, detect_exercise
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
+from src.services.errors import NoFramesExtracted, VideoOpenError
 
 
 logger = logging.getLogger(__name__)
 
+
+class ProgressCallback(Protocol):
+    def __call__(self, progress: int, message: str, /) -> None:
+        """Preferred signature: receives percentage [0..100] and a human-readable message."""
+
+
+@dataclass(frozen=True)
+class SamplingPlan:
+    """Encapsulate the sampling parameters derived for a pipeline run."""
+
+    fps_base: float
+    sample_rate: int
+    fps_effective: float
+    warnings: list[str]
+
 def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> None:
-    """Call progress callback with (progress, message) if supported; fallback to (progress)."""
+    """Invoke callbacks supporting either ``(progress, message)`` or legacy ``(progress)``."""
     if not cb:
         return
     try:
-        # Nueva firma preferida: (progress, message)
+        # Preferred modern signature: (progress, message)
         cb(progress, message)
     except TypeError:
-        # Compatibilidad hacia atrás: (progress)
+        # Backward-compatible legacy signature: (progress)
         cb(progress)
 
 
@@ -59,7 +76,7 @@ def run_pipeline(
     logger.info("CONFIG_SHA1=%s", config_sha1)
 
     output_paths = _prepare_output_paths(Path(video_path), cfg.output)
-    config_path = output_paths.base_dir / "config_used.json"
+    config_path = output_paths.session_dir / "config_used.json"
     config_path.write_text(
         json.dumps(cfg.to_serializable_dict(), indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -68,54 +85,30 @@ def run_pipeline(
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise IOError(f"Could not open the video: {video_path}")
-
+    cap = _open_video_cap(video_path)
+    rotate: int = cfg.pose.rotate if cfg.pose.rotate is not None else 0
     try:
-        info = read_video_file_info(video_path, cap=cap)
-
-        # Derivar variables equivalentes para el plan de muestreo
-        fps_original = float(info.fps or 0.0)
-
-        # Reconstituir un mensaje de warning similar cuando el FPS no es "metadata"
-        fps_warning = None
-        prefer_reader_fps = False
-        if info.fps_source == "estimated":
-            fps_warning = (
-                f"Invalid metadata FPS. Estimated from video duration ({fps_original:.2f} fps)."
-            )
-        elif info.fps_source == "reader":
-            fps_warning = (
-                "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
-            )
-            prefer_reader_fps = True
-
-        initial_sample_rate = (
-            _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
+        info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
+            cap, video_path
         )
 
-        rotate = cfg.pose.rotate
-        if rotate is None:
+        initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
+
+        if cfg.pose.rotate is None:
             rotate = int(info.rotation or 0)
 
-        frames, fps_from_reader = extract_and_preprocess_frames(
-            video_path=video_path,
-            rotate=rotate,
-            sample_rate=initial_sample_rate,
-            cap=cap,
-            prefetched_info=info,
+        frames, fps_from_reader = _extract_frames(
+            video_path, cap, info, rotate, initial_sample_rate
         )
     finally:
         cap.release()
 
     if not frames:
-        raise ValueError("No frames could be extracted from the video.")
+        raise NoFramesExtracted("No frames could be extracted from the video.")
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
-    # Plan de muestreo unificado: decide fps_final, sample_rate y fps_effective.
-    sample_rate, fps_effective, fps_original, _sampling_warnings = _plan_sampling(
+    plan = make_sampling_plan(
         fps_metadata=fps_original,
         fps_from_reader=float(fps_from_reader),
         prefer_reader_fps=prefer_reader_fps,
@@ -123,12 +116,11 @@ def run_pipeline(
         cfg=cfg,
         fps_warning=fps_warning,
     )
-    warnings.extend(_sampling_warnings)
-    # Si el plan decide mayor sample_rate que el usado en extracción inicial (solo ocurrirá si initial==1),
-    # submuestreamos la lista de frames en memoria.
-    if sample_rate != initial_sample_rate:
-        stride = max(1, int(sample_rate // max(1, initial_sample_rate)))
-        frames = frames[::stride]
+    sample_rate = plan.sample_rate
+    fps_effective = plan.fps_effective
+    fps_original = plan.fps_base
+    warnings.extend(plan.warnings)
+    frames = _apply_sampling_plan(frames, initial_sample_rate, plan)
     frames_processed = len(frames)
 
     detected_label = ExerciseType.UNKNOWN
@@ -144,81 +136,60 @@ def run_pipeline(
         except Exception:  # pragma: no cover - defensive logging only
             logger.exception("Automatic exercise detection failed")
 
-    # Mensaje de aviso ya incorporado en _plan_sampling (incluye FPS final).
-
     if frames_processed < cfg.video.min_frames:
         skip_reason = (
-            f"Solo se procesaron {frames_processed} fotogramas (< {cfg.video.min_frames}). "
-            "Se omite el conteo de repeticiones."
-        )
+            "Only {frames_processed} frames processed (< {min_frames}). "
+            "Skipping repetition counting."
+        ).format(frames_processed=frames_processed, min_frames=cfg.video.min_frames)
         warnings.append(skip_reason)
     if fps_effective < cfg.video.min_fps:
         message = (
             f"Effective FPS {fps_effective:.2f} below the minimum ({cfg.video.min_fps}). "
-            "Se omite el conteo de repeticiones."
+            "Skipping repetition counting."
         )
         warnings.append(message)
         if skip_reason is None:
             skip_reason = message
 
     target_size = (cfg.pose.target_width, cfg.pose.target_height)
-    processed_frames = [cv2.resize(frame, target_size) for frame in frames]
+    processed_frames = _prepare_processed_frames(frames, target_size)
 
     t1 = time.perf_counter()
     notify(25, "STAGE 2: Estimating pose on frames...")
-    df_raw_landmarks = extract_landmarks_from_frames(
-        frames=processed_frames,
-        use_crop=cfg.pose.use_crop,
-        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
-        min_visibility=0.5,
-    )
+    df_raw_landmarks = _estimate_pose(processed_frames, cfg)
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
-    filtered_sequence, crop_boxes = filter_and_interpolate_landmarks(df_raw_landmarks)
+    filtered_sequence, crop_boxes = _filter_landmarks(df_raw_landmarks)
 
     debug_video_path: Optional[Path] = None
     if cfg.debug.generate_debug_video:
         notify(65, "EXTRA STAGE: Rendering HQ debug video...")
-        debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
-        try:
-            render_landmarks_video_streaming(
-                video_path,
-                filtered_sequence,
-                crop_boxes,
-                str(debug_video_path),
-                fps_effective,
-                processed_size=(cfg.pose.target_width, cfg.pose.target_height),
-                sample_rate=sample_rate,
-                rotate=rotate,
-            )
-        except Exception as e:
-            logger.warning("Debug video streaming failed: %s", e)
-            debug_video_path = None
+        debug_video_path = _maybe_render_debug_video(
+            video_path=video_path,
+            filtered_sequence=filtered_sequence,
+            crop_boxes=crop_boxes,
+            cfg=cfg,
+            output_paths=output_paths,
+            fps_effective=fps_effective,
+            sample_rate=sample_rate,
+            rotate=rotate,
+        )
 
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
-    df_metrics = calculate_metrics_from_sequence(filtered_sequence, fps_effective)
+    (
+        df_metrics,
+        angle_range,
+        metrics_warnings,
+        metrics_skip_reason,
+    ) = _compute_metrics_and_angle(filtered_sequence, cfg.counting.primary_angle, fps_effective)
+    warnings.extend(metrics_warnings)
+    if skip_reason is None and metrics_skip_reason is not None:
+        skip_reason = metrics_skip_reason
     t_metrics_end = time.perf_counter()
 
     primary_angle = cfg.counting.primary_angle
-    angle_range = 0.0
-    if not df_metrics.empty and primary_angle in df_metrics.columns:
-        series = df_metrics[primary_angle].dropna()
-        if not series.empty:
-            angle_range = float(series.max() - series.min())
-        else:
-            warnings.append(
-                f"No valid values could be obtained for the primary angle '{primary_angle}'."
-            )
-            if skip_reason is None:
-                skip_reason = "The primary angle column does not contain valid data."
-    else:
-        warnings.append(
-            f"The primary angle column '{primary_angle}' is not present in the metrics."
-        )
-        if skip_reason is None:
-            skip_reason = "The primary angle column was not found in the metrics."
 
     if angle_range < cfg.counting.min_angle_excursion_deg and skip_reason is None:
         skip_reason = (
@@ -231,18 +202,21 @@ def run_pipeline(
     if skip_reason is None:
         t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
-        reps, debug_info = count_repetitions_with_config(df_metrics, cfg.counting, fps_effective)
-        if reps == 0 and not debug_info.valley_indices:
-            warnings.append("No repetitions were detected with the current parameters.")
+        reps, count_warnings = _maybe_count_reps(
+            df_metrics, cfg, fps_effective, skip_reason
+        )
+        warnings.extend(count_warnings)
     else:
         notify(90, "STAGE 5: Counting skipped due to quality constraints.")
+        reps, count_warnings = _maybe_count_reps(df_metrics, cfg, fps_effective, skip_reason)
+        warnings.extend(count_warnings)
 
     if cfg.debug.debug_mode:
         logger.info("DEBUG MODE: Saving intermediate data...")
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
-    notify(100, "PIPELINE COMPLETADO")
+    notify(100, "PIPELINE COMPLETED")
     t5 = time.perf_counter()
     extract_ms = (t1 - t0) * 1000
     pose_ms = (t2 - t1) * 1000
@@ -342,7 +316,7 @@ def _normalize_detection(
     return as_exercise(label), as_view(view), float(confidence)
 
 
-def _plan_sampling(
+def make_sampling_plan(
     *,
     fps_metadata: float,
     fps_from_reader: float,
@@ -350,19 +324,11 @@ def _plan_sampling(
     initial_sample_rate: int,
     cfg: config.Config,
     fps_warning: Optional[str],
-) -> tuple[int, float, float, list[str]]:
-    """
-    Decide el FPS efectivo y el sample_rate final en un único lugar.
+) -> SamplingPlan:
+    """Compute ``fps_base``, ``sample_rate``, and warnings using legacy heuristics."""
 
-    Returns:
-        sample_rate (int): stride final para muestrear frames.
-        fps_effective (float): fps_metadata_final / sample_rate.
-        fps_original_final (float): FPS base decidido (metadata/reader/fallback).
-        warnings (list[str]): advertencias de calidad/estimación.
-    """
     warnings: list[str] = []
 
-    # 1) Elegir FPS base
     fps_base = float(fps_metadata)
     if (fps_base <= 0.0 or prefer_reader_fps) and fps_from_reader > 0.0:
         fps_base = float(fps_from_reader)
@@ -372,8 +338,6 @@ def _plan_sampling(
         )
         fps_base = 1.0
 
-    # 2) Calcular sample_rate final manteniendo la semántica: si ya extrajimos con sample_rate>1,
-    # no volvemos a submuestrear. Sólo si initial_sample_rate == 1 permitimos aumentar el stride.
     sample_rate = int(initial_sample_rate)
     if initial_sample_rate == 1 and cfg.video.target_fps and cfg.video.target_fps > 0:
         recomputed = _compute_sample_rate(fps_base, cfg)
@@ -382,16 +346,194 @@ def _plan_sampling(
 
     fps_effective = fps_base / sample_rate if sample_rate > 0 else fps_base
 
-    # 3) Avisos
     if fps_warning:
-        message = f"{fps_warning} FPS final utilizado: {fps_base:.2f}."
+        message = f"{fps_warning} Using FPS value: {fps_base:.2f}."
         logger.warning(message)
         warnings.append(message)
 
-    return sample_rate, float(fps_effective), float(fps_base), warnings
+    return SamplingPlan(
+        fps_base=float(fps_base),
+        sample_rate=int(sample_rate),
+        fps_effective=float(fps_effective),
+        warnings=warnings,
+    )
 
 
 # Video metadata handled by: src/A_preprocessing/video_metadata.read_video_file_info
+
+
+def _open_video_cap(video_path: str) -> cv2.VideoCapture:
+    """Open a ``VideoCapture`` for ``video_path`` ensuring the handle is valid."""
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise VideoOpenError(f"Could not open the video: {video_path}")
+    return cap
+
+
+def _read_info_and_initial_sampling(
+    cap: cv2.VideoCapture,
+    video_path: str,
+) -> tuple[VideoInfo, float, Optional[str], bool]:
+    """Read metadata and derive FPS heuristics used by the sampling plan."""
+
+    info = read_video_file_info(video_path, cap=cap)
+
+    fps_original = float(info.fps or 0.0)
+    fps_warning: Optional[str] = None
+    prefer_reader_fps = False
+
+    if info.fps_source == "estimated":
+        fps_warning = f"Invalid metadata FPS. Estimated from video duration ({fps_original:.2f} fps)."
+    elif info.fps_source == "reader":
+        fps_warning = (
+            "Invalid metadata FPS and unreliable duration. Falling back to the reader-reported FPS."
+        )
+        prefer_reader_fps = True
+
+    return info, fps_original, fps_warning, prefer_reader_fps
+
+
+def _extract_frames(
+    video_path: str,
+    cap: cv2.VideoCapture,
+    info: VideoInfo,
+    rotate: int,
+    initial_sample_rate: int,
+) -> tuple[list[object], float]:
+    """Extract and pre-process frames using the configured sample rate."""
+
+    frames, fps_from_reader = extract_and_preprocess_frames(
+        video_path=video_path,
+        rotate=rotate,
+        sample_rate=initial_sample_rate,
+        cap=cap,
+        prefetched_info=info,
+    )
+    return frames, float(fps_from_reader)
+
+
+def _apply_sampling_plan(
+    frames: list[object], initial_sample_rate: int, plan: SamplingPlan
+) -> list[object]:
+    """Apply the sampling stride derived from ``plan`` to the extracted frames."""
+
+    if plan.sample_rate != initial_sample_rate:
+        stride = max(1, int(plan.sample_rate // max(1, initial_sample_rate)))
+        return frames[::stride]
+    return frames
+
+
+def _prepare_processed_frames(
+    frames: list[object], target_size: tuple[int, int]
+) -> list[object]:
+    """Resize frames to ``target_size`` using area interpolation when downscaling."""
+
+    processed: list[object] = []
+    target_width, target_height = target_size
+    for frame in frames:
+        height, width = frame.shape[:2]
+        if width == target_width and height == target_height:
+            processed.append(frame)
+            continue
+        interpolation = cv2.INTER_AREA if width > target_width or height > target_height else cv2.INTER_LINEAR
+        processed.append(cv2.resize(frame, target_size, interpolation=interpolation))
+    return processed
+
+
+def _estimate_pose(processed_frames: list[object], cfg: config.Config) -> "pd.DataFrame":
+    """Run pose estimation on ``processed_frames`` and return raw landmarks."""
+
+    return extract_landmarks_from_frames(
+        frames=processed_frames,
+        use_crop=cfg.pose.use_crop,
+        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+        min_visibility=0.5,
+    )
+
+
+def _filter_landmarks(df_raw: "pd.DataFrame") -> tuple["pd.DataFrame", object]:
+    """Filter and interpolate the pose landmarks, returning crop boxes as metadata."""
+
+    return filter_and_interpolate_landmarks(df_raw)
+
+
+def _maybe_render_debug_video(
+    *,
+    video_path: str,
+    filtered_sequence: "pd.DataFrame",
+    crop_boxes: object,
+    cfg: config.Config,
+    output_paths: OutputPaths,
+    fps_effective: float,
+    sample_rate: int,
+    rotate: int,
+) -> Optional[Path]:
+    """Render the HQ debug video when enabled, swallowing streaming errors."""
+
+    debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
+    try:
+        render_landmarks_video_streaming(
+            video_path,
+            filtered_sequence,
+            crop_boxes,
+            str(debug_video_path),
+            fps_effective,
+            processed_size=(cfg.pose.target_width, cfg.pose.target_height),
+            sample_rate=sample_rate,
+            rotate=rotate,
+        )
+        return debug_video_path
+    except Exception as exc:  # pragma: no cover - visualization is best-effort
+        logger.warning("Debug video streaming failed: %s", exc)
+        return None
+
+
+def _compute_metrics_and_angle(
+    df_seq: "pd.DataFrame", primary_angle: str, fps_effective: float
+) -> tuple["pd.DataFrame", float, list[str], Optional[str]]:
+    """Compute biomechanical metrics and derive the primary angle excursion."""
+
+    warnings: list[str] = []
+    skip_reason: Optional[str] = None
+
+    df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective)
+    angle_range = 0.0
+
+    if not df_metrics.empty and primary_angle in df_metrics.columns:
+        series = df_metrics[primary_angle].dropna()
+        if not series.empty:
+            angle_range = float(series.max() - series.min())
+        else:
+            warnings.append(
+                f"No valid values could be obtained for the primary angle '{primary_angle}'."
+            )
+            skip_reason = "The primary angle column does not contain valid data."
+    else:
+        warnings.append(
+            f"The primary angle column '{primary_angle}' is not present in the metrics."
+        )
+        skip_reason = "The primary angle column was not found in the metrics."
+
+    return df_metrics, angle_range, warnings, skip_reason
+
+
+def _maybe_count_reps(
+    df_metrics: "pd.DataFrame",
+    cfg: config.Config,
+    fps_effective: float,
+    skip_reason: Optional[str],
+) -> tuple[int, list[str]]:
+    """Count repetitions unless ``skip_reason`` indicates the stage was skipped."""
+
+    if skip_reason is not None:
+        return 0, []
+
+    result, debug_info = count_repetitions_with_config(df_metrics, cfg.counting, fps_effective)
+    stage_warnings: list[str] = []
+    if result == 0 and not debug_info.valley_indices:
+        stage_warnings.append("No repetitions were detected with the current parameters.")
+    return result, stage_warnings
 
 def _apply_settings(cfg: config.Config, settings: Dict[str, Any]) -> None:
     """Bridge legacy dictionary settings into the structured ``Config`` object."""
