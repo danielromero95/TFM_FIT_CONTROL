@@ -1,8 +1,16 @@
 /* Detect step styles (scoped) */
+.step--detect {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
 .step--detect h3, .step--detect .stMarkdown h3 { margin-bottom: 0; }
 
 .step--detect iframe { margin-bottom: 0; }
-.step--detect .autodetect-btn { margin-top: 0; }
+.step--detect .autodetect-btn {
+  margin-top: 0;
+  margin-bottom: 0;
+}
 .step--detect .autodetect-btn > button {
   width: 100%;
   border-radius: var(--fc-radius) !important; /* keep: Streamlit may override radius */
@@ -21,7 +29,7 @@
 .step--detect .form-label { margin: 0; }
 
 /* Fila Back | Continue */
-.step--detect .app-nav-buttons { margin-top: .5rem; }
+.step--detect .app-nav-buttons { margin-top: .15rem; }
 .step--detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
   margin-top: 0;
   gap: .6rem;
@@ -70,12 +78,49 @@
 }
 
 /* Alertas compactas */
-.step--detect .stAlert { margin-top: .35rem; margin-bottom: .4rem; }
+.step--detect .stAlert {
+  margin-top: .1rem;
+  margin-bottom: .1rem;
+}
 
 /* Ajustes de layout dentro del step */
 .step--detect .form-label--inline { min-height: auto; }
-.step--detect [data-testid="stHorizontalBlock"] { margin-top: .2rem; align-items: center; }
-.step--detect [data-testid="column"] > div { margin-top: 0; padding-top: 0; }
+.step--detect [data-testid="stHorizontalBlock"] {
+  margin-top: .1rem;
+  margin-bottom: .1rem;
+  align-items: center;
+}
+.step--detect [data-testid="column"] > div {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 
 /* Selects BaseWeb sin margen superior adicional */
-.step--detect [data-baseweb="select"] { margin-top: 0; }
+.step--detect [data-baseweb="select"] {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* Compactar bloques verticales (Streamlit 1.3x) */
+.step--detect [data-testid="stVerticalBlock"] {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  gap: 0 !important;
+}
+.step--detect [data-testid="stVerticalBlock"] > div {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.step--detect .stButton > button,
+.step--detect .stSelectbox,
+.step--detect .stMarkdown {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
