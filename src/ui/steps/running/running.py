@@ -18,7 +18,7 @@ from src.ui_controller.analysis_controller import (
     start_run,
 )
 from src.ui_controller.progress import phase_for
-from .utils import ensure_video_path, prepare_pipeline_inputs, step_container
+from ..utils import ensure_video_path, prepare_pipeline_inputs, step_container
 
 
 def _running_step() -> None:

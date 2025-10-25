@@ -8,7 +8,7 @@ from src.core.types import ExerciseType
 from src.exercise_detection.exercise_detector import detect_exercise
 from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, safe_rerun
 from src.ui.video import render_uniform_video
-from .utils import step_container
+from ..utils import step_container
 
 
 def _exercise_display_name(ex_type: ExerciseType) -> str:
