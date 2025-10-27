@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 import cv2
 import numpy as np
@@ -118,6 +118,39 @@ def detect_exercise(video_path: str, max_frames: int = 300) -> Tuple[str, str, f
         features.valid_frames,
         features.total_frames,
     )
+    return label, view, confidence
+
+
+def detect_exercise_from_frames(
+    frames: Iterable[np.ndarray], *, fps: float, max_frames: int = 300
+) -> Tuple[str, str, float]:
+    """
+    Detect exercise using an iterable of preprocessed frames (already rotated/resized).
+    Consumes up to ``max_frames`` frames from the iterable. Returns (label, view, confidence).
+    """
+
+    try:
+        features = extract_features_from_frames(
+            frames, fps=fps, max_frames=max_frames
+        )
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.exception("Failed to extract features for exercise detection (streaming)")
+        return "unknown", "unknown", 0.0
+
+    if features.total_frames == 0 or features.valid_frames < MIN_VALID_FRAMES:
+        logger.info(
+            "Inconclusive detection (streaming): valid frames %d of %d",
+            features.valid_frames,
+            features.total_frames,
+        )
+        return "unknown", "unknown", 0.0
+
+    try:
+        label, view, confidence = classify_features(features)
+    except Exception:  # pragma: no cover
+        logger.exception("Failed to classify features (streaming)")
+        return "unknown", "unknown", 0.0
+
     return label, view, confidence
 
 
@@ -237,6 +270,84 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
     return FeatureSeries(
         data=data,
         sampling_rate=float(sampling_rate),
+        valid_frames=int(valid_frames),
+        total_frames=int(total_processed),
+    )
+
+
+def extract_features_from_frames(
+    frames: Iterable[np.ndarray], *, fps: float, max_frames: int = 300
+) -> FeatureSeries:
+    """
+    Build the same feature series as ``extract_features(video_path)`` but reading from an
+    iterable of frames. Uses the same MediaPipe Pose setup and ``_process_frame`` per-frame
+    logic.
+    """
+
+    try:
+        from mediapipe.python.solutions import pose as mp_pose_module
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("MediaPipe is not available in the runtime environment") from exc
+
+    pose_landmark = mp_pose_module.PoseLandmark
+    pose_kwargs = dict(
+        static_image_mode=False,
+        model_complexity=1,
+        smooth_landmarks=True,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+
+    feature_lists: Dict[str, list[float]] = {
+        "knee_angle_left": [],
+        "knee_angle_right": [],
+        "hip_angle_left": [],
+        "hip_angle_right": [],
+        "elbow_angle_left": [],
+        "elbow_angle_right": [],
+        "shoulder_angle_left": [],
+        "shoulder_angle_right": [],
+        "pelvis_y": [],
+        "torso_length": [],
+        "wrist_left_x": [],
+        "wrist_left_y": [],
+        "wrist_right_x": [],
+        "wrist_right_y": [],
+        "shoulder_width_norm": [],
+        "shoulder_yaw_deg": [],
+        "shoulder_z_delta_abs": [],
+        "torso_tilt_deg": [],
+        "ankle_width_norm": [],
+    }
+
+    total_processed = 0
+    valid_frames = 0
+
+    with mp_pose_module.Pose(**pose_kwargs) as pose:
+        for frame in frames:
+            if total_processed >= max_frames:
+                break
+            total_processed += 1
+            valid = _process_frame(frame, pose, pose_landmark, feature_lists)
+            if valid:
+                valid_frames += 1
+
+    data = {key: np.asarray(values, dtype=float) for key, values in feature_lists.items()}
+
+    sampling_rate = float(fps) if (fps and fps > 0) else DEFAULT_SAMPLING_RATE
+
+    logger.info(
+        "Exercise detection (streaming) extraction: frames=%d valid=%d (%.1f%%) sample_rate=%.2f",
+        total_processed,
+        valid_frames,
+        (valid_frames / total_processed * 100.0) if total_processed else 0.0,
+        sampling_rate,
+    )
+
+    return FeatureSeries(
+        data=data,
+        sampling_rate=sampling_rate,
         valid_frames=int(valid_frames),
         total_frames=int(total_processed),
     )

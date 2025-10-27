@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
+from itertools import tee
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple, Union
-import time
 
 import cv2
 import numpy as np
@@ -28,7 +29,10 @@ from src.C_repetition_analysis.reps.api import count_repetitions_with_config
 from src.D_visualization.video_landmarks import (
     render_landmarks_video_streaming,
 )
-from src.exercise_detection.exercise_detector import DetectionResult, detect_exercise
+from src.exercise_detection.exercise_detector import (
+    DetectionResult,
+    detect_exercise_from_frames,
+)
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from src.services.errors import NoFramesExtracted, VideoOpenError
@@ -101,6 +105,10 @@ def run_pipeline(
     fps_original = 0.0
     t1 = t0
 
+    detected_label = ExerciseType.UNKNOWN
+    detected_view = ViewType.UNKNOWN
+    detected_confidence = 0.0
+
     try:
         info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
             cap, video_path
@@ -125,7 +133,7 @@ def run_pipeline(
         warnings.extend(plan.warnings)
 
         target_size = (cfg.pose.target_width, cfg.pose.target_height)
-        frame_iter = extract_processed_frames_stream(
+        raw_iter = extract_processed_frames_stream(
             video_path=video_path,
             every_n=sample_rate,
             rotate=rotate,
@@ -135,9 +143,30 @@ def run_pipeline(
             progress_callback=None,
         )
 
+        pose_iter: Iterable[np.ndarray]
+        if prefetched_detection is not None:
+            detected_label, detected_view, detected_confidence = _normalize_detection(
+                prefetched_detection
+            )
+            pose_iter = raw_iter
+        else:
+            det_iter, pose_iter = tee(raw_iter, 2)
+            try:
+                detection_tuple = detect_exercise_from_frames(
+                    det_iter, fps=fps_effective, max_frames=300
+                )
+                detected_label, detected_view, detected_confidence = _normalize_detection(
+                    detection_tuple
+                )
+            except Exception:  # pragma: no cover
+                logger.exception("Automatic exercise detection failed (streaming)")
+                detected_label = ExerciseType.UNKNOWN
+                detected_view = ViewType.UNKNOWN
+                detected_confidence = 0.0
+
         t1 = time.perf_counter()
         notify(25, "STAGE 2: Estimating pose on frames...")
-        df_raw_landmarks = _estimate_pose(frame_iter, cfg)
+        df_raw_landmarks = _estimate_pose(pose_iter, cfg)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
         frames_processed = len(df_raw_landmarks)
@@ -146,19 +175,6 @@ def run_pipeline(
 
     if df_raw_landmarks is None:
         raise NoFramesExtracted("No frames could be extracted from the video.")
-
-    detected_label = ExerciseType.UNKNOWN
-    detected_view = ViewType.UNKNOWN
-    detected_confidence = 0.0
-    if prefetched_detection is not None:
-        detected_label, detected_view, detected_confidence = _normalize_detection(prefetched_detection)
-    else:
-        try:
-            detected_label, detected_view, detected_confidence = _normalize_detection(
-                detect_exercise(video_path)
-            )
-        except Exception:  # pragma: no cover - defensive logging only
-            logger.exception("Automatic exercise detection failed")
 
     if frames_processed < cfg.video.min_frames:
         skip_reason = (
