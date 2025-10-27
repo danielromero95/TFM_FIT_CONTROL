@@ -1,5 +1,7 @@
 """Frame extraction helpers with optional auto-rotation."""
 
+# Changelog: added streaming helpers that pre-process frames without materializing them.
+
 from __future__ import annotations
 
 import logging
@@ -266,6 +268,34 @@ def extract_frames_stream(
             cap_obj.release()
         if progress_callback and frame_count > 0 and last_progress < 100:
             progress_callback(100)
+
+
+def extract_processed_frames_stream(
+    *,
+    video_path: str,
+    every_n: int,
+    rotate: int,
+    resize_to: tuple[int, int],
+    cap: Optional[cv2.VideoCapture],
+    prefetched_info: Optional["VideoInfo"],
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> Iterator[np.ndarray]:
+    """Stream frames with index-based sampling (every_n), applying rotation and resizing on the fly.
+
+    Yields np.ndarray frames already in the target size/orientation.
+    """
+
+    for finfo in extract_frames_stream(
+        video_path=video_path,
+        sampling="index",
+        every_n=every_n,
+        rotate=rotate,
+        resize_to=resize_to,
+        progress_callback=progress_callback,
+        cap=cap,
+        prefetched_info=prefetched_info,
+    ):
+        yield finfo.array
 
 
 def extract_and_preprocess_frames(
