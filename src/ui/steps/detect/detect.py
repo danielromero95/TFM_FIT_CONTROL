@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from pathlib import Path
 
 import streamlit as st
 
@@ -36,16 +38,41 @@ def _detect_step() -> None:
         st.markdown("### 2. Detect the exercise")
 
         state = get_state()
+
+        preferred_video_path = state.video_path
         video_path = state.video_path
+        report = getattr(state, "report", None)
+        debug_filename: Optional[str] = None
+        if report is not None and getattr(report, "debug_video_path", None):
+            debug_path: Optional[Path] = None
+            try:
+                debug_path = Path(report.debug_video_path)
+            except Exception:
+                debug_path = None
+            else:
+                debug_filename = debug_path.name
+                try:
+                    if debug_path.exists() and debug_path.is_file():
+                        preferred_video_path = str(debug_path)
+                except Exception:
+                    pass
 
         # --- Video: ancho completo, altura fija más pequeña y sin espacio inferior
-        if video_path:
+        if preferred_video_path:
             render_uniform_video(
-                str(video_path),
+                str(preferred_video_path),
                 key="detect_video",
                 bottom_margin=0.0,
                 fixed_height_px=320,  # ↓ antes 400
             )
+
+            if (
+                preferred_video_path
+                and report
+                and debug_filename
+                and str(preferred_video_path).endswith(debug_filename)
+            ):
+                st.caption("Mostrando vídeo con landmarks de la última ejecución.")
 
         # --- Valor actual desde AppState (NO tocar session_state de los widgets)
         # Exercise: vacío si está en Auto-Detect
