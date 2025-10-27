@@ -107,48 +107,63 @@ def filter_and_interpolate_landmarks(
     """Filter landmarks below ``min_confidence`` and interpolate gaps."""
     logger.info("Filtering and interpolating %d landmark frames.", len(df_raw))
     n_frames, n_points = len(df_raw), 33
-    arr = np.full((n_frames, n_points, 4), np.nan, dtype=float)
-
-    for time_index, (_, row) in enumerate(df_raw.iterrows()):
-        for point_index in range(n_points):
-            visibility = row.get(f"v{point_index}", np.nan)
-            if pd.notna(visibility) and visibility >= min_confidence:
-                arr[time_index, point_index, 0] = row.get(f"x{point_index}")
-                arr[time_index, point_index, 1] = row.get(f"y{point_index}")
-                arr[time_index, point_index, 2] = row.get(f"z{point_index}")
-                arr[time_index, point_index, 3] = visibility
-
-    for point_index in range(n_points):
-        valid_mask = ~np.isnan(arr[:, point_index, 0])
-        valid_indices = np.where(valid_mask)[0]
-        if len(valid_indices) > 1:
-            interp_indices = np.arange(n_frames)
-            for axis in range(3):
-                arr[:, point_index, axis] = np.interp(
-                    interp_indices, valid_indices, arr[valid_indices, point_index, axis]
-                )
-
-    filtered_sequence = []
-    for time_index in range(n_frames):
-        frame_landmarks = [
-            {
-                "x": arr[time_index, point_index, 0],
-                "y": arr[time_index, point_index, 1],
-                "z": arr[time_index, point_index, 2],
-                "visibility": arr[time_index, point_index, 3]
-                if pd.notna(arr[time_index, point_index, 3])
-                else 0.0,
-            }
-            for point_index in range(n_points)
-        ]
-        filtered_sequence.append(frame_landmarks)
 
     crop_coords = (
         df_raw[["crop_x1", "crop_y1", "crop_x2", "crop_y2"]].to_numpy()
         if "crop_x1" in df_raw.columns
         else None
     )
-    return np.array(filtered_sequence, dtype=object), crop_coords
+    if n_frames == 0:
+        return np.array([], dtype=object), crop_coords
+
+    cols_x = [f"x{idx}" for idx in range(n_points)]
+    cols_y = [f"y{idx}" for idx in range(n_points)]
+    cols_z = [f"z{idx}" for idx in range(n_points)]
+    cols_v = [f"v{idx}" for idx in range(n_points)]
+
+    xs = df_raw[cols_x].to_numpy(dtype=float, copy=True)
+    ys = df_raw[cols_y].to_numpy(dtype=float, copy=True)
+    zs = df_raw[cols_z].to_numpy(dtype=float, copy=True)
+    vs = df_raw[cols_v].to_numpy(dtype=float, copy=False)
+
+    mask_valid = (vs >= min_confidence) & np.isfinite(xs) & np.isfinite(ys)
+    xs[~mask_valid] = np.nan
+    ys[~mask_valid] = np.nan
+    zs[~mask_valid] = np.nan
+
+    def _interp_columns(arr: np.ndarray) -> np.ndarray:
+        """Interpolate each landmark column independently."""
+        out = arr.copy()
+        if out.size == 0:
+            return out
+        idx = np.arange(out.shape[0])
+        for column_index in range(out.shape[1]):
+            column = out[:, column_index]
+            valid = np.isfinite(column)
+            if valid.sum() >= 2:
+                out[:, column_index] = np.interp(idx, idx[valid], column[valid])
+        return out
+
+    xs_interp = _interp_columns(xs)
+    ys_interp = _interp_columns(ys)
+    zs_interp = _interp_columns(zs)
+
+    vis_output = np.where(np.isfinite(vs), vs, 0.0)
+
+    def _build_landmark(x: float, y: float, z: float, v: float) -> dict[str, float]:
+        return {
+            "x": float(x),
+            "y": float(y),
+            "z": float(z),
+            "visibility": float(v),
+        }
+
+    vectorized_builder = np.vectorize(_build_landmark, otypes=[object])
+    landmarks_array = vectorized_builder(xs_interp, ys_interp, zs_interp, vis_output)
+    frames_list = landmarks_array.tolist()
+    filtered_sequence = np.empty(n_frames, dtype=object)
+    filtered_sequence[:] = frames_list
+    return filtered_sequence, crop_coords
 
 
 def calculate_metrics_from_sequence(
