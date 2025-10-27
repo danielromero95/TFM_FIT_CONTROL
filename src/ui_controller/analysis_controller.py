@@ -4,9 +4,10 @@ import atexit
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from queue import SimpleQueue, Empty
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import streamlit as st
+import numpy as np
 
 from src.services.analysis_service import run_pipeline
 from src.ui_controller.progress import phase_for, make_progress_callback
@@ -37,6 +38,8 @@ def start_run(
     cfg,
     prefetched_detection: Optional[Tuple[str, str, float]],
     debug_enabled: bool,
+    preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
+    preview_fps: Optional[float] = None,
 ) -> RunHandle:
     """
     Lanza run_pipeline en background con callback de progreso
@@ -55,6 +58,8 @@ def start_run(
             cfg,
             progress_callback=cb,
             prefetched_detection=prefetched_detection,
+            preview_callback=preview_callback,
+            preview_fps=preview_fps,
         )
         return run_id, report
 

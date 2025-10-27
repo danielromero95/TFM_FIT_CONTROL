@@ -8,6 +8,8 @@ from concurrent.futures import Future
 
 import streamlit as st
 
+from src.config.settings import DEFAULT_PREVIEW_FPS
+
 
 class Step(str, Enum):
     UPLOAD = "upload"
@@ -56,6 +58,10 @@ class AppState:
     progress_value_from_cb: int = 0
     phase_text_from_cb: str = "Preparando..."
     run_id: str | None = None
+    preview_enabled: bool = False
+    preview_fps: float = float(DEFAULT_PREVIEW_FPS)
+    preview_frame_count: int = 0
+    preview_last_ts_ms: float = 0.0
 
 
 def get_state() -> AppState:
@@ -98,6 +104,10 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.progress_value_from_cb = 0
     state.phase_text_from_cb = "Preparando..."
     state.run_id = None
+    state.preview_enabled = False
+    state.preview_fps = float(DEFAULT_PREVIEW_FPS)
+    state.preview_frame_count = 0
+    state.preview_last_ts_ms = 0.0
     state.exercise = DEFAULT_EXERCISE_LABEL
     state.exercise_pending_update = None
     state.view = ""

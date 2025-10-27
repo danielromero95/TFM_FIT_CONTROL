@@ -89,8 +89,10 @@ def _stream_pose_and_detection(
     detection_source_fps: float,
     debug_video_path: Optional[Path],
     debug_video_fps: float,
+    preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
+    preview_fps: Optional[float] = None,
 ) -> _StreamingPoseResult:
-    """Iterate ``frames`` once running pose estimation, detection and debug writing."""
+    """Iterate ``frames`` once running pose estimation, detection and optional previews."""
 
     rows: list[dict[str, float]] = []
     frames_processed = 0
@@ -111,6 +113,23 @@ def _stream_pose_and_detection(
             source_fps=detection_ts_fps,
             max_frames=300,
         )
+
+    preview_active = bool(preview_callback)
+    configured_preview_fps = float(preview_fps) if preview_fps and preview_fps > 0 else float(
+        getattr(getattr(cfg, "debug", object()), "preview_fps", 0.0) or 0.0
+    )
+    if configured_preview_fps <= 0:
+        configured_preview_fps = 10.0
+
+    detection_stride_base = detection_ts_fps
+    if detection_stride_base <= 0:
+        detection_stride_base = detection_target_fps if detection_target_fps > 0 else configured_preview_fps
+    stride_preview = 1
+    if preview_active:
+        try:
+            stride_preview = max(1, int(round(detection_stride_base / configured_preview_fps)))
+        except Exception:
+            stride_preview = 1
 
     debug_writer: Optional[cv2.VideoWriter] = None
     debug_style = OverlayStyle()
@@ -133,13 +152,16 @@ def _stream_pose_and_detection(
                 frames_processed += 1
                 height, width = frame.shape[:2]
 
+                ts_ms = (
+                    (frame_idx / detection_ts_fps) * 1000.0
+                    if detection_ts_fps > 0
+                    else float(frame_idx) * 1000.0
+                )
+                emit_preview = preview_active and (frame_idx % stride_preview == 0)
+                overlay_points_needed = emit_preview or debug_video_path is not None
+
                 if detection_extractor is not None and not detection_error:
                     try:
-                        ts_ms = (
-                            (frame_idx / detection_ts_fps) * 1000.0
-                            if detection_ts_fps > 0
-                            else float(frame_idx) * 1000.0
-                        )
                         detection_extractor.add_frame(frame_idx, frame, ts_ms)
                     except Exception:  # pragma: no cover - best effort guard
                         logger.exception("Automatic exercise detection failed during streaming")
@@ -147,7 +169,7 @@ def _stream_pose_and_detection(
 
                 landmarks, _annotated, crop_box = estimator.estimate(frame)
                 row: dict[str, float] = {"frame_idx": int(frame_idx)}
-                debug_points: dict[int, tuple[int, int]] = {}
+                overlay_points: dict[int, tuple[int, int]] = {}
 
                 if landmarks:
                     crop_values = crop_box if crop_box else [0, 0, width, height]
@@ -179,10 +201,10 @@ def _stream_pose_and_detection(
                         row[f"z{landmark_index}"] = float(point.get("z", np.nan))
                         row[f"v{landmark_index}"] = visibility
 
-                        if debug_video_path is not None and np.isfinite(x_value) and np.isfinite(y_value):
+                        if overlay_points_needed and np.isfinite(x_value) and np.isfinite(y_value):
                             px = int(round(x_value * width))
                             py = int(round(y_value * height))
-                            debug_points[landmark_index] = (px, py)
+                            overlay_points[landmark_index] = (px, py)
 
                     row.update(
                         {
@@ -202,6 +224,16 @@ def _stream_pose_and_detection(
 
                 rows.append(row)
 
+                overlay_frame: Optional[np.ndarray] = None
+
+                def ensure_overlay_frame() -> np.ndarray:
+                    nonlocal overlay_frame
+                    if overlay_frame is None:
+                        overlay_frame = frame.copy()
+                        if overlay_points:
+                            draw_pose_on_frame(overlay_frame, overlay_points, style=debug_style)
+                    return overlay_frame
+
                 if debug_video_path is not None:
                     if debug_writer is None:
                         try:
@@ -214,10 +246,15 @@ def _stream_pose_and_detection(
                         else:
                             debug_path = debug_video_path
                     if debug_writer is not None:
-                        frame_out = frame.copy()
-                        if debug_points:
-                            draw_pose_on_frame(frame_out, debug_points, style=debug_style)
-                        debug_writer.write(frame_out)
+                        debug_writer.write(ensure_overlay_frame())
+
+                if emit_preview and preview_active and preview_callback is not None:
+                    try:
+                        frame_for_preview = ensure_overlay_frame()
+                        preview_callback(frame_for_preview, int(frame_idx), float(ts_ms))
+                    except Exception:  # pragma: no cover - UI level best effort
+                        preview_active = False
+                        logger.exception("Preview callback failed; disabling previews for this run")
     finally:
         if debug_writer is not None:
             debug_writer.release()
@@ -261,6 +298,8 @@ def run_pipeline(
     progress_callback: Optional[Callable[..., None]] = None,
     *,
     prefetched_detection: Optional[Union[Tuple[str, str, float], DetectionResult]] = None,
+    preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
+    preview_fps: Optional[float] = None,
 ) -> Report:
     """Execute the full analysis pipeline using ``cfg`` as the single source of truth."""
 
@@ -372,6 +411,10 @@ def run_pipeline(
                 else None
             ),
             debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
+            preview_callback=preview_callback,
+            preview_fps=preview_fps if preview_fps is not None else getattr(
+                getattr(cfg, "debug", object()), "preview_fps", None
+            ),
         )
         df_raw_landmarks = streaming_result.df_landmarks
         frames_processed = streaming_result.frames_processed
