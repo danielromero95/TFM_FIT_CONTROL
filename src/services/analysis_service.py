@@ -133,15 +133,39 @@ def run_pipeline(
         warnings.extend(plan.warnings)
 
         target_size = (cfg.pose.target_width, cfg.pose.target_height)
-        raw_iter = extract_processed_frames_stream(
-            video_path=video_path,
-            every_n=sample_rate,
-            rotate=rotate,
-            resize_to=target_size,
-            cap=cap,
-            prefetched_info=info,
-            progress_callback=None,
-        )
+        target_fps_for_sampling: Optional[float] = None
+        if cfg.video.target_fps and cfg.video.target_fps > 0:
+            target_fps_for_sampling = float(cfg.video.target_fps)
+
+        if target_fps_for_sampling and target_fps_for_sampling > 0:
+            raw_iter = extract_processed_frames_stream(
+                video_path=video_path,
+                rotate=rotate,
+                resize_to=target_size,
+                cap=cap,
+                prefetched_info=info,
+                progress_callback=None,
+                target_fps=target_fps_for_sampling,
+            )
+            fps_effective = float(target_fps_for_sampling)
+            if fps_original > 0:
+                sample_rate = max(1, int(round(fps_original / fps_effective)))
+            if fps_warning:
+                logger.info(
+                    "Using time-based sampling at %.3f FPS despite metadata warning: %s",
+                    fps_effective,
+                    fps_warning,
+                )
+        else:
+            raw_iter = extract_processed_frames_stream(
+                video_path=video_path,
+                rotate=rotate,
+                resize_to=target_size,
+                cap=cap,
+                prefetched_info=info,
+                progress_callback=None,
+                every_n=sample_rate,
+            )
 
         pose_iter: Iterable[np.ndarray]
         if prefetched_detection is not None:
