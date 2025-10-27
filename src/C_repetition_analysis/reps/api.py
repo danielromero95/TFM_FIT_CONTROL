@@ -57,29 +57,24 @@ def _apply_refractory_filter(
     if refractory_frames <= 0 or len(indices) <= 1:
         return indices, prominences
 
-    kept_idx: List[int] = []
-    kept_prom: List[float] = []
+    # Work with numpy arrays; inputs are expected in ascending order.
+    idx = np.asarray(indices, dtype=np.int64)
+    prom = np.asarray(prominences, dtype=np.float64)
 
-    # Work over pairs to preserve alignment
-    pairs = list(zip(indices, prominences))
-    current_cluster: List[Tuple[int, float]] = [pairs[0]]
+    # Identify cluster starts where the gap is >= refractory_frames
+    diffs = np.diff(idx)
+    starts = np.r_[0, np.flatnonzero(diffs >= int(refractory_frames)) + 1]
+    ends = np.r_[starts[1:], idx.size]
 
-    for idx, prom in pairs[1:]:
-        last_idx = current_cluster[-1][0]
-        if idx - last_idx < refractory_frames:
-            current_cluster.append((idx, prom))
-        else:
-            # flush cluster: keep the most prominent
-            best = max(current_cluster, key=lambda t: t[1])
-            kept_idx.append(best[0])
-            kept_prom.append(best[1])
-            current_cluster = [(idx, prom)]
+    kept_idx: list[int] = []
+    kept_prom: list[float] = []
 
-    # flush final cluster
-    if current_cluster:
-        best = max(current_cluster, key=lambda t: t[1])
-        kept_idx.append(best[0])
-        kept_prom.append(best[1])
+    # Iterate per cluster (number of clusters << number of points typically)
+    for s, e in zip(starts, ends):
+        # Argmax returns first occurrence on ties → deterministic earliest index in cluster
+        local = s + int(np.argmax(prom[s:e]))
+        kept_idx.append(int(idx[local]))
+        kept_prom.append(float(prom[local]))
 
     return kept_idx, kept_prom
 
