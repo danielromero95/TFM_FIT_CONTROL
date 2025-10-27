@@ -277,27 +277,39 @@ def extract_frames_stream(
 def extract_processed_frames_stream(
     *,
     video_path: str,
-    every_n: int,
     rotate: int,
     resize_to: tuple[int, int],
     cap: Optional[cv2.VideoCapture],
     prefetched_info: Optional["VideoInfo"],
     progress_callback: Optional[Callable[[int], None]] = None,
+    every_n: Optional[int] = None,
+    target_fps: Optional[float] = None,
 ) -> Iterator[np.ndarray]:
-    """Stream frames with index-based sampling (every_n), applying rotation and resizing on the fly.
+    """Stream frames applying rotation/resizing while supporting index or time sampling.
 
-    Yields np.ndarray frames already in the target size/orientation.
+    ``every_n`` remains the legacy stride-based control. When ``target_fps`` is
+    supplied (``> 0``) the iterator switches to time-based sampling to better
+    preserve the requested frame rate.
     """
+
+    sampling_kwargs: dict[str, object]
+    if target_fps and target_fps > 0:
+        sampling_mode: Literal["time", "index"] = "time"
+        sampling_kwargs = {"target_fps": float(target_fps)}
+    else:
+        sampling_mode = "index"
+        stride = int(every_n) if every_n is not None else 1
+        sampling_kwargs = {"every_n": max(1, stride)}
 
     for finfo in extract_frames_stream(
         video_path=video_path,
-        sampling="index",
-        every_n=every_n,
+        sampling=sampling_mode,
         rotate=rotate,
         resize_to=resize_to,
         progress_callback=progress_callback,
         cap=cap,
         prefetched_info=prefetched_info,
+        **sampling_kwargs,
     ):
         yield finfo.array
 
