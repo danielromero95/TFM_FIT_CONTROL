@@ -30,8 +30,7 @@ def extract_landmarks_from_frames(
     min_visibility: float = 0.5,
 ) -> pd.DataFrame:
     """Extract pose landmarks frame by frame and return a raw DataFrame."""
-    frames = list(frames)
-    logger.info("Extracting landmarks from %d frames. Using crop: %s", len(frames), use_crop)
+    logger.info("Extracting landmarks from streaming frames. Using crop: %s", use_crop)
     estimator_cls = (
         RoiPoseEstimator
         if (use_crop and use_roi_tracking)

@@ -125,7 +125,13 @@ def extract_frames_stream(
             if rotate_deg:
                 frame = _apply_rotation(frame, rotate_deg)
             if resize_to:
-                frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
+                target_width, target_height = resize_to
+                height, width = frame.shape[:2]
+                if width != target_width or height != target_height:
+                    interpolation = (
+                        cv2.INTER_AREA if width > target_width or height > target_height else cv2.INTER_LINEAR
+                    )
+                    frame = cv2.resize(frame, resize_to, interpolation=interpolation)
             if to_gray:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             return frame
@@ -266,6 +272,34 @@ def extract_frames_stream(
             cap_obj.release()
         if progress_callback and frame_count > 0 and last_progress < 100:
             progress_callback(100)
+
+
+def extract_processed_frames_stream(
+    *,
+    video_path: str,
+    every_n: int,
+    rotate: int,
+    resize_to: tuple[int, int],
+    cap: Optional[cv2.VideoCapture],
+    prefetched_info: Optional["VideoInfo"],
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> Iterator[np.ndarray]:
+    """Stream frames with index-based sampling (every_n), applying rotation and resizing on the fly.
+
+    Yields np.ndarray frames already in the target size/orientation.
+    """
+
+    for finfo in extract_frames_stream(
+        video_path=video_path,
+        sampling="index",
+        every_n=every_n,
+        rotate=rotate,
+        resize_to=resize_to,
+        progress_callback=progress_callback,
+        cap=cap,
+        prefetched_info=prefetched_info,
+    ):
+        yield finfo.array
 
 
 def extract_and_preprocess_frames(
