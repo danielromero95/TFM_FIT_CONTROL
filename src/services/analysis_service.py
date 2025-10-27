@@ -468,7 +468,7 @@ def _estimate_pose(processed_frames: Iterable[np.ndarray], cfg: config.Config) -
     return extract_landmarks_from_frames(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
-        use_roi_tracking=getattr(cfg.pose, "use_roi_tracking", False),
+        use_roi_tracking=cfg.pose.use_roi_tracking,
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
         min_visibility=0.5,
     )
