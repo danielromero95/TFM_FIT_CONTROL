@@ -1,5 +1,7 @@
 # src/B_pose_estimation/estimators.py
 import logging
+import threading
+import atexit
 from typing import Iterable, List, Dict, Optional, Tuple
 
 import cv2
@@ -10,37 +12,171 @@ from src.config.settings import MODEL_COMPLEXITY
 
 logger = logging.getLogger(__name__)
 
-class PoseEstimator:
-    def __init__(self, static_image_mode=True, model_complexity=MODEL_COMPLEXITY, min_detection_confidence=MIN_DETECTION_CONFIDENCE):
-        try:
+
+class _PoseGraphPool:
+    """
+    Pool sencillo de instancias mp_pose.Pose, indexado por parámetros:
+    (static_image_mode, model_complexity, min_detection_confidence).
+    - acquire(...) -> devuelve una instancia disponible o crea una nueva.
+    - release(inst, key) -> devuelve la instancia al pool (no cierra).
+    - close_all() -> cierra todas las instancias del pool (en atexit).
+    Thread-safe con un Lock.
+    """
+
+    _lock = threading.Lock()
+    _free: Dict[Tuple[bool, int, float], List["object"]] = {}
+    _all: List["object"] = []
+    _imported = False
+    mp_pose = None
+    mp_drawing = None
+
+    @classmethod
+    def _ensure_imports(cls):
+        if not cls._imported:
             from mediapipe.python.solutions import pose as mp_pose_module, drawing_utils as mp_drawing
-        except ImportError: raise
-        self.mp_pose, self.mp_drawing = mp_pose_module, mp_drawing
-        self.pose = self.mp_pose.Pose(static_image_mode=static_image_mode, model_complexity=model_complexity, min_detection_confidence=min_detection_confidence)
+
+            cls.mp_pose = mp_pose_module
+            cls.mp_drawing = mp_drawing
+            cls._imported = True
+
+    @classmethod
+    def acquire(
+        cls,
+        *,
+        static_image_mode: bool,
+        model_complexity: int,
+        min_detection_confidence: float,
+    ):
+        cls._ensure_imports()
+        key = (
+            bool(static_image_mode),
+            int(model_complexity),
+            float(min_detection_confidence),
+        )
+        with cls._lock:
+            bucket = cls._free.get(key)
+            if bucket and len(bucket) > 0:
+                return bucket.pop(), key
+        inst = cls.mp_pose.Pose(
+            static_image_mode=static_image_mode,
+            model_complexity=model_complexity,
+            min_detection_confidence=min_detection_confidence,
+        )
+        with cls._lock:
+            cls._all.append(inst)
+        return inst, key
+
+    @classmethod
+    def release(cls, inst, key):
+        with cls._lock:
+            cls._free.setdefault(key, []).append(inst)
+
+    @classmethod
+    def close_all(cls):
+        with cls._lock:
+            for inst in cls._all:
+                try:
+                    inst.close()
+                except Exception:
+                    pass
+            cls._all.clear()
+            cls._free.clear()
+
+
+atexit.register(_PoseGraphPool.close_all)
+
+class PoseEstimator:
+    def __init__(
+        self,
+        static_image_mode=True,
+        model_complexity=MODEL_COMPLEXITY,
+        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+    ):
+        self.static_image_mode = static_image_mode
+        self.model_complexity = model_complexity
+        self.min_detection_confidence = min_detection_confidence
+        self.pose = None
+        self._key = None
+        _PoseGraphPool._ensure_imports()
+        self.mp_pose = _PoseGraphPool.mp_pose
+        self.mp_drawing = _PoseGraphPool.mp_drawing
+
+    def _ensure_pose(self):
+        if self.pose is None:
+            self.pose, self._key = _PoseGraphPool.acquire(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+            )
+
     def estimate(self, image):
+        self._ensure_pose()
         results = self.pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        if not results.pose_landmarks: return None, image, None
-        landmarks = [{'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility} for lm in results.pose_landmarks.landmark]
+        if not results.pose_landmarks:
+            return None, image, None
+        landmarks = [
+            {
+                'x': lm.x,
+                'y': lm.y,
+                'z': lm.z,
+                'visibility': lm.visibility,
+            }
+            for lm in results.pose_landmarks.landmark
+        ]
         annotated_image = image.copy()
-        self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, POSE_CONNECTIONS)
+        self.mp_drawing.draw_landmarks(
+            annotated_image, results.pose_landmarks, POSE_CONNECTIONS
+        )
         return landmarks, annotated_image, None
+
     def close(self):
-        self.pose.close()
+        if self.pose is not None:
+            _PoseGraphPool.release(self.pose, self._key)
+            self.pose, self._key = None, None
+
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
 class CroppedPoseEstimator:
-    def __init__(self, static_image_mode=True, model_complexity=MODEL_COMPLEXITY, min_detection_confidence=MIN_DETECTION_CONFIDENCE, crop_margin=0.15, target_size=(256, 256)):
+    def __init__(
+        self,
+        static_image_mode=True,
+        model_complexity=MODEL_COMPLEXITY,
+        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+        crop_margin=0.15,
+        target_size=(256, 256),
+    ):
         self.crop_margin, self.target_size = crop_margin, target_size
-        try:
-            from mediapipe.python.solutions import pose as mp_pose_module, drawing_utils as mp_drawing
-        except ImportError: raise
-        self.mp_pose, self.mp_drawing = mp_pose_module, mp_drawing
-        self.pose_full = self.mp_pose.Pose(static_image_mode=static_image_mode, model_complexity=model_complexity, min_detection_confidence=min_detection_confidence)
-        self.pose_crop = self.mp_pose.Pose(static_image_mode=static_image_mode, model_complexity=model_complexity, min_detection_confidence=min_detection_confidence)
+        self.static_image_mode = static_image_mode
+        self.model_complexity = model_complexity
+        self.min_detection_confidence = min_detection_confidence
+        self.pose_full = None
+        self.pose_crop = None
+        self._key_full = None
+        self._key_crop = None
+        _PoseGraphPool._ensure_imports()
+        self.mp_pose = _PoseGraphPool.mp_pose
+        self.mp_drawing = _PoseGraphPool.mp_drawing
+
+    def _ensure_graphs(self):
+        if self.pose_full is None:
+            self.pose_full, self._key_full = _PoseGraphPool.acquire(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+            )
+        if self.pose_crop is None:
+            self.pose_crop, self._key_crop = _PoseGraphPool.acquire(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+            )
+
     def estimate(self, image_bgr):
+        self._ensure_graphs()
         h0, w0 = image_bgr.shape[:2]
         results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
         if not results_full.pose_landmarks: return None, image_bgr, None
@@ -60,10 +196,18 @@ class CroppedPoseEstimator:
             self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, POSE_CONNECTIONS)
         else: landmarks_crop = None
         return landmarks_crop, annotated_crop, crop_box
+
     def close(self):
-        self.pose_full.close(); self.pose_crop.close()
+        if self.pose_full is not None:
+            _PoseGraphPool.release(self.pose_full, self._key_full)
+            self.pose_full, self._key_full = None, None
+        if self.pose_crop is not None:
+            _PoseGraphPool.release(self.pose_crop, self._key_crop)
+            self.pose_crop, self._key_crop = None, None
+
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
@@ -86,26 +230,36 @@ class RoiPoseEstimator:
         self.last_box: Optional[List[int]] = None
         self.misses = 0
         self.frame_idx = 0
+        self.static_image_mode = static_image_mode
+        self.model_complexity = model_complexity
+        self.min_detection_confidence = min_detection_confidence
 
+        _PoseGraphPool._ensure_imports()
+        self.mp_pose = _PoseGraphPool.mp_pose
+        self.mp_drawing = _PoseGraphPool.mp_drawing
         try:
-            from mediapipe.python.solutions import pose as mp_pose_module, drawing_utils as mp_drawing
             from mediapipe.framework.formats import landmark_pb2
         except ImportError:
             raise
-
-        self.mp_pose = mp_pose_module
-        self.mp_drawing = mp_drawing
         self.landmark_pb2 = landmark_pb2
-        self.pose_full = self.mp_pose.Pose(
-            static_image_mode=static_image_mode,
-            model_complexity=model_complexity,
-            min_detection_confidence=min_detection_confidence,
-        )
-        self.pose_crop = self.mp_pose.Pose(
-            static_image_mode=static_image_mode,
-            model_complexity=model_complexity,
-            min_detection_confidence=min_detection_confidence,
-        )
+        self.pose_full = None
+        self.pose_crop = None
+        self._key_full = None
+        self._key_crop = None
+
+    def _ensure_graphs(self):
+        if self.pose_full is None:
+            self.pose_full, self._key_full = _PoseGraphPool.acquire(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+            )
+        if self.pose_crop is None:
+            self.pose_crop, self._key_crop = _PoseGraphPool.acquire(
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+            )
 
     def _expand_and_clip_box(self, bbox: Tuple[float, float, float, float], width: int, height: int) -> List[int]:
         x_min, y_min, x_max, y_max = bbox
@@ -141,6 +295,7 @@ class RoiPoseEstimator:
         ]
 
     def estimate(self, image_bgr):
+        self._ensure_graphs()
         height, width = image_bgr.shape[:2]
         run_full = (
             self.last_box is None
@@ -244,8 +399,12 @@ class RoiPoseEstimator:
         return output
 
     def close(self):
-        self.pose_full.close()
-        self.pose_crop.close()
+        if self.pose_full is not None:
+            _PoseGraphPool.release(self.pose_full, self._key_full)
+            self.pose_full, self._key_full = None, None
+        if self.pose_crop is not None:
+            _PoseGraphPool.release(self.pose_crop, self._key_crop)
+            self.pose_crop, self._key_crop = None, None
 
     def __enter__(self):
         return self
