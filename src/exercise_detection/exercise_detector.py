@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -57,6 +57,28 @@ MIN_CONFIDENCE_SCORE = 0.45
 
 DEFAULT_SAMPLING_RATE = 30.0
 
+FEATURE_NAMES: Tuple[str, ...] = (
+    "knee_angle_left",
+    "knee_angle_right",
+    "hip_angle_left",
+    "hip_angle_right",
+    "elbow_angle_left",
+    "elbow_angle_right",
+    "shoulder_angle_left",
+    "shoulder_angle_right",
+    "pelvis_y",
+    "torso_length",
+    "wrist_left_x",
+    "wrist_left_y",
+    "wrist_right_x",
+    "wrist_right_y",
+    "shoulder_width_norm",
+    "shoulder_yaw_deg",
+    "shoulder_z_delta_abs",
+    "torso_tilt_deg",
+    "ankle_width_norm",
+)
+
 
 @dataclass(frozen=True)
 class DetectionResult:
@@ -80,6 +102,146 @@ class FeatureSeries:
     valid_frames: int
     total_frames: int
 
+
+class _FeatureBuffer:
+    """Lightweight dynamic array used by the incremental extractor."""
+
+    __slots__ = ("array", "size", "dtype")
+
+    def __init__(self, initial_capacity: int = 512, *, dtype: Any = float) -> None:
+        dtype_obj = np.dtype(dtype)
+        self.array = np.empty(int(initial_capacity), dtype=dtype_obj)
+        self.size = 0
+        self.dtype = dtype_obj
+
+    def append(self, value: float) -> None:
+        if self.size >= self.array.size:
+            self._grow()
+        self.array[self.size] = value
+        self.size += 1
+
+    def to_array(self) -> np.ndarray:
+        if self.size == 0:
+            return np.empty(0, dtype=self.dtype)
+        return np.asarray(self.array[: self.size], dtype=float)
+
+    def _grow(self) -> None:
+        new_capacity = max(self.array.size * 2, 1024)
+        new_array = np.empty(new_capacity, dtype=self.dtype)
+        new_array[: self.size] = self.array[: self.size]
+        self.array = new_array
+
+
+class IncrementalExerciseFeatureExtractor:
+    """Incrementally subsample frames and classify the exercise in one pass."""
+
+    def __init__(
+        self,
+        *,
+        target_fps: float,
+        source_fps: float,
+        max_frames: int = 300,
+    ) -> None:
+        self.target_fps = max(float(target_fps or 0.0), 0.1)
+        self.source_fps = float(source_fps or 0.0)
+        self.max_frames = max(1, int(max_frames))
+        self._stride = self._compute_stride()
+        self._pose = None
+        self._pose_landmark = None
+        self._feature_buffers: Dict[str, _FeatureBuffer] = {
+            name: _FeatureBuffer() for name in FEATURE_NAMES
+        }
+        self._samples = 0
+        self._valid_samples = 0
+        self._initialised = False
+        self._done = False
+
+    def _compute_stride(self) -> int:
+        if self.source_fps <= 0.0:
+            approx_source = max(self.target_fps, DEFAULT_SAMPLING_RATE)
+        else:
+            approx_source = self.source_fps
+        stride = int(round(approx_source / self.target_fps)) if self.target_fps > 0 else 1
+        return max(1, stride)
+
+    def _ensure_pose(self) -> None:
+        if self._initialised:
+            return
+        try:
+            from mediapipe.python.solutions import pose as mp_pose_module
+        except ImportError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError("MediaPipe is not available for exercise detection") from exc
+
+        pose_kwargs = dict(
+            static_image_mode=False,
+            model_complexity=1,
+            smooth_landmarks=True,
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        self._pose = mp_pose_module.Pose(**pose_kwargs)
+        self._pose_landmark = mp_pose_module.PoseLandmark
+        self._initialised = True
+
+    def add_frame(self, frame_idx: int, frame: np.ndarray, ts_ms: float) -> None:
+        """Optionally sample ``frame`` and update the incremental feature buffers."""
+
+        if self._done or frame_idx % self._stride != 0:
+            return
+        if self._samples >= self.max_frames:
+            self._done = True
+            return
+
+        self._ensure_pose()
+        assert self._pose is not None and self._pose_landmark is not None  # for type checkers
+
+        feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers
+        valid = _process_frame(frame, self._pose, self._pose_landmark, feature_lists)
+        self._samples += 1
+        if valid:
+            self._valid_samples += 1
+        if not valid:
+            # ``_append_nan`` was already called by ``_process_frame``.
+            pass
+
+    def finalize(self) -> DetectionResult:
+        """Close resources and classify the aggregated feature series."""
+
+        try:
+            if not self._initialised or self._samples == 0:
+                return DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
+
+            data = {name: buf.to_array() for name, buf in self._feature_buffers.items()}
+            sampling_rate = self._effective_sampling_rate()
+            features = FeatureSeries(
+                data=data,
+                sampling_rate=float(sampling_rate),
+                valid_frames=int(self._valid_samples),
+                total_frames=int(self._samples),
+            )
+            try:
+                label, view, confidence = classify_features(features)
+            except Exception:  # pragma: no cover - classification fallback
+                logger.exception("Failed to classify incremental detection features")
+                return DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
+            return make_detection_result(label, view, confidence)
+        finally:
+            if self._initialised and self._pose is not None:
+                try:
+                    self._pose.close()
+                except Exception:  # pragma: no cover - best effort
+                    logger.debug("Failed to close MediaPipe Pose instance", exc_info=True)
+            self._pose = None
+            self._pose_landmark = None
+            self._initialised = False
+
+    def _effective_sampling_rate(self) -> float:
+        if self.source_fps > 0 and self._stride > 0:
+            return float(self.source_fps / self._stride)
+        if self.target_fps > 0:
+            return float(self.target_fps)
+        return DEFAULT_SAMPLING_RATE
 
 # --- Public API ----------------------------------------------------------------
 
@@ -201,27 +363,7 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         min_tracking_confidence=0.5,
     )
 
-    feature_lists: Dict[str, list[float]] = {
-        "knee_angle_left": [],
-        "knee_angle_right": [],
-        "hip_angle_left": [],
-        "hip_angle_right": [],
-        "elbow_angle_left": [],
-        "elbow_angle_right": [],
-        "shoulder_angle_left": [],
-        "shoulder_angle_right": [],
-        "pelvis_y": [],
-        "torso_length": [],
-        "wrist_left_x": [],
-        "wrist_left_y": [],
-        "wrist_right_x": [],
-        "wrist_right_y": [],
-        "shoulder_width_norm": [],
-        "shoulder_yaw_deg": [],
-        "shoulder_z_delta_abs": [],
-        "torso_tilt_deg": [],
-        "ankle_width_norm": [],
-    }
+    feature_lists: Dict[str, list[float]] = {name: [] for name in FEATURE_NAMES}
 
     total_processed = 0
     valid_frames = 0
@@ -299,27 +441,7 @@ def extract_features_from_frames(
         min_tracking_confidence=0.5,
     )
 
-    feature_lists: Dict[str, list[float]] = {
-        "knee_angle_left": [],
-        "knee_angle_right": [],
-        "hip_angle_left": [],
-        "hip_angle_right": [],
-        "elbow_angle_left": [],
-        "elbow_angle_right": [],
-        "shoulder_angle_left": [],
-        "shoulder_angle_right": [],
-        "pelvis_y": [],
-        "torso_length": [],
-        "wrist_left_x": [],
-        "wrist_left_y": [],
-        "wrist_right_x": [],
-        "wrist_right_y": [],
-        "shoulder_width_norm": [],
-        "shoulder_yaw_deg": [],
-        "shoulder_z_delta_abs": [],
-        "torso_tilt_deg": [],
-        "ankle_width_norm": [],
-    }
+    feature_lists: Dict[str, list[float]] = {name: [] for name in FEATURE_NAMES}
 
     total_processed = 0
     valid_frames = 0

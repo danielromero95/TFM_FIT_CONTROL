@@ -6,32 +6,35 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from itertools import tee
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple, Union
 
 import cv2
 import numpy as np
+import pandas as pd
 
 from src import config
 from src.config.constants import MIN_DETECTION_CONFIDENCE
+from src.config.settings import DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS
 from src.A_preprocessing.frame_extraction import (
     extract_and_preprocess_frames,
     extract_processed_frames_stream,
 )
 from src.A_preprocessing.video_metadata import VideoInfo, read_video_file_info
+from src.B_pose_estimation.estimators import (
+    CroppedPoseEstimator,
+    PoseEstimator,
+    RoiPoseEstimator,
+)
 from src.B_pose_estimation.processing import (
     calculate_metrics_from_sequence,
-    extract_landmarks_from_frames,
     filter_and_interpolate_landmarks,
 )
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
-from src.D_visualization.video_landmarks import (
-    render_landmarks_video_streaming,
-)
+from src.D_visualization.video_landmarks import OverlayStyle, draw_pose_on_frame
 from src.exercise_detection.exercise_detector import (
     DetectionResult,
-    detect_exercise_from_frames,
+    IncrementalExerciseFeatureExtractor,
 )
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
@@ -39,6 +42,17 @@ from src.services.errors import NoFramesExtracted, VideoOpenError
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _StreamingPoseResult:
+    df_landmarks: "pd.DataFrame"
+    frames_processed: int
+    detection: Optional[DetectionResult]
+    debug_video_path: Optional[Path]
+
+
+_DEBUG_VIDEO_CODECS = ("avc1", "mp4v", "H264", "XVID")
 
 
 class ProgressCallback(Protocol):
@@ -65,6 +79,180 @@ def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> N
     except TypeError:
         # Backward-compatible legacy signature: (progress)
         cb(progress)
+
+
+def _stream_pose_and_detection(
+    frames: Iterable[np.ndarray],
+    cfg: config.Config,
+    *,
+    detection_enabled: bool,
+    detection_source_fps: float,
+    debug_video_path: Optional[Path],
+    debug_video_fps: float,
+) -> _StreamingPoseResult:
+    """Iterate ``frames`` once running pose estimation, detection and debug writing."""
+
+    rows: list[dict[str, float]] = []
+    frames_processed = 0
+    detection_result: Optional[DetectionResult] = None
+    detection_error = False
+
+    detection_target_fps = getattr(cfg.video, "detection_sample_fps", None)
+    if not detection_target_fps or detection_target_fps <= 0:
+        detection_target_fps = float(DEFAULT_DETECTION_SAMPLE_FPS)
+    detection_source_fps = float(detection_source_fps or 0.0)
+    detection_ts_fps = detection_source_fps if detection_source_fps > 0 else detection_target_fps
+
+    detection_extractor: Optional[IncrementalExerciseFeatureExtractor]
+    detection_extractor = None
+    if detection_enabled:
+        detection_extractor = IncrementalExerciseFeatureExtractor(
+            target_fps=float(detection_target_fps),
+            source_fps=detection_ts_fps,
+            max_frames=300,
+        )
+
+    debug_writer: Optional[cv2.VideoWriter] = None
+    debug_style = OverlayStyle()
+    debug_path: Optional[Path] = None
+    debug_fps = float(debug_video_fps or detection_target_fps)
+    if debug_fps <= 0:
+        debug_fps = float(detection_target_fps)
+
+    estimator_cls = (
+        RoiPoseEstimator
+        if (getattr(cfg.pose, "use_crop", False) and getattr(cfg.pose, "use_roi_tracking", False))
+        else (CroppedPoseEstimator if getattr(cfg.pose, "use_crop", False) else PoseEstimator)
+    )
+
+    min_visibility = 0.5
+
+    try:
+        with estimator_cls(min_detection_confidence=MIN_DETECTION_CONFIDENCE) as estimator:
+            for frame_idx, frame in enumerate(frames):
+                frames_processed += 1
+                height, width = frame.shape[:2]
+
+                if detection_extractor is not None and not detection_error:
+                    try:
+                        ts_ms = (
+                            (frame_idx / detection_ts_fps) * 1000.0
+                            if detection_ts_fps > 0
+                            else float(frame_idx) * 1000.0
+                        )
+                        detection_extractor.add_frame(frame_idx, frame, ts_ms)
+                    except Exception:  # pragma: no cover - best effort guard
+                        logger.exception("Automatic exercise detection failed during streaming")
+                        detection_error = True
+
+                landmarks, _annotated, crop_box = estimator.estimate(frame)
+                row: dict[str, float] = {"frame_idx": int(frame_idx)}
+                debug_points: dict[int, tuple[int, int]] = {}
+
+                if landmarks:
+                    crop_values = crop_box if crop_box else [0, 0, width, height]
+                    crop_x1, crop_y1, crop_x2, crop_y2 = map(float, crop_values)
+                    crop_width = max(crop_x2 - crop_x1, 0.0)
+                    crop_height = max(crop_y2 - crop_y1, 0.0)
+
+                    for landmark_index, point in enumerate(landmarks):
+                        visibility = float(point.get("visibility", 0.0))
+                        x_value = float(point.get("x", np.nan))
+                        y_value = float(point.get("y", np.nan))
+
+                        if getattr(cfg.pose, "use_crop", False) and not getattr(
+                            cfg.pose, "use_roi_tracking", False
+                        ):
+                            if crop_width > 0.0 and crop_height > 0.0:
+                                x_value = (x_value * crop_width + crop_x1) / float(width)
+                                y_value = (y_value * crop_height + crop_y1) / float(height)
+                            else:
+                                x_value = np.nan
+                                y_value = np.nan
+
+                        if visibility < min_visibility:
+                            x_value = np.nan
+                            y_value = np.nan
+
+                        row[f"x{landmark_index}"] = x_value
+                        row[f"y{landmark_index}"] = y_value
+                        row[f"z{landmark_index}"] = float(point.get("z", np.nan))
+                        row[f"v{landmark_index}"] = visibility
+
+                        if debug_video_path is not None and np.isfinite(x_value) and np.isfinite(y_value):
+                            px = int(round(x_value * width))
+                            py = int(round(y_value * height))
+                            debug_points[landmark_index] = (px, py)
+
+                    row.update(
+                        {
+                            "crop_x1": crop_x1,
+                            "crop_y1": crop_y1,
+                            "crop_x2": crop_x2,
+                            "crop_y2": crop_y2,
+                        }
+                    )
+                else:
+                    for landmark_index in range(33):
+                        row[f"x{landmark_index}"] = np.nan
+                        row[f"y{landmark_index}"] = np.nan
+                        row[f"z{landmark_index}"] = np.nan
+                        row[f"v{landmark_index}"] = np.nan
+                    row.update({"crop_x1": np.nan, "crop_y1": np.nan, "crop_x2": np.nan, "crop_y2": np.nan})
+
+                rows.append(row)
+
+                if debug_video_path is not None:
+                    if debug_writer is None:
+                        try:
+                            debug_writer = _open_debug_writer(debug_video_path, width, height, debug_fps)
+                        except Exception as exc:
+                            logger.warning("Debug video writer initialization failed: %s", exc)
+                            debug_writer = None
+                            debug_path = None
+                            debug_video_path = None
+                        else:
+                            debug_path = debug_video_path
+                    if debug_writer is not None:
+                        frame_out = frame.copy()
+                        if debug_points:
+                            draw_pose_on_frame(frame_out, debug_points, style=debug_style)
+                        debug_writer.write(frame_out)
+    finally:
+        if debug_writer is not None:
+            debug_writer.release()
+
+    if detection_extractor is not None:
+        try:
+            detection_result = detection_extractor.finalize()
+        except Exception:  # pragma: no cover - detection fallback
+            logger.exception("Automatic exercise detection failed during finalization")
+            detection_result = DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
+    df_landmarks = pd.DataFrame.from_records(rows)
+    return _StreamingPoseResult(
+        df_landmarks=df_landmarks,
+        frames_processed=frames_processed,
+        detection=detection_result,
+        debug_video_path=debug_path,
+    )
+
+
+def _open_debug_writer(
+    output_path: Path,
+    width: int,
+    height: int,
+    fps: float,
+) -> cv2.VideoWriter:
+    """Open a ``VideoWriter`` trying multiple codecs until one succeeds."""
+
+    size = (int(width), int(height))
+    fps_value = max(float(fps), 1.0)
+    for code in _DEBUG_VIDEO_CODECS:
+        writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*code), fps_value, size)
+        if writer.isOpened():
+            return writer
+        writer.release()
+    raise RuntimeError(f"Could not open debug VideoWriter for path={output_path}")
 
 
 def run_pipeline(
@@ -108,6 +296,7 @@ def run_pipeline(
     detected_label = ExerciseType.UNKNOWN
     detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
+    debug_video_path_stream: Optional[Path] = None
 
     try:
         info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
@@ -167,33 +356,42 @@ def run_pipeline(
                 every_n=sample_rate,
             )
 
-        pose_iter: Iterable[np.ndarray]
+        t1 = time.perf_counter()
+        notify(25, "STAGE 2: Estimating pose on frames...")
+        detection_source = fps_effective if fps_effective > 0 else fps_original
+        if detection_source <= 0:
+            detection_source = fps_from_reader
+        streaming_result = _stream_pose_and_detection(
+            raw_iter,
+            cfg,
+            detection_enabled=prefetched_detection is None,
+            detection_source_fps=detection_source,
+            debug_video_path=(
+                output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
+                if cfg.debug.generate_debug_video
+                else None
+            ),
+            debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
+        )
+        df_raw_landmarks = streaming_result.df_landmarks
+        frames_processed = streaming_result.frames_processed
+        debug_video_path_stream = streaming_result.debug_video_path
         if prefetched_detection is not None:
             detected_label, detected_view, detected_confidence = _normalize_detection(
                 prefetched_detection
             )
-            pose_iter = raw_iter
         else:
-            det_iter, pose_iter = tee(raw_iter, 2)
-            try:
-                detection_tuple = detect_exercise_from_frames(
-                    det_iter, fps=fps_effective, max_frames=300
-                )
-                detected_label, detected_view, detected_confidence = _normalize_detection(
-                    detection_tuple
-                )
-            except Exception:  # pragma: no cover
-                logger.exception("Automatic exercise detection failed (streaming)")
+            detection_output = streaming_result.detection
+            if detection_output is None:
                 detected_label = ExerciseType.UNKNOWN
                 detected_view = ViewType.UNKNOWN
                 detected_confidence = 0.0
-
-        t1 = time.perf_counter()
-        notify(25, "STAGE 2: Estimating pose on frames...")
-        df_raw_landmarks = _estimate_pose(pose_iter, cfg)
+            else:
+                detected_label = detection_output.label
+                detected_view = detection_output.view
+                detected_confidence = float(detection_output.confidence)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
-        frames_processed = len(df_raw_landmarks)
     finally:
         cap.release()
 
@@ -221,17 +419,11 @@ def run_pipeline(
 
     debug_video_path: Optional[Path] = None
     if cfg.debug.generate_debug_video:
-        notify(65, "EXTRA STAGE: Rendering HQ debug video...")
-        debug_video_path = _maybe_render_debug_video(
-            video_path=video_path,
-            filtered_sequence=filtered_sequence,
-            crop_boxes=crop_boxes,
-            cfg=cfg,
-            output_paths=output_paths,
-            fps_effective=fps_effective,
-            sample_rate=sample_rate,
-            rotate=rotate,
-        )
+        if debug_video_path_stream is not None:
+            notify(65, "EXTRA STAGE: Debug video saved during streaming.")
+            debug_video_path = debug_video_path_stream
+        else:
+            notify(65, "EXTRA STAGE: Debug video skipped (no frames recorded).")
 
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
@@ -498,52 +690,10 @@ def _prepare_processed_frames(
     return processed
 
 
-def _estimate_pose(processed_frames: Iterable[np.ndarray], cfg: config.Config) -> "pd.DataFrame":
-    """Run pose estimation on ``processed_frames`` and return raw landmarks."""
-
-    return extract_landmarks_from_frames(
-        frames=processed_frames,
-        use_crop=cfg.pose.use_crop,
-        min_detection_confidence=MIN_DETECTION_CONFIDENCE,
-        min_visibility=0.5,
-    )
-
-
 def _filter_landmarks(df_raw: "pd.DataFrame") -> tuple["pd.DataFrame", object]:
     """Filter and interpolate the pose landmarks, returning crop boxes as metadata."""
 
     return filter_and_interpolate_landmarks(df_raw)
-
-
-def _maybe_render_debug_video(
-    *,
-    video_path: str,
-    filtered_sequence: "pd.DataFrame",
-    crop_boxes: object,
-    cfg: config.Config,
-    output_paths: OutputPaths,
-    fps_effective: float,
-    sample_rate: int,
-    rotate: int,
-) -> Optional[Path]:
-    """Render the HQ debug video when enabled, swallowing streaming errors."""
-
-    debug_video_path = output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
-    try:
-        render_landmarks_video_streaming(
-            video_path,
-            filtered_sequence,
-            crop_boxes,
-            str(debug_video_path),
-            fps_effective,
-            processed_size=(cfg.pose.target_width, cfg.pose.target_height),
-            sample_rate=sample_rate,
-            rotate=rotate,
-        )
-        return debug_video_path
-    except Exception as exc:  # pragma: no cover - visualization is best-effort
-        logger.warning("Debug video streaming failed: %s", exc)
-        return None
 
 
 def _compute_metrics_and_angle(
