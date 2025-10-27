@@ -9,13 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .estimators import CroppedPoseEstimator, PoseEstimator, RoiPoseEstimator
-from .metrics import (
-    angular_velocity,
-    calculate_distances,
-    calculate_symmetry,
-    extract_joint_angles,
-    normalize_landmarks,
-)
+from .metrics import angular_velocity
 from src.config.constants import MIN_DETECTION_CONFIDENCE
 
 logger = logging.getLogger(__name__)
@@ -166,6 +160,58 @@ def filter_and_interpolate_landmarks(
     return filtered_sequence, crop_coords
 
 
+def _sequence_to_arrays(
+    sequence: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Convert a sequence of per-frame landmark dicts into (x, y, z, v) arrays of shape (T, 33).
+    Missing frames/values → NaN.
+    """
+
+    T = len(sequence)
+    n = 33
+    xs = np.full((T, n), np.nan, dtype=float)
+    ys = np.full((T, n), np.nan, dtype=float)
+    zs = np.full((T, n), np.nan, dtype=float)
+    vs = np.full((T, n), np.nan, dtype=float)
+
+    for t, frame in enumerate(sequence):
+        if frame is None:
+            continue
+        for j, lm in enumerate(frame):
+            try:
+                xs[t, j] = float(lm["x"])
+                ys[t, j] = float(lm["y"])
+                zs[t, j] = float(lm["z"])
+                visibility = lm.get("visibility", np.nan)
+                vs[t, j] = float(visibility) if np.isfinite(visibility) else np.nan
+            except Exception:
+                pass
+
+    return xs, ys, zs, vs
+
+
+def _angle_deg(
+    ax: np.ndarray,
+    ay: np.ndarray,
+    bx: np.ndarray,
+    by: np.ndarray,
+    cx: np.ndarray,
+    cy: np.ndarray,
+) -> np.ndarray:
+    """Compute angle ABC (in degrees) for all rows of the provided arrays."""
+
+    v1x, v1y = ax - bx, ay - by
+    v2x, v2y = cx - bx, cy - by
+    dot = v1x * v2x + v1y * v2y
+    n1 = np.hypot(v1x, v1y)
+    n2 = np.hypot(v2x, v2y)
+    denom = n1 * n2
+    cos = np.where(denom > 0, dot / denom, np.nan)
+    cos = np.clip(cos, -1.0, 1.0)
+    return np.degrees(np.arccos(cos))
+
+
 def calculate_metrics_from_sequence(
     sequence: np.ndarray,
     fps: float,
@@ -175,46 +221,101 @@ def calculate_metrics_from_sequence(
 ) -> pd.DataFrame:
     """Compute biomechanical metrics for the provided landmark sequence."""
     logger.info("Computing metrics for a sequence of %d frames.", len(sequence))
-    all_metrics: list[dict[str, float]] = []
-    for index, frame_landmarks in enumerate(sequence):
-        row: dict[str, float] = {"frame_idx": index}
-        if frame_landmarks is None:
-            row.update(
-                {
-                    "left_knee": np.nan,
-                    "right_knee": np.nan,
-                    "left_elbow": np.nan,
-                    "right_elbow": np.nan,
-                    "shoulder_width": np.nan,
-                    "foot_separation": np.nan,
-                }
-            )
-        else:
-            norm_landmarks = normalize_landmarks(frame_landmarks)
-            angles = extract_joint_angles(norm_landmarks)
-            distances = calculate_distances(norm_landmarks)
-            row.update(angles)
-            row.update(distances)
-        all_metrics.append(row)
+    if len(sequence) == 0:
+        return pd.DataFrame([])
 
-    dfm = pd.DataFrame(all_metrics)
-    if dfm.empty:
-        return dfm
+    xs, ys, _zs, _vs = _sequence_to_arrays(sequence)
+
+    hip_cx = (xs[:, 23] + xs[:, 24]) / 2.0
+    hip_cy = (ys[:, 23] + ys[:, 24]) / 2.0
+    x_norm = xs - hip_cx[:, None]
+    y_norm = ys - hip_cy[:, None]
+
+    left_knee = _angle_deg(
+        x_norm[:, 23],
+        y_norm[:, 23],
+        x_norm[:, 25],
+        y_norm[:, 25],
+        x_norm[:, 27],
+        y_norm[:, 27],
+    )
+    right_knee = _angle_deg(
+        x_norm[:, 24],
+        y_norm[:, 24],
+        x_norm[:, 26],
+        y_norm[:, 26],
+        x_norm[:, 28],
+        y_norm[:, 28],
+    )
+    left_elbow = _angle_deg(
+        x_norm[:, 11],
+        y_norm[:, 11],
+        x_norm[:, 13],
+        y_norm[:, 13],
+        x_norm[:, 15],
+        y_norm[:, 15],
+    )
+    right_elbow = _angle_deg(
+        x_norm[:, 12],
+        y_norm[:, 12],
+        x_norm[:, 14],
+        y_norm[:, 14],
+        x_norm[:, 16],
+        y_norm[:, 16],
+    )
+
+    shoulder_width = np.abs(x_norm[:, 12] - x_norm[:, 11])
+    foot_separation = np.abs(x_norm[:, 28] - x_norm[:, 27])
+
+    frame_idx = np.arange(len(sequence), dtype=int)
+    dfm = pd.DataFrame(
+        {
+            "frame_idx": frame_idx,
+            "left_knee": left_knee,
+            "right_knee": right_knee,
+            "left_elbow": left_elbow,
+            "right_elbow": right_elbow,
+            "shoulder_width": shoulder_width,
+            "foot_separation": foot_separation,
+        }
+    )
 
     angle_columns = ["left_knee", "right_knee", "left_elbow", "right_elbow"]
     raw_angles = dfm[angle_columns].copy()
+
     for column in angle_columns:
         dfm[column] = dfm[column].interpolate(method="linear", limit_direction="both")
         if smooth_window >= 3:
             dfm[column] = dfm[column].rolling(smooth_window, center=True, min_periods=1).mean()
         dfm[f"ang_vel_{column}"] = angular_velocity(
-            dfm[column].tolist(), fps, method=vel_method
+            dfm[column].to_numpy(), fps, method=vel_method
         )
 
-    dfm["knee_symmetry"] = raw_angles.apply(
-        lambda row: calculate_symmetry(row["left_knee"], row["right_knee"]), axis=1
+    # Knee symmetry
+    L = raw_angles["left_knee"].to_numpy()
+    R = raw_angles["right_knee"].to_numpy()
+    max_lr = np.maximum(np.abs(L), np.abs(R))
+    nan_mask = ~np.isfinite(L) | ~np.isfinite(R)
+    both_zero = max_lr == 0
+    knee_sym = np.where(
+        nan_mask,
+        np.nan,
+        np.where(both_zero, 1.0, 1.0 - (np.abs(L - R) / max_lr)),
     )
-    dfm["elbow_symmetry"] = raw_angles.apply(
-        lambda row: calculate_symmetry(row["left_elbow"], row["right_elbow"]), axis=1
+
+    # Elbow symmetry
+    L = raw_angles["left_elbow"].to_numpy()
+    R = raw_angles["right_elbow"].to_numpy()
+    max_lr = np.maximum(np.abs(L), np.abs(R))
+    nan_mask = ~np.isfinite(L) | ~np.isfinite(R)
+    both_zero = max_lr == 0
+    elbow_sym = np.where(
+        nan_mask,
+        np.nan,
+        np.where(both_zero, 1.0, 1.0 - (np.abs(L - R) / max_lr)),
     )
+
+    dfm["knee_symmetry"] = knee_sym
+    dfm["elbow_symmetry"] = elbow_sym
+
     return dfm
