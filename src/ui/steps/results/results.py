@@ -14,8 +14,6 @@ except Exception:
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.state import get_state
-from src.ui.video import render_uniform_video
-from src.ui.metrics_sync import render_video_with_metrics_sync
 from ..utils import step_container
 
 
@@ -138,14 +136,11 @@ def _results_panel() -> Dict[str, bool]:
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
-            debug_video_enabled = bool((state.configure_values or {}).get("debug_video", True))
-            debug_video_path = str(report.debug_video_path) if report.debug_video_path else None
-            preferred_video_path = str(state.video_path) if state.video_path else None
-            if debug_video_enabled and debug_video_path:
-                preferred_video_path = debug_video_path
+            if state.preview_enabled:
+                st.info("El vídeo con landmarks se visualizó durante el análisis.")
 
-            rendered_sync_viewer = False
-            should_render_fallback_video = metrics_df is None
+            debug_video_enabled = bool((state.configure_values or {}).get("debug_video", True))
+            debug_video_path = report.debug_video_path
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
@@ -157,61 +152,14 @@ def _results_panel() -> Dict[str, bool]:
                         key="metrics_multiselect",
                     )
                     if selected_metrics:
-                        fps_value = float(getattr(stats, "fps_effective", 0.0) or 0.0)
-                        rep_intervals: List[Tuple[int, int]] = []
-                        start_at_s: Optional[float] = None
-                        if preferred_video_path:
-                            rep_intervals = _compute_rep_intervals(
-                                metrics_df, report, stats, numeric_columns
-                            )
-                            if rep_intervals:
-                                rep_options = list(range(1, len(rep_intervals) + 1))
-                                rep_idx = st.select_slider(
-                                    "Go to rep",
-                                    options=rep_options,
-                                    value=rep_options[0],
-                                    key="results_rep_slider",
-                                )
-                                fps_for_slider = fps_value if fps_value > 0 else 1.0
-                                start_at_s = rep_intervals[rep_idx - 1][0] / fps_for_slider
-
-                        if preferred_video_path:
-                            render_video_with_metrics_sync(
-                                video_path=preferred_video_path,
-                                metrics_df=metrics_df,
-                                selected_metrics=selected_metrics,
-                                fps=fps_value,
-                                rep_intervals=rep_intervals,
-                                start_at_s=start_at_s,
-                                key="results_video_metrics_sync",
-                                bottom_margin_rem=0.18,
-                            )
-                            rendered_sync_viewer = True
-                        else:
-                            st.info("Video not available for sync; showing simple chart.")
-                            st.line_chart(metrics_df[selected_metrics])
+                        st.line_chart(metrics_df[selected_metrics])
                     else:
-                        st.info(
-                            "Select at least one metric to visualize. Showing the video below as a fallback."
-                        )
-                        should_render_fallback_video = True
+                        st.info("Select at least one metric to visualize.")
                 else:
                     st.info("No numeric metrics available for charting.")
-                    should_render_fallback_video = True
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
-                should_render_fallback_video = True
-
-            if (
-                should_render_fallback_video
-                and not rendered_sync_viewer
-                and preferred_video_path is not None
-            ):
-                render_uniform_video(
-                    preferred_video_path,
-                    key="results_video_fallback",
-                    bottom_margin=0.18,
-                )
+                st.info("No metrics were generated for this run.")
 
             stats_rows = [
                 {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
@@ -251,6 +199,22 @@ def _results_panel() -> Dict[str, bool]:
                     st.dataframe(stats_df, width="stretch")
                 except Exception:
                     st.json({row["Field"]: row["Value"] for row in stats_rows})
+
+            if debug_video_enabled and debug_video_path:
+                debug_path = Path(debug_video_path)
+                try:
+                    debug_bytes = debug_path.read_bytes()
+                except FileNotFoundError:
+                    st.error("The debug video for download was not found.")
+                except OSError as exc:
+                    st.error(f"Could not read debug video: {exc}")
+                else:
+                    st.download_button(
+                        "Download debug video",
+                        data=debug_bytes,
+                        file_name=debug_path.name,
+                        mime="video/mp4",
+                    )
 
             if state.metrics_path is not None:
                 metrics_data = None

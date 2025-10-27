@@ -23,7 +23,8 @@ from .settings import (
     SQUAT_LOW_THRESH,
     SQUAT_HIGH_THRESH,
     DEFAULT_GENERATE_VIDEO,
-    DEFAULT_DEBUG_MODE
+    DEFAULT_DEBUG_MODE,
+    DEFAULT_PREVIEW_FPS,
 )
 
 
@@ -69,6 +70,7 @@ class DebugConfig:
     """Debug and diagnostics toggles."""
     generate_debug_video: bool = DEFAULT_GENERATE_VIDEO
     debug_mode: bool = DEFAULT_DEBUG_MODE
+    preview_fps: float = DEFAULT_PREVIEW_FPS
 
 
 @dataclass
