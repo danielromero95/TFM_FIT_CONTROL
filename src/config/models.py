@@ -43,6 +43,7 @@ class VideoConfig:
     min_frames: int = 15
     min_fps: float = 5.0
     manual_sample_rate: Optional[int] = None
+    detection_sample_fps: Optional[float] = None
 
 
 @dataclass
