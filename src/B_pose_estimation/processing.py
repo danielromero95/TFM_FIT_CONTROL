@@ -1,5 +1,7 @@
 """Pose landmark extraction and biomechanical metric utilities."""
 
+# Changelog: switched pose extraction to consume streaming frame iterables lazily.
+
 from __future__ import annotations
 
 import logging
@@ -30,8 +32,7 @@ def extract_landmarks_from_frames(
     min_visibility: float = 0.5,
 ) -> pd.DataFrame:
     """Extract pose landmarks frame by frame and return a raw DataFrame."""
-    frames = list(frames)
-    logger.info("Extracting landmarks from %d frames. Using crop: %s", len(frames), use_crop)
+    logger.info("Extracting landmarks from streaming frames. Using crop: %s", use_crop)
     estimator_cls = (
         RoiPoseEstimator
         if (use_crop and use_roi_tracking)
@@ -39,8 +40,10 @@ def extract_landmarks_from_frames(
     )
 
     rows: list[dict[str, float]] = []
+    frames_processed = 0
     with estimator_cls(min_detection_confidence=min_detection_confidence) as estimator:
         for index, image in enumerate(frames):
+            frames_processed = index + 1
             height, width = image.shape[0], image.shape[1]
             landmarks, _annotated, crop_box = estimator.estimate(image)
             if landmarks and crop_box is None:
@@ -99,6 +102,7 @@ def extract_landmarks_from_frames(
                     )
             rows.append(row)
 
+    logger.info("Extracted landmarks from %d frames.", frames_processed)
     return pd.DataFrame(rows)
 
 

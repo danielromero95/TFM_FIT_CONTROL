@@ -1,19 +1,26 @@
 """Service layer for running the video analysis pipeline."""
 
+# Changelog: run_pipeline now streams frames end-to-end without in-memory buffering.
+
 from __future__ import annotations
 
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple, Union
 import time
 
 import cv2
+import numpy as np
+import pandas as pd
 
 from src import config
 from src.config.constants import MIN_DETECTION_CONFIDENCE
-from src.A_preprocessing.frame_extraction import extract_and_preprocess_frames
+from src.A_preprocessing.frame_extraction import (
+    extract_and_preprocess_frames,
+    extract_processed_frames_stream,
+)
 from src.A_preprocessing.video_metadata import VideoInfo, read_video_file_info
 from src.B_pose_estimation.processing import (
     calculate_metrics_from_sequence,
@@ -87,7 +94,20 @@ def run_pipeline(
 
     cap = _open_video_cap(video_path)
     rotate: int = cfg.pose.rotate if cfg.pose.rotate is not None else 0
+    warnings: list[str] = []
+    skip_reason: Optional[str] = None
+    frames_processed = 0
+    sample_rate = 1
+    fps_effective = 0.0
+    fps_original = 0.0
+    df_raw_landmarks: pd.DataFrame | None = None
+    detected_label = ExerciseType.UNKNOWN
+    detected_view = ViewType.UNKNOWN
+    detected_confidence = 0.0
+    t1 = t0
+
     try:
+        fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
         info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
             cap, video_path
         )
@@ -97,44 +117,52 @@ def run_pipeline(
         if cfg.pose.rotate is None:
             rotate = int(info.rotation or 0)
 
-        frames, fps_from_reader = _extract_frames(
-            video_path, cap, info, rotate, initial_sample_rate
+        plan = make_sampling_plan(
+            fps_metadata=fps_original,
+            fps_from_reader=fps_from_reader,
+            prefer_reader_fps=prefer_reader_fps,
+            initial_sample_rate=initial_sample_rate,
+            cfg=cfg,
+            fps_warning=fps_warning,
         )
+        sample_rate = plan.sample_rate
+        fps_effective = plan.fps_effective
+        fps_original = plan.fps_base
+        warnings.extend(plan.warnings)
+
+        if prefetched_detection is not None:
+            detected_label, detected_view, detected_confidence = _normalize_detection(
+                prefetched_detection
+            )
+        else:
+            try:
+                detected_label, detected_view, detected_confidence = _normalize_detection(
+                    detect_exercise(video_path)
+                )
+            except Exception:  # pragma: no cover - defensive logging only
+                logger.exception("Automatic exercise detection failed")
+
+        target_size = (cfg.pose.target_width, cfg.pose.target_height)
+        frame_iter = extract_processed_frames_stream(
+            video_path=video_path,
+            every_n=sample_rate,
+            rotate=rotate,
+            resize_to=target_size,
+            cap=cap,
+            prefetched_info=info,
+            progress_callback=None,
+        )
+
+        t1 = time.perf_counter()
+        notify(25, "STAGE 2: Estimating pose on frames...")
+        df_raw_landmarks = _estimate_pose(frame_iter, cfg)
+        if df_raw_landmarks.empty:
+            raise NoFramesExtracted("No frames could be extracted from the video.")
+        frames_processed = len(df_raw_landmarks)
     finally:
         cap.release()
 
-    if not frames:
-        raise NoFramesExtracted("No frames could be extracted from the video.")
-
-    warnings: list[str] = []
-    skip_reason: Optional[str] = None
-    plan = make_sampling_plan(
-        fps_metadata=fps_original,
-        fps_from_reader=float(fps_from_reader),
-        prefer_reader_fps=prefer_reader_fps,
-        initial_sample_rate=initial_sample_rate,
-        cfg=cfg,
-        fps_warning=fps_warning,
-    )
-    sample_rate = plan.sample_rate
-    fps_effective = plan.fps_effective
-    fps_original = plan.fps_base
-    warnings.extend(plan.warnings)
-    frames = _apply_sampling_plan(frames, initial_sample_rate, plan)
-    frames_processed = len(frames)
-
-    detected_label = ExerciseType.UNKNOWN
-    detected_view = ViewType.UNKNOWN
-    detected_confidence = 0.0
-    if prefetched_detection is not None:
-        detected_label, detected_view, detected_confidence = _normalize_detection(prefetched_detection)
-    else:
-        try:
-            detected_label, detected_view, detected_confidence = _normalize_detection(
-                detect_exercise(video_path)
-            )
-        except Exception:  # pragma: no cover - defensive logging only
-            logger.exception("Automatic exercise detection failed")
+    assert df_raw_landmarks is not None  # for mypy; ensured by NoFramesExtracted
 
     if frames_processed < cfg.video.min_frames:
         skip_reason = (
@@ -150,13 +178,6 @@ def run_pipeline(
         warnings.append(message)
         if skip_reason is None:
             skip_reason = message
-
-    target_size = (cfg.pose.target_width, cfg.pose.target_height)
-    processed_frames = _prepare_processed_frames(frames, target_size)
-
-    t1 = time.perf_counter()
-    notify(25, "STAGE 2: Estimating pose on frames...")
-    df_raw_landmarks = _estimate_pose(processed_frames, cfg)
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
@@ -441,12 +462,13 @@ def _prepare_processed_frames(
     return processed
 
 
-def _estimate_pose(processed_frames: list[object], cfg: config.Config) -> "pd.DataFrame":
+def _estimate_pose(processed_frames: Iterable[np.ndarray], cfg: config.Config) -> pd.DataFrame:
     """Run pose estimation on ``processed_frames`` and return raw landmarks."""
 
     return extract_landmarks_from_frames(
         frames=processed_frames,
         use_crop=cfg.pose.use_crop,
+        use_roi_tracking=getattr(cfg.pose, "use_roi_tracking", False),
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
         min_visibility=0.5,
     )
