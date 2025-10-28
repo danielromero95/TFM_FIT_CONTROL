@@ -9,6 +9,8 @@ from typing import Callable, Optional, Tuple
 import streamlit as st
 import numpy as np
 
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+
 from src.services.analysis_service import run_pipeline
 from src.ui_controller.progress import phase_for, make_progress_callback
 
@@ -64,6 +66,9 @@ def start_run(
         return run_id, report
 
     fut = get_executor().submit(_job)
+    ctx = get_script_run_ctx()
+    if ctx is not None:
+        add_script_run_ctx(fut, ctx=ctx)
     return RunHandle(run_id=run_id, future=fut)
 
 
