@@ -7,6 +7,7 @@ from math import ceil
 from string import Template
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from importlib.resources import files
@@ -35,24 +36,54 @@ def _build_payload(
     *,
     max_points: int = 3000,
 ) -> dict:
+    # Normalize FPS
     fps = float(fps) if float(fps) > 0 else 1.0
+
+    n = int(len(df))
+    if n <= 0:
+        return {"times": [], "series": {}, "fps": fps, "x_mode": "frame"}
+
+    # Compute stride once based on total points
+    stride = 1
+    if max_points and n > int(max_points):
+        stride = max(1, int(ceil(n / float(max_points))))
+
+    # Build a single index array for all downsampling
+    idx = np.arange(0, n, stride, dtype=int)
+
+    # X axis: time from frame_idx (if present), otherwise frame index
     if "frame_idx" in df.columns:
-        times_raw = [float(i) / fps for i in df["frame_idx"].tolist()]
+        # to_numpy avoids per-row Python overhead; coerce to float64
+        frames = pd.to_numeric(df["frame_idx"], errors="coerce").to_numpy(
+            dtype="float64", copy=False
+        )
+        # Fallback if all-NaN: use 0..n-1
+        if not np.isfinite(frames).any():
+            frames = np.arange(n, dtype="float64")
+        times_arr = frames[idx] / fps
         x_mode = "time"
     else:
-        times_raw = list(range(len(df)))
+        times_arr = idx.astype("float64", copy=False)
         x_mode = "frame"
 
-    stride = 1
-    if max_points and len(times_raw) > max_points:
-        stride = max(1, ceil(len(times_raw) / max_points))
-    times = times_raw[::stride]
+    # Convert times to Python scalars
+    times = times_arr.tolist()
 
+    # Prepare selected series that exist in the frame
+    present = [c for c in selected if c in df.columns]
     series: dict[str, list[float | None]] = {}
-    for col in selected:
-        if col in df.columns:
-            vals = _series_list(df[col].tolist())
-            series[col] = vals[::stride]
+    if present:
+        # Single materialization: (n, k)
+        data = df[present].to_numpy(dtype="float64", copy=False)
+        # Downsample rows
+        data_ds = data[idx, :]
+        # Vectorized NaN -> None conversion for JSON (object dtype)
+        mask = np.isfinite(data_ds)
+        obj = data_ds.astype(object)
+        obj[~mask] = None
+        # Export one list per series
+        for j, name in enumerate(present):
+            series[name] = obj[:, j].tolist()
 
     return {"times": times, "series": series, "fps": fps, "x_mode": x_mode}
 
