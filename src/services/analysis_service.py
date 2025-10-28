@@ -55,7 +55,8 @@ class _StreamingPoseResult:
     debug_video_path: Optional[Path]
 
 
-_DEBUG_VIDEO_CODECS = ("avc1", "mp4v", "H264", "XVID")
+# Prioriza mp4v para evitar dependencias de libopenh264 en Windows
+_DEBUG_VIDEO_CODECS = ("mp4v", "avc1", "XVID", "H264")
 
 
 class ProgressCallback(Protocol):
@@ -311,16 +312,26 @@ def _open_debug_writer(
     height: int,
     fps: float,
 ) -> cv2.VideoWriter:
-    """Open a ``VideoWriter`` trying multiple codecs until one succeeds."""
+    """Open a VideoWriter trying multiple codecs until one succeeds.
 
+    Prefer 'mp4v' to avoid libopenh264 version issues on some Windows builds.
+    """
     size = (int(width), int(height))
     fps_value = max(float(fps), 1.0)
+    last_error = None
     for code in _DEBUG_VIDEO_CODECS:
-        writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*code), fps_value, size)
-        if writer.isOpened():
-            return writer
-        writer.release()
-    raise RuntimeError(f"Could not open debug VideoWriter for path={output_path}")
+        try:
+            writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*code), fps_value, size)
+            if writer.isOpened():
+                logger.info("Debug video writer opened with codec=%s fps=%.2f size=%s", code, fps_value, size)
+                return writer
+            # ensure resources are freed if the backend returned a closed writer
+            writer.release()
+            logger.warning("Debug writer attempt failed with codec=%s fps=%.2f size=%s", code, fps_value, size)
+        except Exception as exc:
+            last_error = exc
+            logger.warning("Debug writer exception with codec=%s: %s", code, exc)
+    raise RuntimeError(f"Could not open debug VideoWriter for path={output_path}") from last_error
 
 
 def run_pipeline(
