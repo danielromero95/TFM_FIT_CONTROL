@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from queue import SimpleQueue, Empty
@@ -54,7 +55,14 @@ def start_run(
     queue = get_progress_queue()
     cb = make_progress_callback(queue, run_id, debug_enabled)
 
+    ctx = get_script_run_ctx()
+
     def _job():
+        if ctx is not None:
+            try:
+                add_script_run_ctx(threading.current_thread(), ctx=ctx)
+            except Exception:
+                pass
         report = run_pipeline(
             str(video_path),
             cfg,
