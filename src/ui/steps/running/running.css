@@ -1,4 +1,4 @@
 /* Running step minimal tweaks */
-.step--running .stProgress { margin-top: .35rem; }
+.step--running .stProgress { margin-top: var(--fc-space-2); }
 .step--running .stSpinner > div { font-weight: 600; }
 .step--running .stButton > button { border-radius: var(--fc-radius) !important; }

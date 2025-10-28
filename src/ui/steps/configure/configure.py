@@ -97,20 +97,26 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             run_active = bool(state.analysis_future and not state.analysis_future.done())
             col_back, col_forward = st.columns(2)
             with col_back:
-                if st.button(
+                st.markdown('<div class="btn--back">', unsafe_allow_html=True)
+                back_clicked = st.button(
                     "Back",
                     key="configure_back",
                     disabled=run_active,
                     width='stretch',
-                ):
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+                if back_clicked:
                     go_to(Step.DETECT)
             with col_forward:
-                if st.button(
+                st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
+                forward_clicked = st.button(
                     "Continue",
                     key="configure_continue",
                     disabled=run_active,
                     width='stretch',
-                ):
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+                if forward_clicked:
                     state.configure_values = current_values
                     go_to(Step.RUNNING)
                     try:
