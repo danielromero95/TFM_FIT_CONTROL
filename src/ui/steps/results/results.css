@@ -1,5 +1,4 @@
 /* Results step – extra tweaks (base panel rules live in ui-components.css) */
-.step--results { margin-top: 0 !important; }
 .step--results h3, .step--results .stMarkdown h3 { margin-bottom: .35rem !important; }
 .step--results h4 { margin-bottom: .35rem !important; }
 .results-panel .results-metrics-block {

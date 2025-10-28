@@ -15,7 +15,7 @@
 
   /* Shape & spacing */
   --fc-radius: 12px;
-  --fc-gap-sm: .5rem;
+  --fc-gap-sm: 0.75rem;
   --fc-gap: .75rem;
 
   /* Typography */

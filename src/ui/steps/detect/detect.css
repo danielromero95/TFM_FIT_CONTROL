@@ -1,5 +1,4 @@
 /* Detect step styles (scoped) */
-.step--detect { margin-top: .5rem; }
 .step--detect h3, .step--detect .stMarkdown h3 { margin-bottom: .35rem; }
 .step--detect h4 { margin-bottom: .35rem; }
 
