@@ -239,10 +239,16 @@ def _results_panel() -> Dict[str, bool]:
 
         adjust_col, reset_col = st.columns(2)
         with adjust_col:
-            if st.button("Adjust configuration and re-run", key="results_adjust"):
+            st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
+            adjust_clicked = st.button("Adjust configuration and re-run", key="results_adjust")
+            st.markdown('</div>', unsafe_allow_html=True)
+            if adjust_clicked:
                 actions["adjust"] = True
         with reset_col:
-            if st.button("Back to start", key="results_reset"):
+            st.markdown('<div class="btn--back">', unsafe_allow_html=True)
+            reset_clicked = st.button("Back to start", key="results_reset")
+            st.markdown('</div>', unsafe_allow_html=True)
+            if reset_clicked:
                 actions["reset"] = True
 
         st.markdown("</div>", unsafe_allow_html=True)

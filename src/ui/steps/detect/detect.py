@@ -190,12 +190,15 @@ def _detect_step() -> None:
         st.markdown('<div class="app-nav-buttons">', unsafe_allow_html=True)
         back_col, continue_col = st.columns(2, gap="small")
         with back_col:
+            st.markdown('<div class="btn--back">', unsafe_allow_html=True)
             if st.button("Back", key="detect_back", width='stretch'):
                 state.detect_result = None
                 go_to(Step.UPLOAD)
                 safe_rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
         with continue_col:
             can_continue = bool(selected_exercise and selected_view)
+            st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
             if st.button(
                 "Continue",
                 key="detect_continue",
@@ -204,5 +207,6 @@ def _detect_step() -> None:
             ):
                 go_to(Step.CONFIGURE)
                 safe_rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 

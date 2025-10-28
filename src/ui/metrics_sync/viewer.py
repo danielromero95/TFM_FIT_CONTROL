@@ -105,7 +105,6 @@ def render_video_with_metrics_sync(
     scroll_zoom: bool = True,
     key: str = "video_metrics_sync",
     max_width_px: int = 720,
-    bottom_margin_rem: float = 1.0,
     show_video: bool = False,
 ) -> None:
     if metrics_df is None or metrics_df.empty:
@@ -158,9 +157,7 @@ def render_video_with_metrics_sync(
     if signature and "key" in signature.parameters:
         html_kwargs["key"] = key
 
-    wrapper_style = (
-        f"width:100%;max-width:{max_width_px}px;margin:0 auto {bottom_margin_rem:.2f}rem auto;"
-    )
+    wrapper_style = f"width:100%;max-width:{max_width_px}px;margin:0 auto;"
     wrapper_class = "vmx-wrapper vmx-wrapper--plot-only" if not show_video_final else "vmx-wrapper"
 
     video_block = ""

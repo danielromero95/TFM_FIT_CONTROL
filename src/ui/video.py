@@ -6,6 +6,7 @@ import mimetypes
 import inspect
 from base64 import b64encode
 from pathlib import Path
+from math import isclose
 from typing import BinaryIO, Final, Union
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from streamlit.components.v1 import html
 
 VideoData = Union[str, bytes, BinaryIO]
 VIDEO_VIEWPORT_HEIGHT_PX: Final[int] = 400
+DEFAULT_VIDEO_BOTTOM_REM: Final[float] = 1.25
 
 
 @st.cache_data(show_spinner=False)
@@ -108,7 +110,7 @@ def render_uniform_video(
     format: str | None = None,
     start_time: int = 0,
     key: str | None = None,
-    bottom_margin: float = 1.25,
+    bottom_margin: float = DEFAULT_VIDEO_BOTTOM_REM,
     fixed_height_px: int | None = VIDEO_VIEWPORT_HEIGHT_PX,
 ) -> None:
     """Render ``data`` inside a viewport with fixed height and full width."""
@@ -121,9 +123,9 @@ def render_uniform_video(
 
     st.markdown(f'<div id="{marker_id}"></div>', unsafe_allow_html=True)
 
-    padding = 24
+    iframe_pad_px = 24
     fixed_h = int(fixed_height_px or 400)
-    initial_height = fixed_h + padding
+    initial_height = fixed_h + iframe_pad_px
     html_kwargs: dict[str, object] = {"height": initial_height, "scrolling": False}
     try:
         signature = inspect.signature(html)
@@ -136,7 +138,7 @@ def render_uniform_video(
     html(
         f"""
         <div id="{inner_id}" style="width:100%;margin:0 auto;">
-          <div style="position:relative;width:100%;height:{fixed_h}px;background:#000;border-radius:12px;overflow:hidden;">
+          <div style="position:relative;width:100%;height:{fixed_h}px;background:#000;border-radius:var(--fc-radius, 12px);overflow:hidden;">
             <video
               id="{video_id}"
               controls
@@ -151,7 +153,10 @@ def render_uniform_video(
         </div>
         <script>
           (function() {{
-            const pad = {padding};
+            const fallbackPad = {iframe_pad_px};
+            const padVar = getComputedStyle(document.documentElement).getPropertyValue('--fc-iframe-pad').trim();
+            const parsedPad = Number.parseFloat(padVar || '');
+            const pad = Number.isNaN(parsedPad) ? fallbackPad : parsedPad;
             const inner = document.getElementById('{inner_id}');
             const video = document.getElementById('{video_id}');
             if (!inner) return;
@@ -186,20 +191,23 @@ def render_uniform_video(
     )
 
     margin_value = max(bottom_margin, 0.0)
+    override_line = ""
+    if not isclose(margin_value, DEFAULT_VIDEO_BOTTOM_REM, rel_tol=1e-9, abs_tol=1e-9):
+        override_line = f"          --uniform-video-bottom: {margin_value:.2f}rem;\n"
     st.markdown(
         f"""
         <style>
         #{marker_id} + iframe {{
           width: 100% !important;
-          margin: 0 auto {margin_value:.2f}rem auto !important;
+{override_line}          margin: 0 auto var(--uniform-video-bottom, var(--fc-video-bottom, 1.25rem)) auto !important;
           display: block !important;
-          border-radius: 12px !important;
+          border-radius: var(--fc-radius, 12px) !important;
           background: #000 !important;
           overflow: hidden !important;
-          box-shadow: 0 18px 36px rgba(15, 23, 42, 0.35);
+          box-shadow: var(--fc-shadow-elev-2, 0 18px 36px rgba(15, 23, 42, .35));
         }}
         #{marker_id} + iframe > iframe {{
-          border-radius: 12px !important;
+          border-radius: var(--fc-radius, 12px) !important;
         }}
         </style>
         """,
