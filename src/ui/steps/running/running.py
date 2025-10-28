@@ -109,7 +109,7 @@ def _running_step() -> None:
                     frame_rgb = frame_bgr
                 try:
                     preview_placeholder.image(
-                        frame_rgb, width="stretch", channels="RGB"
+                        frame_rgb, use_container_width=True, channels="RGB"
                     )
                     seconds = ts_ms / 1000.0 if ts_ms else 0.0
                     fps_display = (frame_idx + 1) / seconds if seconds > 0 else 0.0

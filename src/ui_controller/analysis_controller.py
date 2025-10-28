@@ -74,11 +74,9 @@ def start_run(
         return run_id, report
 
     fut = get_executor().submit(_job)
+    ctx = get_script_run_ctx()
     if ctx is not None:
-        try:
-            add_script_run_ctx(fut, ctx=ctx)
-        except Exception:
-            pass
+        add_script_run_ctx(fut, ctx=ctx)
     return RunHandle(run_id=run_id, future=fut)
 
 
