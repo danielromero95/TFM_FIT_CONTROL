@@ -96,7 +96,7 @@ def _load_asset_text(name: str) -> str:
 
 def render_video_with_metrics_sync(
     *,
-    video_path: str,
+    video_path: str | None = None,
     metrics_df: pd.DataFrame,
     selected_metrics: list[str],
     fps: float | int,
@@ -106,13 +106,8 @@ def render_video_with_metrics_sync(
     key: str = "video_metrics_sync",
     max_width_px: int = 720,
     bottom_margin_rem: float = 1.0,
+    show_video: bool = False,
 ) -> None:
-    try:
-        source_uri, mime = get_video_source(video_path, format=None)
-    except FileNotFoundError:
-        st.error(f"Video file not found: {video_path}")
-        return
-
     if metrics_df is None or metrics_df.empty:
         st.info("No metrics available to display.")
         return
@@ -134,14 +129,23 @@ def render_video_with_metrics_sync(
     plot_id = f"vmx-plot-{uuid.uuid4().hex}"
     wrapper_id = f"vmx-wrap-{uuid.uuid4().hex}"
 
+    show_video_final = bool(show_video and video_path)
+    source_uri: str | None = None
+    mime: str | None = None
+    if show_video_final:
+        try:
+            source_uri, mime = get_video_source(video_path, format=None)
+        except FileNotFoundError:
+            st.error(f"Video file not found: {video_path}")
+            show_video_final = False
+
     css = _load_asset_text("metrics_sync.css")
     js_tpl = Template(_load_asset_text("metrics_sync.js"))
     js = js_tpl.substitute(
         VIDEO_ID=video_id,
         PLOT_ID=plot_id,
         WRAPPER_ID=wrapper_id,
-        SOURCE_URI=source_uri,
-        MIME=mime,
+        HAS_VIDEO=str(show_video_final).lower(),
         DATA_JSON=data_json,
         PLOT_CONFIG_JSON=plot_config_json,
     )
@@ -157,18 +161,27 @@ def render_video_with_metrics_sync(
     wrapper_style = (
         f"width:100%;max-width:{max_width_px}px;margin:0 auto {bottom_margin_rem:.2f}rem auto;"
     )
+    wrapper_class = "vmx-wrapper vmx-wrapper--plot-only" if not show_video_final else "vmx-wrapper"
+
+    video_block = ""
+    if show_video_final and source_uri and mime:
+        video_block = (
+            f"  <div class=\"vmx-video-box\">\n"
+            f"    <video id=\"{video_id}\" controls preload=\"metadata\" playsinline "
+            f"webkit-playsinline aria-label=\"Analysis video\">\n"
+            f"      <source src=\"{source_uri}\" type=\"{mime}\">\n"
+            f"    </video>\n"
+            f"  </div>\n"
+        )
+    elif show_video and not video_path:
+        st.warning("No video was provided to display alongside the metrics.")
 
     html(
         f"""
 <style>{css}</style>
 
-<div id="{wrapper_id}" style="{wrapper_style}">
-  <div class="vmx-video-box">
-    <video id="{video_id}" controls preload="metadata" playsinline webkit-playsinline aria-label="Analysis video">
-      <source src="{source_uri}" type="{mime}">
-    </video>
-  </div>
-  <div id="{plot_id}"></div>
+<div id="{wrapper_id}" class="{wrapper_class}" style="{wrapper_style}">
+{video_block}  <div id="{plot_id}" class="vmx-plot"></div>
 </div>
 
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>

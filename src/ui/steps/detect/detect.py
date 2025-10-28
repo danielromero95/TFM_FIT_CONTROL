@@ -8,7 +8,7 @@ import streamlit as st
 from src.core.types import ExerciseType
 from src.exercise_detection.exercise_detector import detect_exercise
 from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, safe_rerun
-from src.ui.video import render_uniform_video
+from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 from ..utils import step_container
 
 
@@ -38,28 +38,64 @@ def _detect_step() -> None:
 
         state = get_state()
         video_path = state.video_path
+        debug_requested = bool((state.configure_values or {}).get("debug_video", True))
 
-        # --- Video (con landmarks tras análisis): ancho completo, altura fija, sin margen inferior
-        video_to_show = str(video_path) if video_path else None
+        overlay_missing = False
+        overlay_source: str | None = None
 
-        # Si hay reporte y ruta de debug video, úsalo en lugar del original
-        report = getattr(state, "report", None)
-        debug_video_path = getattr(report, "debug_video_path", None) if report is not None else None
-        if debug_video_path:
-            try:
-                p = Path(str(debug_video_path))
-                if p.exists() and p.is_file():
-                    video_to_show = str(p)
-            except Exception:
-                # Fallback silencioso al vídeo original si el path no es válido
-                pass
+        if state.overlay_video_path:
+            candidate = Path(str(state.overlay_video_path))
+            if candidate.exists() and candidate.is_file():
+                overlay_source = str(candidate)
+            else:
+                overlay_missing = True
+
+        if overlay_source is None and state.step in (Step.RUNNING, Step.RESULTS):
+            report = getattr(state, "report", None)
+            candidate_value = None
+            if report is not None:
+                for attr in (
+                    "overlay_video_path",
+                    "overlay_video",
+                    "debug_video_path",
+                    "debug_video",
+                ):
+                    if hasattr(report, attr):
+                        value = getattr(report, attr)
+                        if value:
+                            candidate_value = value
+                            break
+            if candidate_value:
+                candidate_path = Path(str(candidate_value))
+                if candidate_path.exists() and candidate_path.is_file():
+                    overlay_source = str(candidate_path)
+                elif debug_requested:
+                    overlay_missing = True
+
+        base_video = str(video_path) if video_path else None
+        use_overlay = (
+            state.step in (Step.RUNNING, Step.RESULTS)
+            and overlay_source is not None
+        )
+        video_to_show = overlay_source if use_overlay else base_video
 
         if video_to_show:
             render_uniform_video(
                 video_to_show,
-                key="detect_video",
-                bottom_margin=0.0,
-                fixed_height_px=320,
+                key="detect_primary_video",
+                fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
+                bottom_margin=0.75,
+            )
+
+        if (
+            state.step == Step.RESULTS
+            and debug_requested
+            and overlay_source is None
+            and overlay_missing
+        ):
+            st.warning(
+                "Debug overlay video was not found. Showing the original upload instead.",
+                icon="⚠️",
             )
 
         # --- Valor actual desde AppState (NO tocar session_state de los widgets)

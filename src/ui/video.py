@@ -6,13 +6,14 @@ import mimetypes
 import inspect
 from base64 import b64encode
 from pathlib import Path
-from typing import BinaryIO, Union
+from typing import BinaryIO, Final, Union
 from uuid import uuid4
 
 import streamlit as st
 from streamlit.components.v1 import html
 
 VideoData = Union[str, bytes, BinaryIO]
+VIDEO_VIEWPORT_HEIGHT_PX: Final[int] = 400
 
 
 @st.cache_data(show_spinner=False)
@@ -108,7 +109,7 @@ def render_uniform_video(
     start_time: int = 0,
     key: str | None = None,
     bottom_margin: float = 1.25,
-    fixed_height_px: int | None = 400,
+    fixed_height_px: int | None = VIDEO_VIEWPORT_HEIGHT_PX,
 ) -> None:
     """Render ``data`` inside a viewport with fixed height and full width."""
 

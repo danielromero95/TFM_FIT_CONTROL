@@ -2,9 +2,14 @@
   const DATA = $DATA_JSON;
   const CFG  = $PLOT_CONFIG_JSON;
 
-  const video   = document.getElementById("$VIDEO_ID");
-  const plot    = document.getElementById("$PLOT_ID");
-  const wrapper = document.getElementById("$WRAPPER_ID");
+  const HAS_VIDEO = $HAS_VIDEO;
+  const videoId = "$VIDEO_ID";
+  const plotId = "$PLOT_ID";
+  const wrapperId = "$WRAPPER_ID";
+
+  const video   = HAS_VIDEO ? document.getElementById(videoId) : null;
+  const plot    = document.getElementById(plotId);
+  const wrapper = document.getElementById(wrapperId);
 
   const x = DATA.times.slice();
   const names = Object.keys(DATA.series || {});
@@ -46,6 +51,7 @@
 
   let lastT = -1;
   function updateCursorFromVideo() {
+    if (!video) return;
     const rawT = video.currentTime || 0;
     const frame = Math.max(0, Math.round(rawT * fps));
     const t = frame / fps;
@@ -55,34 +61,44 @@
     Plotly.relayout(plot, {"shapes[0].x0": xVal, "shapes[0].x1": xVal});
   }
 
-  ["timeupdate","seeked"].forEach((ev) => video.addEventListener(ev, updateCursorFromVideo));
-  video.addEventListener("loadedmetadata", () => {
-    if (Number.isFinite(DATA.startAt)) {
-      try { video.currentTime = Math.max(0, DATA.startAt); } catch (e) {}
-    }
+  if (video) {
+    ["timeupdate","seeked"].forEach((ev) => video.addEventListener(ev, updateCursorFromVideo));
+    video.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(DATA.startAt)) {
+        try { video.currentTime = Math.max(0, DATA.startAt); } catch (e) {}
+      }
+      updateCursorFromVideo();
+    });
     updateCursorFromVideo();
-  });
-  updateCursorFromVideo();
+  } else {
+    const initialX = x.length ? x[0] : 0;
+    Plotly.relayout(plot, {"shapes[0].x0": initialX, "shapes[0].x1": initialX});
+  }
 
   let rafId = null;
   function tick() {
+    if (!video) return;
     updateCursorFromVideo();
     if (!video.paused && !video.ended) { rafId = requestAnimationFrame(tick); }
   }
-  video.addEventListener("play",  () => { cancelAnimationFrame(rafId); tick(); });
-  video.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
-  video.addEventListener("ended", () => { cancelAnimationFrame(rafId); });
+  if (video) {
+    video.addEventListener("play",  () => { cancelAnimationFrame(rafId); tick(); });
+    video.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
+    video.addEventListener("ended", () => { cancelAnimationFrame(rafId); });
+  }
 
-  plot.on("plotly_click", (ev) => {
-    if (!ev || !ev.points || !ev.points.length) return;
-    const xClicked = ev.points[0].x;
-    const targetFrame = (DATA.x_mode === "time")
-      ? Math.max(0, Math.round(xClicked * fps))
-      : Math.max(0, Math.round(xClicked));
-    const newTime = targetFrame / fps;
-    try { video.currentTime = Math.max(0, newTime); video.pause(); updateCursorFromVideo(); }
-    catch (err) { console.warn("Seek error:", err); }
-  });
+  if (video) {
+    plot.on("plotly_click", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const xClicked = ev.points[0].x;
+      const targetFrame = (DATA.x_mode === "time")
+        ? Math.max(0, Math.round(xClicked * fps))
+        : Math.max(0, Math.round(xClicked));
+      const newTime = targetFrame / fps;
+      try { video.currentTime = Math.max(0, newTime); video.pause(); updateCursorFromVideo(); }
+      catch (err) { console.warn("Seek error:", err); }
+    });
+  }
 
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));
 

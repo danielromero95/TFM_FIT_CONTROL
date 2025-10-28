@@ -1,5 +1,7 @@
 /* Detect step styles (scoped) */
-.step--detect h3, .step--detect .stMarkdown h3 { margin-bottom: 0; }
+.step--detect { margin-top: .5rem; }
+.step--detect h3, .step--detect .stMarkdown h3 { margin-bottom: .35rem; }
+.step--detect h4 { margin-bottom: .35rem; }
 
 .step--detect iframe { margin-bottom: 0; }
 .step--detect .autodetect-btn { margin-top: 0; }
@@ -74,7 +76,12 @@
 
 /* Ajustes de layout dentro del step */
 .step--detect .form-label--inline { min-height: auto; }
-.step--detect [data-testid="stHorizontalBlock"] { margin-top: .2rem; align-items: center; }
+.step--detect [data-testid="stVerticalBlock"] { row-gap: .5rem; }
+.step--detect [data-testid="stHorizontalBlock"] {
+  margin-top: .2rem;
+  align-items: center;
+  column-gap: .5rem;
+}
 .step--detect [data-testid="column"] > div { margin-top: 0; padding-top: 0; }
 
 /* Selects BaseWeb sin margen superior adicional */

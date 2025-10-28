@@ -62,6 +62,7 @@ class AppState:
     preview_fps: float = float(DEFAULT_PREVIEW_FPS)
     preview_frame_count: int = 0
     preview_last_ts_ms: float = 0.0
+    overlay_video_path: Optional[str] = None
 
 
 def get_state() -> AppState:
@@ -108,6 +109,7 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.preview_fps = float(DEFAULT_PREVIEW_FPS)
     state.preview_frame_count = 0
     state.preview_last_ts_ms = 0.0
+    state.overlay_video_path = None
     state.exercise = DEFAULT_EXERCISE_LABEL
     state.exercise_pending_update = None
     state.view = ""

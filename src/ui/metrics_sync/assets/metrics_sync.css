@@ -1,4 +1,7 @@
 /* Streamlit video + plot wrapper */
+.vmx-wrapper { width: 100%; }
+.vmx-plot { width: 100%; }
+.vmx-wrapper--plot-only .vmx-video-box { display: none; }
 .vmx-video-box {
   position: relative;
   width: 100%;
