@@ -224,27 +224,22 @@ def _stream_pose_and_detection(
                     row.update({"crop_x1": np.nan, "crop_y1": np.nan, "crop_x2": np.nan, "crop_y2": np.nan})
 
                 if detection_extractor is not None and not detection_error:
-                    norm_landmarks: list[dict[str, float]] = []
-
                     def _coerce(value: Any) -> float:
                         try:
                             return float(value)
                         except (TypeError, ValueError):
                             return float("nan")
 
+                    arr = np.empty((33, 4), dtype=float)
                     for landmark_index in range(33):
-                        norm_landmarks.append(
-                            {
-                                "x": _coerce(row[f"x{landmark_index}"]),
-                                "y": _coerce(row[f"y{landmark_index}"]),
-                                "z": _coerce(row[f"z{landmark_index}"]),
-                                "visibility": _coerce(row[f"v{landmark_index}"]),
-                            }
-                        )
+                        arr[landmark_index, 0] = _coerce(row[f"x{landmark_index}"])
+                        arr[landmark_index, 1] = _coerce(row[f"y{landmark_index}"])
+                        arr[landmark_index, 2] = _coerce(row[f"z{landmark_index}"])
+                        arr[landmark_index, 3] = _coerce(row[f"v{landmark_index}"])
                     try:
                         detection_extractor.add_landmarks(
                             frame_idx,
-                            norm_landmarks,
+                            arr,
                             width,
                             height,
                             ts_ms,

@@ -248,12 +248,17 @@ class IncrementalExerciseFeatureExtractor:
     def add_landmarks(
         self,
         frame_idx: int,
-        landmarks: list[dict[str, float]],
+        landmarks: list[dict[str, float]] | "np.ndarray",
         width: int,
         height: int,
         ts_ms: float,
     ) -> None:
-        """Ingest pre-computed pose ``landmarks`` using the configured sampling stride."""
+        """Ingest pre-computed pose ``landmarks`` using the configured sampling stride.
+
+        Accepts either:
+        - list[dict]: 33 entries with {'x','y','z','visibility'}
+        - np.ndarray: shape (33,4) with columns [x,y,z,visibility]
+        """
 
         del width, height, ts_ms  # these values are not required for feature extraction
 
@@ -265,37 +270,45 @@ class IncrementalExerciseFeatureExtractor:
             return
 
         feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers
-        def _coerce(value: Any, default: float = float("nan")) -> float:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return float(default)
+        # --- Vectorized normalization into (33,4) [x,y,z,visibility] ---
+        arr: "np.ndarray | None" = None
+        if isinstance(landmarks, np.ndarray):
+            a = np.asarray(landmarks, dtype=float)
+            if a.ndim == 2 and a.shape[0] >= 33 and a.shape[1] >= 3:
+                if a.shape[1] >= 4:
+                    arr = np.array(a[:33, :4], dtype=float, copy=True)
+                else:
+                    coords = np.array(a[:33, :3], dtype=float, copy=True)
+                    vis = np.full((33, 1), np.nan, dtype=float)
+                    arr = np.concatenate([coords, vis], axis=1)
 
-        processed_landmarks: list[dict[str, float]] = []
-        for index in range(33):
-            entry: Optional[dict[str, float]]
-            if 0 <= index < len(landmarks) and isinstance(landmarks[index], dict):
-                entry = landmarks[index]
-            else:
-                entry = None
+        if arr is None:
+            # Fallback: build array from list[dict] once, but avoid creating nested dicts
+            def _coerce(value: Any, default: float = float("nan")) -> float:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return float(default)
 
-            visibility = _coerce(entry.get("visibility") if entry else 0.0, 0.0)
-            if not np.isfinite(visibility) or visibility < self._min_visibility:
-                processed_landmarks.append(
-                    {"x": float("nan"), "y": float("nan"), "z": float("nan"), "visibility": visibility}
-                )
-                continue
+            xs = np.empty(33, dtype=float)
+            ys = np.empty(33, dtype=float)
+            zs = np.empty(33, dtype=float)
+            vs = np.empty(33, dtype=float)
+            for i in range(33):
+                entry = landmarks[i] if (0 <= i < len(landmarks)) and isinstance(landmarks[i], dict) else None
+                xs[i] = _coerce(entry.get("x") if entry else float("nan"))
+                ys[i] = _coerce(entry.get("y") if entry else float("nan"))
+                zs[i] = _coerce(entry.get("z") if entry else float("nan"))
+                vs[i] = _coerce(entry.get("visibility") if entry else 0.0, 0.0)
+            arr = np.column_stack((xs, ys, zs, vs))
 
-            processed_landmarks.append(
-                {
-                    "x": _coerce(entry.get("x") if entry else float("nan")),
-                    "y": _coerce(entry.get("y") if entry else float("nan")),
-                    "z": _coerce(entry.get("z") if entry else float("nan")),
-                    "visibility": visibility,
-                }
-            )
+        # Apply min_visibility masking on coordinates (leave visibility as-is for debugging)
+        vis = arr[:, 3]
+        mask = ~(np.isfinite(vis) & (vis >= self._min_visibility))
+        arr[:, :3][mask] = np.nan
+
         try:
-            feature_values = _build_features_from_landmarks(processed_landmarks)
+            feature_values = _build_features_from_landmark_array(arr)
         except ValueError:
             for buffer in feature_lists.values():
                 buffer.append(float("nan"))
@@ -644,33 +657,13 @@ def _process_frame(
     return has_finite
 
 
-def _build_features_from_landmarks(landmarks: list[dict[str, float]]) -> dict[str, float]:
-    """Compute the detection features from a MediaPipe-like landmark list."""
+def _features_from_coords(coords: "np.ndarray") -> dict[str, float]:
+    """Compute detection features from a (33,3) coords array with NaNs for invalid XY/Z."""
 
-    if len(landmarks) < 33:
-        raise ValueError(f"Expected 33 pose landmarks, received {len(landmarks)}")
+    if coords is None or not isinstance(coords, np.ndarray) or coords.shape[0] < 33 or coords.shape[1] < 3:
+        raise ValueError("Expected coords with shape (33,3)")
 
-    coords = np.empty((33, 3), dtype=float)
-
-    def _safe_float(value: Any, default: float = float("nan")) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return float(default)
-
-    for index in range(33):
-        raw_entry = landmarks[index] if index < len(landmarks) else None
-        entry = raw_entry if isinstance(raw_entry, dict) else {}
-        x_val = _safe_float(entry.get("x"))
-        y_val = _safe_float(entry.get("y"))
-        z_val = _safe_float(entry.get("z"))
-
-        coords[index] = np.array([x_val, y_val, z_val], dtype=float)
-        if not np.isfinite(x_val) or not np.isfinite(y_val):
-            coords[index, 0] = float("nan")
-            coords[index, 1] = float("nan")
-        if not np.isfinite(z_val):
-            coords[index, 2] = float("nan")
+    coords = np.asarray(coords, dtype=float)
 
     left_hip = coords[_POSE_LANDMARK_INDEX["LEFT_HIP"]]
     right_hip = coords[_POSE_LANDMARK_INDEX["RIGHT_HIP"]]
@@ -728,6 +721,48 @@ def _build_features_from_landmarks(landmarks: list[dict[str, float]]) -> dict[st
     }
 
     return features
+
+
+def _build_features_from_landmark_array(landmarks_arr: "np.ndarray") -> dict[str, float]:
+    """Fast-path: accept (33,4) or (33,3) array → compute features."""
+
+    arr = np.asarray(landmarks_arr, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] < 33 or arr.shape[1] < 3:
+        raise ValueError(f"Expected landmark array with shape (33,3/4), got {arr.shape}")
+    coords = arr[:33, :3].copy()
+    coords[~np.isfinite(coords)] = float("nan")
+    return _features_from_coords(coords)
+
+
+def _build_features_from_landmarks(landmarks: list[dict[str, float]]) -> dict[str, float]:
+    """Compute the detection features from a MediaPipe-like landmark list."""
+
+    if len(landmarks) < 33:
+        raise ValueError(f"Expected 33 pose landmarks, received {len(landmarks)}")
+
+    coords = np.empty((33, 3), dtype=float)
+
+    def _safe_float(value: Any, default: float = float("nan")) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    for index in range(33):
+        raw_entry = landmarks[index] if index < len(landmarks) else None
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        x_val = _safe_float(entry.get("x"))
+        y_val = _safe_float(entry.get("y"))
+        z_val = _safe_float(entry.get("z"))
+
+        coords[index] = np.array([x_val, y_val, z_val], dtype=float)
+        if not np.isfinite(x_val) or not np.isfinite(y_val):
+            coords[index, 0] = float("nan")
+            coords[index, 1] = float("nan")
+        if not np.isfinite(z_val):
+            coords[index, 2] = float("nan")
+
+    return _features_from_coords(coords)
 
 
 def _append_nan(feature_lists: Dict[str, list[float]]) -> None:
