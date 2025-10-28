@@ -26,8 +26,11 @@ def _running_step() -> None:
     with step_container("running"):
         st.markdown("### 4. Running the analysis")
         progress_queue = get_progress_queue()
-        preview_placeholder = st.empty()
-        preview_stats_placeholder = st.empty()
+
+        # Live preview (debug) apagado por defecto.
+        SHOW_LIVE_PREVIEW = False
+        preview_placeholder = st.empty() if SHOW_LIVE_PREVIEW else None
+        preview_stats_placeholder = st.empty() if SHOW_LIVE_PREVIEW else None
 
         def _drain_progress_queue() -> None:
             while True:
@@ -96,45 +99,51 @@ def _running_step() -> None:
             state.cfg_fingerprint = None
             state.progress_value_from_cb = 0
             state.phase_text_from_cb = phase_for(0, debug_enabled=debug_enabled)
+            # Asegura que el estado de preview arranca deshabilitado
             state.preview_enabled = False
             state.preview_frame_count = 0
             state.preview_last_ts_ms = 0.0
 
             _drain_progress_queue()
 
+            # Define callback solo si queremos mostrar preview en vivo
             def _preview_callback(frame_bgr, frame_idx: int, ts_ms: float) -> None:
+                if not SHOW_LIVE_PREVIEW:
+                    return
                 try:
                     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 except Exception:
                     frame_rgb = frame_bgr
                 try:
-                    preview_placeholder.image(
-                        frame_rgb, use_container_width=True, channels="RGB"
-                    )
+                    if preview_placeholder is not None:
+                        preview_placeholder.image(
+                            frame_rgb, width="stretch", channels="RGB"
+                        )
                     seconds = ts_ms / 1000.0 if ts_ms else 0.0
                     fps_display = (frame_idx + 1) / seconds if seconds > 0 else 0.0
-                    preview_stats_placeholder.caption(
-                        f"Frame {frame_idx + 1} • {fps_display:.1f} FPS"
-                    )
+                    if preview_stats_placeholder is not None:
+                        preview_stats_placeholder.caption(
+                            f"Frame {frame_idx + 1} • {fps_display:.1f} FPS"
+                        )
                     state_ref = get_state()
                     state_ref.preview_frame_count = frame_idx + 1
                     state_ref.preview_last_ts_ms = float(ts_ms)
                 except Exception:
                     pass
 
-            preview_fps_value = getattr(
-                getattr(cfg, "debug", object()), "preview_fps", state.preview_fps
-            )
+            preview_fps_value = getattr(getattr(cfg, "debug", object()), "preview_fps", state.preview_fps)
             handle = start_run(
                 video_path=video_path,
                 cfg=cfg,
                 prefetched_detection=prefetched_detection,
                 debug_enabled=debug_enabled,
-                preview_callback=_preview_callback,
-                preview_fps=preview_fps_value,
+                # No enviar callback si el preview está desactivado
+                preview_callback=(_preview_callback if SHOW_LIVE_PREVIEW else None),
+                preview_fps=(preview_fps_value if SHOW_LIVE_PREVIEW else None),
             )
-            state.preview_enabled = True
-            state.preview_fps = float(preview_fps_value or state.preview_fps)
+            state.preview_enabled = bool(SHOW_LIVE_PREVIEW)
+            if SHOW_LIVE_PREVIEW:
+                state.preview_fps = float(preview_fps_value or state.preview_fps)
             state.run_id = handle.run_id
             state.analysis_future = handle.future
             try:
@@ -166,12 +175,18 @@ def _running_step() -> None:
 
             while future and not future.done():
                 state = get_state()
-                if state.preview_enabled and state.preview_frame_count and state.preview_last_ts_ms:
+                if (
+                    SHOW_LIVE_PREVIEW
+                    and state.preview_enabled
+                    and state.preview_frame_count
+                    and state.preview_last_ts_ms
+                ):
                     seconds = state.preview_last_ts_ms / 1000.0 if state.preview_last_ts_ms else 0.0
                     fps_display = state.preview_frame_count / seconds if seconds > 0 else 0.0
-                    preview_stats_placeholder.caption(
-                        f"Frame {state.preview_frame_count} • {fps_display:.1f} FPS"
-                    )
+                    if preview_stats_placeholder is not None:
+                        preview_stats_placeholder.caption(
+                            f"Frame {state.preview_frame_count} • {fps_display:.1f} FPS"
+                        )
                 if state.run_id is None:
                     state.report = None
                     state.count_path = None
