@@ -12,9 +12,25 @@ import cv2
 import numpy as np
 from scipy.signal import find_peaks, savgol_filter
 
+from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 
 logger = logging.getLogger(__name__)
+
+_POSE_LANDMARK_INDEX = {
+    "LEFT_HIP": 23,
+    "RIGHT_HIP": 24,
+    "LEFT_KNEE": 25,
+    "RIGHT_KNEE": 26,
+    "LEFT_ANKLE": 27,
+    "RIGHT_ANKLE": 28,
+    "LEFT_SHOULDER": 11,
+    "RIGHT_SHOULDER": 12,
+    "LEFT_ELBOW": 13,
+    "RIGHT_ELBOW": 14,
+    "LEFT_WRIST": 15,
+    "RIGHT_WRIST": 16,
+}
 
 # --- Tunable thresholds -------------------------------------------------------
 
@@ -141,11 +157,25 @@ class IncrementalExerciseFeatureExtractor:
         target_fps: float,
         source_fps: float,
         max_frames: int = 300,
+        min_visibility: Optional[float] = None,
     ) -> None:
+        """Create an incremental extractor configured for streaming pose landmarks.
+
+        Args:
+            target_fps: Desired sampling frequency for feature extraction.
+            source_fps: Estimated frame rate of the incoming sequence.
+            max_frames: Maximum number of sampled frames to retain.
+            min_visibility: Minimum landmark visibility required to accept coordinates.
+        """
         self.target_fps = max(float(target_fps or 0.0), 0.1)
         self.source_fps = float(source_fps or 0.0)
         self.max_frames = max(1, int(max_frames))
         self._stride = self._compute_stride()
+        self._min_visibility = float(
+            min_visibility
+            if (min_visibility is not None)
+            else DEFAULT_LANDMARK_MIN_VISIBILITY
+        )
         self._pose = None
         self._pose_landmark = None
         self._feature_buffers: Dict[str, _FeatureBuffer] = {
@@ -153,6 +183,8 @@ class IncrementalExerciseFeatureExtractor:
         }
         self._samples = 0
         self._valid_samples = 0
+        self._frames_considered = 0
+        self._frames_accepted = 0
         self._initialised = False
         self._done = False
 
@@ -187,6 +219,7 @@ class IncrementalExerciseFeatureExtractor:
     def add_frame(self, frame_idx: int, frame: np.ndarray, ts_ms: float) -> None:
         """Optionally sample ``frame`` and update the incremental feature buffers."""
 
+        self._frames_considered += 1
         if self._done or frame_idx % self._stride != 0:
             return
         if self._samples >= self.max_frames:
@@ -197,19 +230,100 @@ class IncrementalExerciseFeatureExtractor:
         assert self._pose is not None and self._pose_landmark is not None  # for type checkers
 
         feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers
-        valid = _process_frame(frame, self._pose, self._pose_landmark, feature_lists)
+        valid = _process_frame(
+            frame,
+            self._pose,
+            self._pose_landmark,
+            feature_lists,
+            min_visibility=self._min_visibility,
+        )
         self._samples += 1
         if valid:
             self._valid_samples += 1
+            self._frames_accepted += 1
         if not valid:
             # ``_append_nan`` was already called by ``_process_frame``.
             pass
+
+    def add_landmarks(
+        self,
+        frame_idx: int,
+        landmarks: list[dict[str, float]],
+        width: int,
+        height: int,
+        ts_ms: float,
+    ) -> None:
+        """Ingest pre-computed pose ``landmarks`` using the configured sampling stride."""
+
+        del width, height, ts_ms  # these values are not required for feature extraction
+
+        self._frames_considered += 1
+        if self._done or frame_idx % self._stride != 0:
+            return
+        if self._samples >= self.max_frames:
+            self._done = True
+            return
+
+        feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers
+        def _coerce(value: Any, default: float = float("nan")) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
+        processed_landmarks: list[dict[str, float]] = []
+        for index in range(33):
+            entry: Optional[dict[str, float]]
+            if 0 <= index < len(landmarks) and isinstance(landmarks[index], dict):
+                entry = landmarks[index]
+            else:
+                entry = None
+
+            visibility = _coerce(entry.get("visibility") if entry else 0.0, 0.0)
+            if not np.isfinite(visibility) or visibility < self._min_visibility:
+                processed_landmarks.append(
+                    {"x": float("nan"), "y": float("nan"), "z": float("nan"), "visibility": visibility}
+                )
+                continue
+
+            processed_landmarks.append(
+                {
+                    "x": _coerce(entry.get("x") if entry else float("nan")),
+                    "y": _coerce(entry.get("y") if entry else float("nan")),
+                    "z": _coerce(entry.get("z") if entry else float("nan")),
+                    "visibility": visibility,
+                }
+            )
+        try:
+            feature_values = _build_features_from_landmarks(processed_landmarks)
+        except ValueError:
+            for buffer in feature_lists.values():
+                buffer.append(float("nan"))
+            self._samples += 1
+            return
+
+        for name in FEATURE_NAMES:
+            feature_lists[name].append(float(feature_values.get(name, float("nan"))))
+
+        self._samples += 1
+        has_finite = any(
+            np.isfinite(feature_values.get(name, float("nan"))) for name in FEATURE_NAMES
+        )
+        if has_finite:
+            self._valid_samples += 1
+            self._frames_accepted += 1
 
     def finalize(self) -> DetectionResult:
         """Close resources and classify the aggregated feature series."""
 
         try:
-            if not self._initialised or self._samples == 0:
+            logger.info(
+                "detector.incremental: samples=%d accepted=%d sr=%.2f",
+                self._samples,
+                self._valid_samples,
+                self._effective_sampling_rate(),
+            )
+            if self._samples == 0:
                 return DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
 
             data = {name: buf.to_array() for name, buf in self._feature_buffers.items()}
@@ -480,6 +594,8 @@ def _process_frame(
     pose: Any,
     pose_landmark: Any,
     feature_lists: Dict[str, list[float]],
+    *,
+    min_visibility: float = DEFAULT_LANDMARK_MIN_VISIBILITY,
 ) -> bool:
     """Run pose detection on a frame and append measurements to ``feature_lists``."""
 
@@ -490,84 +606,128 @@ def _process_frame(
         _append_nan(feature_lists)
         return False
 
-    landmarks = results.pose_landmarks.landmark
+    del pose_landmark  # MediaPipe indices are not required when reusing normalized landmarks
 
-    def pt(index: int) -> np.ndarray:
-        landmark = landmarks[index]
-        return np.array([landmark.x, landmark.y, landmark.z], dtype=float)
+    mp_landmarks = results.pose_landmarks.landmark
+    landmark_dicts: list[dict[str, float]] = []
 
-    left_hip = pt(pose_landmark.LEFT_HIP.value)
-    right_hip = pt(pose_landmark.RIGHT_HIP.value)
-    left_knee = pt(pose_landmark.LEFT_KNEE.value)
-    right_knee = pt(pose_landmark.RIGHT_KNEE.value)
-    left_ankle = pt(pose_landmark.LEFT_ANKLE.value)
-    right_ankle = pt(pose_landmark.RIGHT_ANKLE.value)
-    left_shoulder = pt(pose_landmark.LEFT_SHOULDER.value)
-    right_shoulder = pt(pose_landmark.RIGHT_SHOULDER.value)
-    left_elbow = pt(pose_landmark.LEFT_ELBOW.value)
-    right_elbow = pt(pose_landmark.RIGHT_ELBOW.value)
-    left_wrist = pt(pose_landmark.LEFT_WRIST.value)
-    right_wrist = pt(pose_landmark.RIGHT_WRIST.value)
+    def _coerce(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    for landmark in mp_landmarks:
+        visibility = _coerce(getattr(landmark, "visibility", 0.0))
+        x_val = _coerce(getattr(landmark, "x", float("nan")))
+        y_val = _coerce(getattr(landmark, "y", float("nan")))
+        z_val = _coerce(getattr(landmark, "z", float("nan")))
+
+        if not np.isfinite(visibility) or visibility < min_visibility:
+            x_val = float("nan")
+            y_val = float("nan")
+            z_val = float("nan")
+
+        landmark_dicts.append(
+            {"x": x_val, "y": y_val, "z": z_val, "visibility": visibility}
+        )
+
+    feature_values = _build_features_from_landmarks(landmark_dicts)
+
+    has_finite = False
+    for name in FEATURE_NAMES:
+        value = float(feature_values.get(name, float("nan")))
+        feature_lists[name].append(value)
+        if not has_finite and np.isfinite(value):
+            has_finite = True
+
+    return has_finite
+
+
+def _build_features_from_landmarks(landmarks: list[dict[str, float]]) -> dict[str, float]:
+    """Compute the detection features from a MediaPipe-like landmark list."""
+
+    if len(landmarks) < 33:
+        raise ValueError(f"Expected 33 pose landmarks, received {len(landmarks)}")
+
+    coords = np.empty((33, 3), dtype=float)
+
+    def _safe_float(value: Any, default: float = float("nan")) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    for index in range(33):
+        raw_entry = landmarks[index] if index < len(landmarks) else None
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        x_val = _safe_float(entry.get("x"))
+        y_val = _safe_float(entry.get("y"))
+        z_val = _safe_float(entry.get("z"))
+
+        coords[index] = np.array([x_val, y_val, z_val], dtype=float)
+        if not np.isfinite(x_val) or not np.isfinite(y_val):
+            coords[index, 0] = float("nan")
+            coords[index, 1] = float("nan")
+        if not np.isfinite(z_val):
+            coords[index, 2] = float("nan")
+
+    left_hip = coords[_POSE_LANDMARK_INDEX["LEFT_HIP"]]
+    right_hip = coords[_POSE_LANDMARK_INDEX["RIGHT_HIP"]]
+    left_knee = coords[_POSE_LANDMARK_INDEX["LEFT_KNEE"]]
+    right_knee = coords[_POSE_LANDMARK_INDEX["RIGHT_KNEE"]]
+    left_ankle = coords[_POSE_LANDMARK_INDEX["LEFT_ANKLE"]]
+    right_ankle = coords[_POSE_LANDMARK_INDEX["RIGHT_ANKLE"]]
+    left_shoulder = coords[_POSE_LANDMARK_INDEX["LEFT_SHOULDER"]]
+    right_shoulder = coords[_POSE_LANDMARK_INDEX["RIGHT_SHOULDER"]]
+    left_elbow = coords[_POSE_LANDMARK_INDEX["LEFT_ELBOW"]]
+    right_elbow = coords[_POSE_LANDMARK_INDEX["RIGHT_ELBOW"]]
+    left_wrist = coords[_POSE_LANDMARK_INDEX["LEFT_WRIST"]]
+    right_wrist = coords[_POSE_LANDMARK_INDEX["RIGHT_WRIST"]]
 
     hip_mid = (left_hip + right_hip) / 2.0
     shoulder_mid = (left_shoulder + right_shoulder) / 2.0
-
-    feature_lists["knee_angle_left"].append(
-        _angle_degrees(left_hip, left_knee, left_ankle)
-    )
-    feature_lists["knee_angle_right"].append(
-        _angle_degrees(right_hip, right_knee, right_ankle)
-    )
-    feature_lists["hip_angle_left"].append(
-        _angle_degrees(left_shoulder, left_hip, left_knee)
-    )
-    feature_lists["hip_angle_right"].append(
-        _angle_degrees(right_shoulder, right_hip, right_knee)
-    )
-    feature_lists["elbow_angle_left"].append(
-        _angle_degrees(left_shoulder, left_elbow, left_wrist)
-    )
-    feature_lists["elbow_angle_right"].append(
-        _angle_degrees(right_shoulder, right_elbow, right_wrist)
-    )
-    feature_lists["shoulder_angle_left"].append(
-        _angle_degrees(left_hip, left_shoulder, left_elbow)
-    )
-    feature_lists["shoulder_angle_right"].append(
-        _angle_degrees(right_hip, right_shoulder, right_elbow)
-    )
-
-    pelvis_y = float((left_hip[1] + right_hip[1]) / 2.0)
-    feature_lists["pelvis_y"].append(pelvis_y)
-
-    feature_lists["wrist_left_x"].append(float(left_wrist[0]))
-    feature_lists["wrist_left_y"].append(float(left_wrist[1]))
-    feature_lists["wrist_right_x"].append(float(right_wrist[0]))
-    feature_lists["wrist_right_y"].append(float(right_wrist[1]))
 
     shoulder_width = float(np.linalg.norm(left_shoulder[:2] - right_shoulder[:2]))
     torso_left = float(np.linalg.norm(left_shoulder[:2] - left_hip[:2]))
     torso_right = float(np.linalg.norm(right_shoulder[:2] - right_hip[:2]))
     torso_length = (torso_left + torso_right) / 2.0
-    feature_lists["torso_length"].append(float(torso_length))
+
     norm_width = shoulder_width / (torso_length + 1e-6)
-    feature_lists["shoulder_width_norm"].append(norm_width)
 
     ankle_width = float(np.linalg.norm(left_ankle[:2] - right_ankle[:2]))
     ankle_width_norm = ankle_width / (torso_length + 1e-6)
-    feature_lists["ankle_width_norm"].append(ankle_width_norm)
 
     dx = abs(float(left_shoulder[0] - right_shoulder[0]))
     dz = abs(float(left_shoulder[2] - right_shoulder[2]))
     yaw_deg = math.degrees(math.atan2(dz, dx + 1e-6))
-    feature_lists["shoulder_yaw_deg"].append(float(yaw_deg))
-    feature_lists["shoulder_z_delta_abs"].append(float(dz))
 
     torso_vec = shoulder_mid - hip_mid
     tilt = math.degrees(math.atan2(abs(torso_vec[0]), abs(torso_vec[1]) + 1e-6))
-    feature_lists["torso_tilt_deg"].append(float(tilt))
 
-    return True
+    features = {
+        "knee_angle_left": _angle_degrees(left_hip, left_knee, left_ankle),
+        "knee_angle_right": _angle_degrees(right_hip, right_knee, right_ankle),
+        "hip_angle_left": _angle_degrees(left_shoulder, left_hip, left_knee),
+        "hip_angle_right": _angle_degrees(right_shoulder, right_hip, right_knee),
+        "elbow_angle_left": _angle_degrees(left_shoulder, left_elbow, left_wrist),
+        "elbow_angle_right": _angle_degrees(right_shoulder, right_elbow, right_wrist),
+        "shoulder_angle_left": _angle_degrees(left_hip, left_shoulder, left_elbow),
+        "shoulder_angle_right": _angle_degrees(right_hip, right_shoulder, right_elbow),
+        "pelvis_y": float((left_hip[1] + right_hip[1]) / 2.0),
+        "torso_length": float(torso_length),
+        "wrist_left_x": float(left_wrist[0]),
+        "wrist_left_y": float(left_wrist[1]),
+        "wrist_right_x": float(right_wrist[0]),
+        "wrist_right_y": float(right_wrist[1]),
+        "shoulder_width_norm": float(norm_width),
+        "shoulder_yaw_deg": float(yaw_deg),
+        "shoulder_z_delta_abs": float(dz),
+        "torso_tilt_deg": float(tilt),
+        "ankle_width_norm": float(ankle_width_norm),
+    }
+
+    return features
 
 
 def _append_nan(feature_lists: Dict[str, list[float]]) -> None:

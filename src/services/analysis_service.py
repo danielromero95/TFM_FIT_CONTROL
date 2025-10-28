@@ -15,7 +15,10 @@ import pandas as pd
 
 from src import config
 from src.config.constants import MIN_DETECTION_CONFIDENCE
-from src.config.settings import DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS
+from src.config.settings import (
+    DEFAULT_LANDMARK_MIN_VISIBILITY,
+    DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS,
+)
 from src.A_preprocessing.frame_extraction import (
     extract_and_preprocess_frames,
     extract_processed_frames_stream,
@@ -112,6 +115,7 @@ def _stream_pose_and_detection(
             target_fps=float(detection_target_fps),
             source_fps=detection_ts_fps,
             max_frames=300,
+            min_visibility=min_visibility,
         )
 
     preview_active = bool(preview_callback)
@@ -144,7 +148,11 @@ def _stream_pose_and_detection(
         else (CroppedPoseEstimator if getattr(cfg.pose, "use_crop", False) else PoseEstimator)
     )
 
-    min_visibility = 0.5
+    min_visibility = (
+        float(getattr(cfg.debug, "min_visibility", DEFAULT_LANDMARK_MIN_VISIBILITY))
+        if hasattr(cfg, "debug")
+        else float(DEFAULT_LANDMARK_MIN_VISIBILITY)
+    )
 
     try:
         with estimator_cls(min_detection_confidence=MIN_DETECTION_CONFIDENCE) as estimator:
@@ -159,13 +167,6 @@ def _stream_pose_and_detection(
                 )
                 emit_preview = preview_active and (frame_idx % stride_preview == 0)
                 overlay_points_needed = emit_preview or debug_video_path is not None
-
-                if detection_extractor is not None and not detection_error:
-                    try:
-                        detection_extractor.add_frame(frame_idx, frame, ts_ms)
-                    except Exception:  # pragma: no cover - best effort guard
-                        logger.exception("Automatic exercise detection failed during streaming")
-                        detection_error = True
 
                 landmarks, _annotated, crop_box = estimator.estimate(frame)
                 row: dict[str, float] = {"frame_idx": int(frame_idx)}
@@ -221,6 +222,36 @@ def _stream_pose_and_detection(
                         row[f"z{landmark_index}"] = np.nan
                         row[f"v{landmark_index}"] = np.nan
                     row.update({"crop_x1": np.nan, "crop_y1": np.nan, "crop_x2": np.nan, "crop_y2": np.nan})
+
+                if detection_extractor is not None and not detection_error:
+                    norm_landmarks: list[dict[str, float]] = []
+
+                    def _coerce(value: Any) -> float:
+                        try:
+                            return float(value)
+                        except (TypeError, ValueError):
+                            return float("nan")
+
+                    for landmark_index in range(33):
+                        norm_landmarks.append(
+                            {
+                                "x": _coerce(row[f"x{landmark_index}"]),
+                                "y": _coerce(row[f"y{landmark_index}"]),
+                                "z": _coerce(row[f"z{landmark_index}"]),
+                                "visibility": _coerce(row[f"v{landmark_index}"]),
+                            }
+                        )
+                    try:
+                        detection_extractor.add_landmarks(
+                            frame_idx,
+                            norm_landmarks,
+                            width,
+                            height,
+                            ts_ms,
+                        )
+                    except Exception:  # pragma: no cover - best effort guard
+                        logger.exception("Automatic exercise detection failed during streaming")
+                        detection_error = True
 
                 rows.append(row)
 

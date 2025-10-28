@@ -25,6 +25,7 @@ from .settings import (
     DEFAULT_GENERATE_VIDEO,
     DEFAULT_DEBUG_MODE,
     DEFAULT_PREVIEW_FPS,
+    DEFAULT_LANDMARK_MIN_VISIBILITY,
 )
 
 
@@ -71,6 +72,7 @@ class DebugConfig:
     generate_debug_video: bool = DEFAULT_GENERATE_VIDEO
     debug_mode: bool = DEFAULT_DEBUG_MODE
     preview_fps: float = DEFAULT_PREVIEW_FPS
+    min_visibility: float = DEFAULT_LANDMARK_MIN_VISIBILITY
 
 
 @dataclass
