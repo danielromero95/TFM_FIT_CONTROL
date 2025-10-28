@@ -56,7 +56,7 @@ def _detect_step() -> None:
 
         # --- Auto-Detect (actualiza AppState y NO st.session_state de los widgets)
         st.markdown('<div class="autodetect-btn">', unsafe_allow_html=True)
-        autodetect_clicked = st.button("Auto-Detect", key="btn_autodetect", use_container_width=True)
+        autodetect_clicked = st.button("Auto-Detect", key="btn_autodetect", width='stretch')
         st.markdown("</div>", unsafe_allow_html=True)
 
         if autodetect_clicked:
@@ -139,7 +139,7 @@ def _detect_step() -> None:
         st.markdown('<div class="app-nav-buttons">', unsafe_allow_html=True)
         back_col, continue_col = st.columns(2, gap="small")
         with back_col:
-            if st.button("Back", key="detect_back", use_container_width=True):
+            if st.button("Back", key="detect_back", width='stretch'):
                 state.detect_result = None
                 go_to(Step.UPLOAD)
                 safe_rerun()
@@ -148,7 +148,7 @@ def _detect_step() -> None:
             if st.button(
                 "Continue",
                 key="detect_continue",
-                use_container_width=True,
+                width='stretch',
                 disabled=not can_continue,
             ):
                 go_to(Step.CONFIGURE)

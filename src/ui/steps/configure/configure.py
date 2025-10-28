@@ -101,7 +101,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                     "Back",
                     key="configure_back",
                     disabled=run_active,
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     go_to(Step.DETECT)
             with col_forward:
@@ -109,7 +109,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                     "Continue",
                     key="configure_continue",
                     disabled=run_active,
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     state.configure_values = current_values
                     go_to(Step.RUNNING)
