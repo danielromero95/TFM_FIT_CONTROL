@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Tuple
+from pathlib import Path
 
 import streamlit as st
 
@@ -38,13 +39,27 @@ def _detect_step() -> None:
         state = get_state()
         video_path = state.video_path
 
-        # --- Video: ancho completo, altura fija más pequeña y sin espacio inferior
-        if video_path:
+        # --- Video (con landmarks tras análisis): ancho completo, altura fija, sin margen inferior
+        video_to_show = str(video_path) if video_path else None
+
+        # Si hay reporte y ruta de debug video, úsalo en lugar del original
+        report = getattr(state, "report", None)
+        debug_video_path = getattr(report, "debug_video_path", None) if report is not None else None
+        if debug_video_path:
+            try:
+                p = Path(str(debug_video_path))
+                if p.exists() and p.is_file():
+                    video_to_show = str(p)
+            except Exception:
+                # Fallback silencioso al vídeo original si el path no es válido
+                pass
+
+        if video_to_show:
             render_uniform_video(
-                str(video_path),
+                video_to_show,
                 key="detect_video",
                 bottom_margin=0.0,
-                fixed_height_px=320,  # ↓ antes 400
+                fixed_height_px=320,
             )
 
         # --- Valor actual desde AppState (NO tocar session_state de los widgets)
