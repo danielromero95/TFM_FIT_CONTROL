@@ -1,3 +1,34 @@
+/* Unified step rhythm */
+.step {
+  margin: 0 0 var(--fc-gap-sm);
+  padding-top: 0;
+}
+.step:last-of-type {
+  margin-bottom: 0;
+}
+.step h3, .step .stMarkdown h3 {
+  margin-top: 0 !important;
+}
+
+/* First step in each column starts flush with the top */
+[data-testid="stHorizontalBlock"] > [data-testid="column"] > div:first-child,
+[data-testid="column"] > div:first-child .step {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Streamlit sometimes nests extra blocks; flatten the very first one */
+[data-testid="column"] [data-testid="stVerticalBlock"] > div:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Inside any .step, ensure the first inner block doesn't reintroduce space */
+.step [data-testid="stVerticalBlock"] > div:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
 .form-label {
   color: var(--fc-text-1);
   font-weight: 600;

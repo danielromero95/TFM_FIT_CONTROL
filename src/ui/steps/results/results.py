@@ -110,8 +110,8 @@ def _compute_rep_intervals(
 
 def _results_panel() -> Dict[str, bool]:
     with step_container("results"):
-        st.markdown('<div class="results-panel">', unsafe_allow_html=True)
         st.markdown("### 5. Results")
+        st.markdown('<div class="results-panel">', unsafe_allow_html=True)
 
         actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
