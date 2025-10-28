@@ -109,8 +109,13 @@ def _stream_pose_and_detection(
     detection_source_fps = float(detection_source_fps or 0.0)
     detection_ts_fps = detection_source_fps if detection_source_fps > 0 else detection_target_fps
 
-    detection_extractor: Optional[IncrementalExerciseFeatureExtractor]
-    detection_extractor = None
+    # Resolve min_visibility before constructing the incremental detector so overrides are honored
+    min_visibility = (
+        float(getattr(cfg.debug, "min_visibility", DEFAULT_LANDMARK_MIN_VISIBILITY))
+        if hasattr(cfg, "debug")
+        else float(DEFAULT_LANDMARK_MIN_VISIBILITY)
+    )
+    detection_extractor: Optional[IncrementalExerciseFeatureExtractor] = None
     if detection_enabled:
         detection_extractor = IncrementalExerciseFeatureExtractor(
             target_fps=float(detection_target_fps),
@@ -147,12 +152,6 @@ def _stream_pose_and_detection(
         RoiPoseEstimator
         if (getattr(cfg.pose, "use_crop", False) and getattr(cfg.pose, "use_roi_tracking", False))
         else (CroppedPoseEstimator if getattr(cfg.pose, "use_crop", False) else PoseEstimator)
-    )
-
-    min_visibility = (
-        float(getattr(cfg.debug, "min_visibility", DEFAULT_LANDMARK_MIN_VISIBILITY))
-        if hasattr(cfg, "debug")
-        else float(DEFAULT_LANDMARK_MIN_VISIBILITY)
     )
 
     try:
