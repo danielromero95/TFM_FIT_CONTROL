@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config.settings import configure_environment
 from src.ui.assets import inject_css, inject_js
+from src.ui.debug.spacing_probe import inject_spacing_probe
 from src.ui.state import AppState, Step, get_state, go_to, reset_state, safe_rerun
 from src.ui.steps.configure import _configure_step
 from src.ui.steps.detect import _detect_step
@@ -93,6 +94,7 @@ def main() -> None:
     if threading.current_thread() is threading.main_thread():
         inject_css()
         inject_js(title=APP_TITLE, enable=ENABLE_JS_ENHANCEMENTS)
+        inject_spacing_probe()
 
     results_action = AppAction.NONE
     col_left, col_mid, col_right = st.columns(3)
