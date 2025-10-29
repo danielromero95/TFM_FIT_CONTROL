@@ -95,7 +95,8 @@ def main() -> None:
         inject_js(title=APP_TITLE, enable=ENABLE_JS_ENHANCEMENTS)
 
     results_action = AppAction.NONE
-    col_left, col_mid, col_right = st.columns(3)
+    st.markdown("<div class='app-grid'>", unsafe_allow_html=True)
+    col_left, col_mid, col_right = st.columns(3, gap="small")
 
     with col_left:
         _upload_step()
@@ -121,6 +122,8 @@ def main() -> None:
             results_action = _results_action_from_payload(_results_panel())
         else:
             st.empty()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     handle_results_action(results_action)
 

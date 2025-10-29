@@ -1,11 +1,9 @@
 /* Unified step rhythm */
-.step {
-  margin: 0 0 var(--fc-step-vspace);
-  padding-top: 0;
-}
-.step:last-of-type {
-  margin-bottom: 0;
-}
+.step { margin: 0; padding-top: 0; }
+/* Apply vertical rhythm only between adjacent steps */
+.step + .step { margin-top: var(--fc-step-vspace); }
+/* When detect follows upload, use a smaller gap */
+.step--upload + .step--detect { margin-top: var(--fc-space-1) !important; }
 .step h3, .step .stMarkdown h3 {
   margin-top: 0 !important;
   margin-bottom: var(--fc-heading-bottom) !important;
@@ -113,3 +111,8 @@ button.btn--disabled,
 .results-panel video { border-radius: var(--fc-radius); }
 .results-panel [data-testid="stHorizontalBlock"] { gap: var(--fc-hstack-gap) !important; }
 .results-panel [data-testid="column"] .stButton > button { width: 100%; }
+
+/* Main grid: tighter horizontal gap between the 3 primary columns */
+.app-grid [data-testid="stHorizontalBlock"] {
+  column-gap: var(--fc-space-3) !important; /* 0.5rem */
+}

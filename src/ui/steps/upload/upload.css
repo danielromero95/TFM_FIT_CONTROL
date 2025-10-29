@@ -3,3 +3,8 @@
 .step--upload .stAlert { margin-top: var(--fc-space-2); }
 .step--upload .stButton > button { border-radius: var(--fc-radius) !important; }
 .step--upload [data-testid="stHorizontalBlock"] { gap: var(--fc-hstack-gap); }
+
+/* Compact spacing for uploader internals */
+.step--upload [data-testid="stFileUploader"] { margin-bottom: var(--fc-space-2) !important; }
+.step--upload [data-testid="stFileUploaderDropzone"] { margin-bottom: var(--fc-space-2) !important; }
+.step--upload .uploadedFile { margin-bottom: var(--fc-space-2) !important; }
