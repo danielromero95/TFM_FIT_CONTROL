@@ -21,6 +21,7 @@ from src.config.settings import (
 )
 from src.A_preprocessing.frame_extraction import (
     extract_and_preprocess_frames,
+    extract_frames_stream,
     extract_processed_frames_stream,
 )
 from src.A_preprocessing.video_metadata import VideoInfo, read_video_file_info
@@ -34,7 +35,11 @@ from src.B_pose_estimation.processing import (
     filter_and_interpolate_landmarks,
 )
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
-from src.D_visualization.video_landmarks import OverlayStyle, draw_pose_on_frame
+from src.D_visualization.video_landmarks import (
+    OverlayStyle,
+    draw_pose_on_frame,
+    render_landmarks_video,
+)
 from src.exercise_detection.exercise_detector import (
     DetectionResult,
     IncrementalExerciseFeatureExtractor,
@@ -53,6 +58,7 @@ class _StreamingPoseResult:
     frames_processed: int
     detection: Optional[DetectionResult]
     debug_video_path: Optional[Path]
+    processed_size: Optional[tuple[int, int]] = None
 
 
 # Prioriza mp4v para evitar dependencias de libopenh264 en Windows
@@ -154,11 +160,16 @@ def _stream_pose_and_detection(
         else (CroppedPoseEstimator if getattr(cfg.pose, "use_crop", False) else PoseEstimator)
     )
 
+    processed_size: Optional[tuple[int, int]] = None
+
     try:
         with estimator_cls(min_detection_confidence=MIN_DETECTION_CONFIDENCE) as estimator:
             for frame_idx, frame in enumerate(frames):
                 frames_processed += 1
                 height, width = frame.shape[:2]
+
+                if processed_size is None:
+                    processed_size = (int(width), int(height))
 
                 ts_ms = (
                     (frame_idx / detection_ts_fps) * 1000.0
@@ -297,6 +308,7 @@ def _stream_pose_and_detection(
         frames_processed=frames_processed,
         detection=detection_result,
         debug_video_path=debug_path,
+        processed_size=processed_size,
     )
 
 
@@ -326,6 +338,93 @@ def _open_debug_writer(
             last_error = exc
             logger.warning("Debug writer exception with codec=%s: %s", code, exc)
     raise RuntimeError(f"Could not open debug VideoWriter for path={output_path}") from last_error
+
+
+def _iter_original_frames_for_overlay(
+    video_path: Path,
+    *,
+    rotate: int,
+    sample_rate: int,
+    target_fps: Optional[float],
+    max_frames: int,
+):
+    """Yield original-resolution frames using the same sampling strategy as the pipeline."""
+
+    target = float(target_fps) if target_fps and target_fps > 0 else None
+    sampling_mode = "time" if target is not None else "index"
+
+    kwargs: dict[str, object] = {
+        "video_path": str(video_path),
+        "sampling": sampling_mode,
+        "rotate": int(rotate),
+        "resize_to": None,
+    }
+    if sampling_mode == "time":
+        kwargs["target_fps"] = target
+    else:
+        kwargs["every_n"] = max(1, int(sample_rate))
+
+    iterator = extract_frames_stream(**kwargs)
+    produced = 0
+    for finfo in iterator:
+        yield finfo.array
+        produced += 1
+        if max_frames and produced >= max_frames:
+            break
+
+
+def _generate_overlay_video(
+    video_path: Path,
+    session_dir: Path,
+    *,
+    frame_sequence: np.ndarray,
+    crop_boxes: Optional[np.ndarray],
+    processed_size: Optional[tuple[int, int]],
+    rotate: int,
+    sample_rate: int,
+    target_fps: Optional[float],
+    fps_for_writer: float,
+) -> Optional[Path]:
+    """Render a debug overlay video matching the original resolution."""
+
+    if frame_sequence is None:
+        return None
+
+    total_frames = len(frame_sequence)
+    if total_frames == 0:
+        return None
+
+    if not processed_size or processed_size[0] <= 0 or processed_size[1] <= 0:
+        return None
+
+    processed_w = int(processed_size[0])
+    processed_h = int(processed_size[1])
+
+    overlay_path = session_dir / f"{session_dir.name}_overlay.mp4"
+    fps_value = fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0
+
+    frames_iter = _iter_original_frames_for_overlay(
+        video_path,
+        rotate=rotate,
+        sample_rate=sample_rate,
+        target_fps=target_fps,
+        max_frames=total_frames,
+    )
+
+    stats = render_landmarks_video(
+        frames_iter,
+        frame_sequence,
+        crop_boxes,
+        str(overlay_path),
+        fps=float(fps_value),
+        processed_size=(processed_w, processed_h),
+    )
+
+    if stats.frames_written <= 0:
+        overlay_path.unlink(missing_ok=True)
+        return None
+
+    return overlay_path
 
 
 def run_pipeline(
@@ -372,6 +471,10 @@ def run_pipeline(
     detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
     debug_video_path_stream: Optional[Path] = None
+    processed_frame_size: Optional[tuple[int, int]] = None
+
+    target_size = (cfg.pose.target_width, cfg.pose.target_height)
+    target_fps_for_sampling: Optional[float] = None
 
     try:
         info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
@@ -396,8 +499,6 @@ def run_pipeline(
         fps_original = plan.fps_base
         warnings.extend(plan.warnings)
 
-        target_size = (cfg.pose.target_width, cfg.pose.target_height)
-        target_fps_for_sampling: Optional[float] = None
         if cfg.video.target_fps and cfg.video.target_fps > 0:
             target_fps_for_sampling = float(cfg.video.target_fps)
 
@@ -455,6 +556,7 @@ def run_pipeline(
         df_raw_landmarks = streaming_result.df_landmarks
         frames_processed = streaming_result.frames_processed
         debug_video_path_stream = streaming_result.debug_video_path
+        processed_frame_size = streaming_result.processed_size
         if prefetched_detection is not None:
             detected_label, detected_view, detected_confidence = _normalize_detection(
                 prefetched_detection
@@ -497,12 +599,28 @@ def run_pipeline(
     filtered_sequence, crop_boxes = _filter_landmarks(df_raw_landmarks)
 
     debug_video_path: Optional[Path] = None
+    overlay_video_path: Optional[Path] = None
     if cfg.debug.generate_debug_video:
         if debug_video_path_stream is not None:
             notify(65, "EXTRA STAGE: Debug video saved during streaming.")
             debug_video_path = debug_video_path_stream
         else:
             notify(65, "EXTRA STAGE: Debug video skipped (no frames recorded).")
+
+        try:
+            overlay_video_path = _generate_overlay_video(
+                Path(video_path),
+                output_paths.session_dir,
+                frame_sequence=filtered_sequence,
+                crop_boxes=crop_boxes,
+                processed_size=processed_frame_size or target_size,
+                rotate=rotate,
+                sample_rate=sample_rate,
+                target_fps=target_fps_for_sampling,
+                fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
+            )
+        except Exception:
+            logger.exception("Failed to render overlay video")
 
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
@@ -591,6 +709,7 @@ def run_pipeline(
         repetitions=reps if skip_reason is None else 0,
         metrics=df_metrics,
         debug_video_path=debug_video_path,
+        overlay_video_path=overlay_video_path,
         stats=stats,
         config_used=cfg,
     )
