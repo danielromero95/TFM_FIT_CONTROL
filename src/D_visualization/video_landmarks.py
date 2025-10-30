@@ -79,6 +79,32 @@ def _normalize_points_for_frame(
     return pts
 
 
+_ROTATE_CODE = {
+    0: None,
+    90: cv2.ROTATE_90_CLOCKWISE,
+    180: cv2.ROTATE_180,
+    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+}
+
+
+def _normalize_rotation_deg(value: int) -> int:
+    """Clamp ``value`` to the closest multiple of 90 degrees."""
+
+    value = int(value) % 360
+    if value in _ROTATE_CODE:
+        return value
+    candidates = tuple(_ROTATE_CODE.keys())
+    return min(candidates, key=lambda cand: min((value - cand) % 360, (cand - value) % 360))
+
+
+def _rotate_frame(frame: np.ndarray, rotation_deg: int) -> np.ndarray:
+    """Return ``frame`` rotated by ``rotation_deg`` (clockwise)."""
+
+    rotation = _normalize_rotation_deg(rotation_deg)
+    code = _ROTATE_CODE.get(rotation)
+    return cv2.rotate(frame, code) if code is not None else frame
+
+
 def draw_pose_on_frame(
     frame: np.ndarray,
     points_xy: Mapping[int, tuple[int, int]],
@@ -264,6 +290,7 @@ def render_landmarks_video(
     progress_cb: Optional[Callable[[int, int], None]] = None,  # (written, total)
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
+    output_rotate: int = 0,
 ) -> RenderStats:
     """Iterate in-memory frames -> overlay -> write. UI-agnostic.
 
@@ -280,7 +307,15 @@ def render_landmarks_video(
     if first is None:
         return RenderStats(0, 0, 0, 0.0, "")
     orig_h, orig_w = first.shape[:2]
-    writer, used_code = _open_writer(out_path, fps if fps > 0 else 1.0, (orig_w, orig_h), codec_preference)
+    rotation_out = _normalize_rotation_deg(output_rotate)
+    if rotation_out in (90, 270):
+        writer_size = (orig_h, orig_w)
+    else:
+        writer_size = (orig_w, orig_h)
+
+    writer, used_code = _open_writer(
+        out_path, fps if fps > 0 else 1.0, writer_size, codec_preference
+    )
 
     try:
         def handle_one(idx: int, fr: np.ndarray):
@@ -303,12 +338,18 @@ def render_landmarks_video(
             )
             if not pts:
                 skipped += 1
-                writer.write(fr)
+                frame_to_write = fr
+                if rotation_out:
+                    frame_to_write = _rotate_frame(frame_to_write, rotation_out)
+                writer.write(frame_to_write)
                 frames_written += 1
                 return
             fr_ann = fr.copy()
             draw_pose_on_frame(fr_ann, pts, style=style or OverlayStyle())
-            writer.write(fr_ann)
+            frame_to_write = fr_ann
+            if rotation_out:
+                frame_to_write = _rotate_frame(frame_to_write, rotation_out)
+            writer.write(frame_to_write)
             frames_written += 1
 
         handle_one(0, first)

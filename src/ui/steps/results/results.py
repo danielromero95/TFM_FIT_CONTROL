@@ -140,7 +140,8 @@ def _results_panel() -> Dict[str, bool]:
                 st.info("El vídeo con landmarks se visualizó durante el análisis.")
 
             debug_video_enabled = bool((state.configure_values or {}).get("debug_video", True))
-            debug_video_path = report.debug_video_path
+            overlay_video_path = getattr(report, "overlay_video_path", None)
+            debug_video_path = overlay_video_path or report.debug_video_path
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
@@ -202,6 +203,11 @@ def _results_panel() -> Dict[str, bool]:
 
             if debug_video_enabled and debug_video_path:
                 debug_path = Path(debug_video_path)
+                download_label = (
+                    "Download landmark overlay video"
+                    if overlay_video_path
+                    else "Download debug video"
+                )
                 try:
                     debug_bytes = debug_path.read_bytes()
                 except FileNotFoundError:
@@ -210,7 +216,7 @@ def _results_panel() -> Dict[str, bool]:
                     st.error(f"Could not read debug video: {exc}")
                 else:
                     st.download_button(
-                        "Download debug video",
+                        download_label,
                         data=debug_bytes,
                         file_name=debug_path.name,
                         mime="video/mp4",
