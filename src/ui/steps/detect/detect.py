@@ -84,7 +84,7 @@ def _detect_step() -> None:
                 video_to_show,
                 key="detect_primary_video",
                 fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
-                bottom_margin=0.75,
+                bottom_margin=0.0,
             )
 
         if (
