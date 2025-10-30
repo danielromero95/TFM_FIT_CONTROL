@@ -380,8 +380,7 @@ def _generate_overlay_video(
     frame_sequence: np.ndarray,
     crop_boxes: Optional[np.ndarray],
     processed_size: Optional[tuple[int, int]],
-    processing_rotation: int,
-    output_rotation: int,
+    rotate: int,
     sample_rate: int,
     target_fps: Optional[float],
     fps_for_writer: float,
@@ -406,13 +405,11 @@ def _generate_overlay_video(
 
     frames_iter = _iter_original_frames_for_overlay(
         video_path,
-        rotate=processing_rotation,
+        rotate=rotate,
         sample_rate=sample_rate,
         target_fps=target_fps,
         max_frames=total_frames,
     )
-
-    rotation_delta = (int(output_rotation) - int(processing_rotation)) % 360
 
     stats = render_landmarks_video(
         frames_iter,
@@ -421,7 +418,6 @@ def _generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
-        output_rotate=rotation_delta,
     )
 
     if stats.frames_written <= 0:
@@ -623,8 +619,7 @@ def run_pipeline(
                 frame_sequence=filtered_sequence,
                 crop_boxes=crop_boxes,
                 processed_size=processed_frame_size or target_size,
-                processing_rotation=processing_rotate,
-                output_rotation=metadata_rotation,
+                rotate=rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
