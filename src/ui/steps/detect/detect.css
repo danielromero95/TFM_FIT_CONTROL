@@ -35,7 +35,10 @@
 
 /* Ajustes de layout dentro del step */
 .step--detect .form-label--inline { min-height: auto; }
-.step--detect [data-testid="stVerticalBlock"] { row-gap: var(--fc-form-row-gap); }
+.step--detect [data-testid="stVerticalBlock"] {
+  gap: var(--fc-space-0);
+  row-gap: var(--fc-space-0);
+}
 .step--detect [data-testid="stHorizontalBlock"] {
   margin-top: var(--fc-space-1);
   align-items: center;
