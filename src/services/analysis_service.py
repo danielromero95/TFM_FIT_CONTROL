@@ -456,7 +456,9 @@ def run_pipeline(
     notify(5, "STAGE 1: Extracting and rotating frames...")
 
     cap = _open_video_cap(video_path)
-    rotate: int = cfg.pose.rotate if cfg.pose.rotate is not None else 0
+    manual_rotate = cfg.pose.rotate
+    processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
+    metadata_rotation = 0
     warnings: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -483,8 +485,11 @@ def run_pipeline(
 
         initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
 
-        if cfg.pose.rotate is None:
-            rotate = int(info.rotation or 0)
+        metadata_rotation = int(info.rotation or 0)
+        if manual_rotate is None:
+            processing_rotate = metadata_rotation
+        else:
+            processing_rotate = int(manual_rotate)
 
         plan = make_sampling_plan(
             fps_metadata=fps_original,
@@ -505,7 +510,7 @@ def run_pipeline(
         if target_fps_for_sampling and target_fps_for_sampling > 0:
             raw_iter = extract_processed_frames_stream(
                 video_path=video_path,
-                rotate=rotate,
+                rotate=processing_rotate,
                 resize_to=target_size,
                 cap=cap,
                 prefetched_info=info,
@@ -524,7 +529,7 @@ def run_pipeline(
         else:
             raw_iter = extract_processed_frames_stream(
                 video_path=video_path,
-                rotate=rotate,
+                rotate=processing_rotate,
                 resize_to=target_size,
                 cap=cap,
                 prefetched_info=info,
