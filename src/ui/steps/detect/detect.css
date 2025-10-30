@@ -3,6 +3,21 @@
 .step--detect h4 { margin-bottom: var(--fc-space-2); }
 
 .step--detect iframe { margin-bottom: 0; }
+.step--detect .detect-video-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.step--detect .detect-video-stack [data-testid="stVerticalBlock"] {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  gap: 0 !important;
+  row-gap: 0 !important;
+}
+.step--detect .detect-video-stack [data-testid="stVerticalBlock"] > div {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
 .step--detect .autodetect-btn { margin-top: 0; }
 .step--detect .autodetect-btn > button {
   width: 100%;

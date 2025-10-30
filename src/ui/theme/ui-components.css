@@ -30,6 +30,12 @@
   padding-top: 0 !important;
 }
 
+/* Default vertical rhythm inside steps, overridable per-step */
+.step [data-testid="stVerticalBlock"] {
+  gap: var(--fc-step-vspace);
+  row-gap: var(--fc-step-vspace);
+}
+
 .form-label {
   color: var(--fc-text-1);
   font-weight: 600;

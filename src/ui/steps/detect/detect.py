@@ -79,12 +79,14 @@ def _detect_step() -> None:
         )
         video_to_show = overlay_source if use_overlay else base_video
 
+        st.markdown("<div class='detect-video-stack'>", unsafe_allow_html=True)
+
         if video_to_show:
             render_uniform_video(
                 video_to_show,
                 key="detect_primary_video",
                 fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
-                bottom_margin=0.75,
+                bottom_margin=0.0,
             )
 
         if (
@@ -108,6 +110,7 @@ def _detect_step() -> None:
         # --- Auto-Detect (actualiza AppState y NO st.session_state de los widgets)
         st.markdown('<div class="autodetect-btn">', unsafe_allow_html=True)
         autodetect_clicked = st.button("Auto-Detect", key="btn_autodetect", width='stretch')
+        st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         if autodetect_clicked:

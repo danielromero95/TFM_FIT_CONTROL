@@ -27,6 +27,17 @@ main [data-testid="column"] > div {
   padding-top: 0 !important;
 }
 
+/* Streamlit columns add row-gap between blocks; neutralise it so tokens drive rhythm */
+main [data-testid="stVerticalBlock"] {
+  gap: 0 !important;
+  row-gap: 0 !important;
+}
+main [data-testid="stColumn"] > div[data-testid="stVerticalBlock"],
+main [data-testid="column"] > div > [data-testid="stVerticalBlock"] {
+  gap: 0 !important;
+  row-gap: 0 !important;
+}
+
 @media (max-width: 520px) {
   header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
 }
