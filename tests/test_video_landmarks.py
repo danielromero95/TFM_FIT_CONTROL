@@ -5,6 +5,7 @@ np = pytest.importorskip("numpy")
 from src.D_visualization.video_landmarks import (
     _normalize_points_for_frame,
     render_landmarks_video,
+    transcode_video,
 )
 
 
@@ -80,3 +81,28 @@ def test_writer_codec_fallback(tmp_path):
     assert stats.used_fourcc == "mp4v"
     assert output.exists()
     assert output.stat().st_size > 0
+
+
+def test_transcode_video_rewrites_file_when_possible(tmp_path):
+    src = tmp_path / "source.mp4"
+    frames = list(_make_test_frames(2))
+    render_landmarks_video(
+        frames,
+        [None, None],
+        None,
+        str(src),
+        fps=25.0,
+        processed_size=(256, 256),
+        codec_preference=("mp4v",),
+    )
+    dst = tmp_path / "h264.mp4"
+    success, codec = transcode_video(
+        str(src),
+        str(dst),
+        fps=25.0,
+        codec_preference=("mp4v",),
+    )
+    assert success
+    assert codec == "mp4v"
+    assert dst.exists()
+    assert dst.stat().st_size > 0

@@ -20,6 +20,7 @@ __all__ = [
     "draw_pose_on_frame",
     "render_landmarks_video",
     "render_landmarks_video_streaming",
+    "transcode_video",
 ]
 
 
@@ -134,6 +135,62 @@ def _open_writer(path: str, fps: float, size: tuple[int, int], prefs: Sequence[s
         logger.info("VideoWriter open failed with fourcc=%s; trying next...", code)
         writer.release()
     raise RuntimeError(f"Could not open VideoWriter for path={path} with prefs={prefs}")
+
+
+def transcode_video(
+    src_path: str,
+    dst_path: str,
+    *,
+    fps: float,
+    codec_preference: Sequence[str] = ("avc1", "H264"),
+) -> tuple[bool, str]:
+    """Re-encode ``src_path`` using the requested codecs.
+
+    Returns ``(success, codec)`` and leaves ``dst_path`` on disk only when ``success``
+    is ``True``.
+    """
+
+    cap = cv2.VideoCapture(src_path)
+    if not cap.isOpened():
+        return False, ""
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if width <= 0 or height <= 0:
+        cap.release()
+        return False, ""
+
+    try:
+        writer, used_code = _open_writer(
+            dst_path,
+            fps if fps > 0 else 1.0,
+            (width, height),
+            codec_preference,
+        )
+    except Exception:
+        cap.release()
+        return False, ""
+
+    frames_written = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            writer.write(frame)
+            frames_written += 1
+    finally:
+        writer.release()
+        cap.release()
+
+    if frames_written <= 0:
+        try:
+            Path(dst_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False, ""
+
+    return True, used_code
 
 
 def render_landmarks_video_streaming(
