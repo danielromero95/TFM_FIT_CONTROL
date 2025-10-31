@@ -39,7 +39,6 @@ from src.D_visualization.video_landmarks import (
     OverlayStyle,
     draw_pose_on_frame,
     render_landmarks_video,
-    transcode_video,
 )
 from src.exercise_detection.exercise_detector import (
     DetectionResult,
@@ -381,8 +380,7 @@ def _generate_overlay_video(
     frame_sequence: np.ndarray,
     crop_boxes: Optional[np.ndarray],
     processed_size: Optional[tuple[int, int]],
-    processing_rotation: int,
-    output_rotation: int,
+    rotate: int,
     sample_rate: int,
     target_fps: Optional[float],
     fps_for_writer: float,
@@ -407,13 +405,11 @@ def _generate_overlay_video(
 
     frames_iter = _iter_original_frames_for_overlay(
         video_path,
-        rotate=processing_rotation,
+        rotate=rotate,
         sample_rate=sample_rate,
         target_fps=target_fps,
         max_frames=total_frames,
     )
-
-    rotation_delta = (int(output_rotation) - int(processing_rotation)) % 360
 
     stats = render_landmarks_video(
         frames_iter,
@@ -422,47 +418,11 @@ def _generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
-        output_rotate=rotation_delta,
     )
 
     if stats.frames_written <= 0:
         overlay_path.unlink(missing_ok=True)
         return None
-
-    codec = (stats.used_fourcc or "").upper()
-    if codec not in {"AVC1", "H264"}:
-        tmp_overlay = overlay_path.with_name(f"{overlay_path.stem}_h264{overlay_path.suffix}")
-        try:
-            success, used_codec = transcode_video(
-                str(overlay_path),
-                str(tmp_overlay),
-                fps=float(fps_value),
-                codec_preference=("avc1", "H264"),
-            )
-        except Exception:
-            success = False
-            used_codec = ""
-            logger.exception("Failed to re-encode overlay video using H.264")
-        if success:
-            try:
-                overlay_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            try:
-                tmp_overlay.replace(overlay_path)
-            except OSError:
-                tmp_overlay.rename(overlay_path)
-            logger.info(
-                "Overlay video re-encoded for browser playback using codec=%s", used_codec
-            )
-        else:
-            try:
-                tmp_overlay.unlink(missing_ok=True)
-            except Exception:
-                pass
-            logger.warning(
-                "Overlay video kept using codec=%s; some browsers may not play it", codec or "unknown"
-            )
 
     return overlay_path
 
@@ -659,8 +619,7 @@ def run_pipeline(
                 frame_sequence=filtered_sequence,
                 crop_boxes=crop_boxes,
                 processed_size=processed_frame_size or target_size,
-                processing_rotation=processing_rotate,
-                output_rotation=metadata_rotation,
+                rotate=rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
