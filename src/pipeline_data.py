@@ -59,9 +59,10 @@ class Report:
 
     repetitions: int
     metrics: Optional["pd.DataFrame"]
-    debug_video_path: Optional[Path]
     stats: RunStats
     config_used: config.Config
+    debug_video_path: Optional[Path] = None
+    overlay_video_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Preserve the dictionary-based API used by the existing front-ends."""
@@ -75,6 +76,9 @@ class Report:
             "repetition_count": self.repetitions,
             "metrics_dataframe": self.metrics,
             "debug_video_path": str(self.debug_video_path) if self.debug_video_path else None,
+            "overlay_video_path": str(self.overlay_video_path)
+            if self.overlay_video_path
+            else None,
             "stats": stats_dict,
             "config_sha1": self.stats.config_sha1,
             "warnings": list(self.stats.warnings),
