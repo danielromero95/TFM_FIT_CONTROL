@@ -80,6 +80,61 @@ def _normalize_points_for_frame(
     return pts
 
 
+def _estimate_subject_bbox(
+    pts: dict[int, tuple[int, int]],
+    frame_w: int,
+    frame_h: int,
+    *,
+    margin: float = 0.12,
+) -> tuple[int, int, int, int] | None:
+    """
+    A partir de los puntos ya pasados a píxeles, devuelve un bbox (x1,y1,x2,y2)
+    ampliado con un pequeño margen. Si no hay puntos, devuelve None.
+    """
+
+    if not pts:
+        return None
+
+    xs = [p[0] for p in pts.values()]
+    ys = [p[1] for p in pts.values()]
+    if not xs or not ys:
+        return None
+
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    base = min(frame_w, frame_h)
+    margin_px = float(max(0.0, margin)) * float(base)
+
+    x1 = int(math.floor(min_x - margin_px))
+    y1 = int(math.floor(min_y - margin_px))
+    x2 = int(math.ceil(max_x + margin_px + 1.0))
+    y2 = int(math.ceil(max_y + margin_px + 1.0))
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(frame_w, max(x2, x1 + 1))
+    y2 = min(frame_h, max(y2, y1 + 1))
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    return x1, y1, x2, y2
+
+
+def _adaptive_style_for_region(width: int, height: int) -> OverlayStyle:
+    """
+    Devuelve un OverlayStyle con thickness/radius escalados al tamaño del recorte.
+    Usa como referencia un lado corto de 320px: por debajo de eso, usa 2px/4px,
+    por encima escala linealmente.
+    """
+
+    base = max(1, min(int(width), int(height)))
+    thickness = max(2, round(base / 320 * 2))
+    radius = max(3, round(base / 320 * 4))
+    return OverlayStyle(connection_thickness=thickness, landmark_radius=radius)
+
+
 _ROTATE_CODE = {
     0: None,
     90: cv2.ROTATE_90_CLOCKWISE,
@@ -348,6 +403,8 @@ def render_landmarks_video(
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
     output_rotate: int = 0,
+    tighten_to_subject: bool = False,
+    subject_margin: float = 0.12,
 ) -> RenderStats:
     """Iterate in-memory frames -> overlay -> write. UI-agnostic.
 
@@ -365,51 +422,108 @@ def render_landmarks_video(
         return RenderStats(0, 0, 0, 0.0, "")
     orig_h, orig_w = first.shape[:2]
     rotation_out = _normalize_rotation_deg(output_rotate)
-    if rotation_out in (90, 270):
-        writer_size = (orig_h, orig_w)
-    else:
-        writer_size = (orig_w, orig_h)
+    base_style = style or OverlayStyle()
+    writer: Optional[cv2.VideoWriter] = None
+    used_code = ""
+    writer_size: Optional[tuple[int, int]] = None
+    subject_region_size: Optional[tuple[int, int]] = None
 
-    writer, used_code = _open_writer(
-        out_path, fps if fps > 0 else 1.0, writer_size, codec_preference
-    )
+    def _safe_get(seq, index):
+        try:
+            return seq[index]
+        except Exception:
+            return None
 
-    try:
-        def handle_one(idx: int, fr: np.ndarray):
-            nonlocal frames_written, skipped
-            h, w = fr.shape[:2]
-            if (w, h) != (orig_w, orig_h):
-                fr = cv2.resize(fr, (orig_w, orig_h))
-            crop = None
-            if crop_boxes is not None and idx < len(crop_boxes):
-                cb = crop_boxes[idx]
-                if cb is not None and not (np.isnan(cb).all() if hasattr(cb, "all") else False):
-                    crop = cb
-            pts = _normalize_points_for_frame(
-                landmarks_sequence[idx] if idx < len(landmarks_sequence) else None,
-                crop,
-                orig_w,
-                orig_h,
-                processed_size[0],
-                processed_size[1],
-            )
-            if not pts:
-                skipped += 1
-                frame_to_write = fr
-                if rotation_out:
-                    frame_to_write = _rotate_frame(frame_to_write, rotation_out)
-                writer.write(frame_to_write)
-                frames_written += 1
-                return
-            fr_ann = fr.copy()
-            draw_pose_on_frame(fr_ann, pts, style=style or OverlayStyle())
-            frame_to_write = fr_ann
+    def _process_frame(idx: int, fr: np.ndarray) -> np.ndarray:
+        nonlocal skipped, subject_region_size
+        frame = fr
+        h, w = frame.shape[:2]
+        if (w, h) != (orig_w, orig_h):
+            frame = cv2.resize(frame, (orig_w, orig_h))
+
+        crop = None
+        if crop_boxes is not None:
+            cb = _safe_get(crop_boxes, idx)
+            if cb is not None and not (np.isnan(cb).all() if hasattr(cb, "all") else False):
+                crop = cb
+
+        pts = _normalize_points_for_frame(
+            _safe_get(landmarks_sequence, idx),
+            crop,
+            orig_w,
+            orig_h,
+            processed_size[0],
+            processed_size[1],
+        )
+
+        if not pts:
+            skipped += 1
+            frame_to_write = frame
             if rotation_out:
                 frame_to_write = _rotate_frame(frame_to_write, rotation_out)
-            writer.write(frame_to_write)
-            frames_written += 1
+            return frame_to_write
 
-        handle_one(0, first)
+        frame_region = frame
+        points_for_draw = pts
+        style_for_draw = base_style
+
+        if tighten_to_subject:
+            bbox = _estimate_subject_bbox(pts, orig_w, orig_h, margin=subject_margin)
+            if bbox is not None:
+                x1, y1, x2, y2 = bbox
+                if subject_region_size is not None:
+                    target_w, target_h = subject_region_size
+                    target_w = max(1, int(target_w))
+                    target_h = max(1, int(target_h))
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+                    x1 = int(round(cx - target_w / 2))
+                    y1 = int(round(cy - target_h / 2))
+                    x2 = x1 + target_w
+                    y2 = y1 + target_h
+                    if x1 < 0:
+                        x2 -= x1
+                        x1 = 0
+                    if x2 > orig_w:
+                        shift = x2 - orig_w
+                        x1 = max(0, x1 - shift)
+                        x2 = orig_w
+                    if y1 < 0:
+                        y2 -= y1
+                        y1 = 0
+                    if y2 > orig_h:
+                        shift = y2 - orig_h
+                        y1 = max(0, y1 - shift)
+                        y2 = orig_h
+                if x2 > x1 and y2 > y1:
+                    if subject_region_size is None:
+                        subject_region_size = (x2 - x1, y2 - y1)
+                    frame_region = frame[y1:y2, x1:x2]
+                    points_for_draw = {k: (px - x1, py - y1) for k, (px, py) in pts.items()}
+                    adaptive = _adaptive_style_for_region(frame_region.shape[1], frame_region.shape[0])
+                    style_for_draw = OverlayStyle(
+                        connection_thickness=adaptive.connection_thickness,
+                        landmark_radius=adaptive.landmark_radius,
+                        connection_bgr=base_style.connection_bgr,
+                        landmark_bgr=base_style.landmark_bgr,
+                    )
+
+        frame_to_annotate = frame_region.copy()
+        draw_pose_on_frame(frame_to_annotate, points_for_draw, style=style_for_draw)
+        frame_to_write = frame_to_annotate
+
+        if rotation_out:
+            frame_to_write = _rotate_frame(frame_to_write, rotation_out)
+        return frame_to_write
+
+    try:
+        frame_to_write = _process_frame(0, first)
+        writer_size = (frame_to_write.shape[1], frame_to_write.shape[0])
+        writer, used_code = _open_writer(
+            out_path, fps if fps > 0 else 1.0, writer_size, codec_preference
+        )
+        writer.write(frame_to_write)
+        frames_written += 1
         frames_in += 1
         if progress_cb:
             try:
@@ -421,14 +535,19 @@ def render_landmarks_video(
             if cancelled and cancelled():
                 break
             frames_in += 1
-            handle_one(idx, fr)
+            frame_to_write = _process_frame(idx, fr)
+            if writer_size and (frame_to_write.shape[1], frame_to_write.shape[0]) != writer_size:
+                frame_to_write = cv2.resize(frame_to_write, writer_size)
+            writer.write(frame_to_write)
+            frames_written += 1
             if progress_cb and (idx % 10 == 0):
                 try:
                     progress_cb(frames_written, frames_in)
                 except Exception:
                     pass
     finally:
-        writer.release()
+        if writer:
+            writer.release()
     dt_ms = (time.perf_counter() - t0) * 1000.0
     if progress_cb:
         try:

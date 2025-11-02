@@ -445,6 +445,8 @@ def _generate_overlay_video(
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
         output_rotate=output_rotate,
+        tighten_to_subject=True,
+        subject_margin=0.15,
     )
 
     if stats.frames_written <= 0:
