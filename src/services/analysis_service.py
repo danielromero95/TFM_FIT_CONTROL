@@ -384,6 +384,7 @@ def _generate_overlay_video(
     sample_rate: int,
     target_fps: Optional[float],
     fps_for_writer: float,
+    rotate_from_metadata: bool = True,
 ) -> Optional[Path]:
     """Render a debug overlay video matching the original resolution."""
 
@@ -396,6 +397,27 @@ def _generate_overlay_video(
 
     if not processed_size or processed_size[0] <= 0 or processed_size[1] <= 0:
         return None
+
+    is_df = False
+    try:
+        import pandas as pd  # noqa: WPS433
+
+        is_df = isinstance(frame_sequence, pd.DataFrame)
+    except Exception:
+        is_df = False
+
+    if is_df:
+        cols_x = [c for c in frame_sequence.columns if c.startswith("x")]
+        num_landmarks = len(cols_x)
+        normalized_sequence: list[list[dict[str, float]]] = []
+        for _, row in frame_sequence.iterrows():
+            frame_landmarks: list[dict[str, float]] = []
+            for i in range(num_landmarks):
+                x_val = float(row.get(f"x{i}", float("nan")))
+                y_val = float(row.get(f"y{i}", float("nan")))
+                frame_landmarks.append({"x": x_val, "y": y_val})
+            normalized_sequence.append(frame_landmarks)
+        frame_sequence = normalized_sequence
 
     processed_w = int(processed_size[0])
     processed_h = int(processed_size[1])
@@ -411,6 +433,10 @@ def _generate_overlay_video(
         max_frames=total_frames,
     )
 
+    output_rotate = 0
+    if rotate_from_metadata and rotate:
+        output_rotate = (360 - int(rotate)) % 360
+
     stats = render_landmarks_video(
         frames_iter,
         frame_sequence,
@@ -418,6 +444,7 @@ def _generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
+        output_rotate=output_rotate,
     )
 
     if stats.frames_written <= 0:
@@ -457,6 +484,7 @@ def run_pipeline(
 
     cap = _open_video_cap(video_path)
     manual_rotate = cfg.pose.rotate
+    rotate_from_metadata = manual_rotate is None
     processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
     metadata_rotation = 0
     warnings: list[str] = []
@@ -619,11 +647,14 @@ def run_pipeline(
                 frame_sequence=filtered_sequence,
                 crop_boxes=crop_boxes,
                 processed_size=processed_frame_size or target_size,
-                rotate=rotate,
+                rotate=processing_rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
+                rotate_from_metadata=rotate_from_metadata,
             )
+            if overlay_video_path is not None:
+                logger.info("Overlay video generated at %s", overlay_video_path)
         except Exception:
             logger.exception("Failed to render overlay video")
 
