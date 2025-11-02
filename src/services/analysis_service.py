@@ -446,7 +446,7 @@ def _generate_overlay_video(
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
         output_rotate=output_rotate,
-        tighten_to_subject=True,
+        tighten_to_subject=False,  # keep full frame; cropping handled upstream when needed
         subject_margin=0.15,
         progress_cb=progress_cb,
     )
@@ -490,7 +490,6 @@ def run_pipeline(
     manual_rotate = cfg.pose.rotate
     rotate_from_metadata = manual_rotate is None
     processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
-    metadata_rotation = 0
     warnings: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)

@@ -57,6 +57,27 @@ def _normalize_points_for_frame(
             return pts
     except Exception:
         pass
+    crop_vals: Optional[tuple[float, float, float, float]] = None
+    if crop_box is not None:
+        try:
+            crop_vals = tuple(map(float, crop_box))  # type: ignore[arg-type]
+        except Exception:
+            crop_vals = None
+
+    treat_as_global = False
+    if crop_vals is not None and max(crop_vals) > 1.0:
+        for lm in frame_landmarks:
+            try:
+                x = float(lm["x"])
+                y = float(lm["y"])
+            except Exception:
+                continue
+            if not (math.isfinite(x) and math.isfinite(y)):
+                continue
+            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                treat_as_global = True
+                break
+
     sx, sy = (orig_w / float(proc_w)), (orig_h / float(proc_h))
     for idx, lm in enumerate(frame_landmarks):
         try:
@@ -65,8 +86,8 @@ def _normalize_points_for_frame(
                 continue
         except Exception:
             continue
-        if crop_box is not None:
-            x1_p, y1_p, x2_p, y2_p = map(float, crop_box)
+        if not treat_as_global and crop_vals is not None:
+            x1_p, y1_p, x2_p, y2_p = crop_vals
             abs_x_p = x1_p + x * (x2_p - x1_p)
             abs_y_p = y1_p + y * (y2_p - y1_p)
             final_x = int(round(abs_x_p * sx))
