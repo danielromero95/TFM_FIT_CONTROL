@@ -385,6 +385,7 @@ def _generate_overlay_video(
     target_fps: Optional[float],
     fps_for_writer: float,
     rotate_from_metadata: bool = True,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> Optional[Path]:
     """Render a debug overlay video matching the original resolution."""
 
@@ -447,6 +448,7 @@ def _generate_overlay_video(
         output_rotate=output_rotate,
         tighten_to_subject=True,
         subject_margin=0.15,
+        progress_cb=progress_cb,
     )
 
     if stats.frames_written <= 0:
@@ -643,6 +645,17 @@ def run_pipeline(
             notify(65, "EXTRA STAGE: Debug video skipped (no frames recorded).")
 
         try:
+            def _overlay_progress(written: int, total: int) -> None:
+                # total puede ser 0 si el renderer no lo sabe todavía
+                base = 65
+                top = 75
+                if total and total > 0:
+                    frac = min(1.0, max(0.0, written / float(total)))
+                    pct = int(base + (top - base) * frac)
+                else:
+                    pct = base
+                notify(pct, f"EXTRA STAGE: Rendering debug video... ({written}/{total})")
+
             overlay_video_path = _generate_overlay_video(
                 Path(video_path),
                 output_paths.session_dir,
@@ -654,6 +667,7 @@ def run_pipeline(
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
                 rotate_from_metadata=rotate_from_metadata,
+                progress_cb=_overlay_progress,
             )
             if overlay_video_path is not None:
                 logger.info("Overlay video generated at %s", overlay_video_path)
