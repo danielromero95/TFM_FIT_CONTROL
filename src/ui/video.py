@@ -146,7 +146,7 @@ def render_uniform_video(
               preload="metadata"
               playsinline
               webkit-playsinline
-              style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;"
+              style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;background:#000;"
             >
               <source src="{source}" type="{mime}">
             </video>
@@ -191,7 +191,15 @@ def render_uniform_video(
                 const vh = video.videoHeight || 0;
                 if (vh > 0 && vw > 0) {{
                   const isPortrait = vh > vw;
-                  const targetHeight = isPortrait ? {portrait_height_px} : {fixed_h};
+                  const rect = inner.getBoundingClientRect();
+                  const containerWidth = rect.width || video.clientWidth || 0;
+                  let targetHeight = isPortrait ? {portrait_height_px} : {fixed_h};
+                  if (containerWidth > 0) {{
+                    const candidate = Math.round(containerWidth * (vh / vw));
+                    if (candidate > targetHeight) {{
+                      targetHeight = candidate;
+                    }}
+                  }}
                   setViewportHeight(targetHeight);
                 }}
                 if (start) {{
