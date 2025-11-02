@@ -112,6 +112,7 @@ def render_uniform_video(
     key: str | None = None,
     bottom_margin: float = DEFAULT_VIDEO_BOTTOM_REM,
     fixed_height_px: int | None = VIDEO_VIEWPORT_HEIGHT_PX,
+    portrait_height_px: int = 560,
 ) -> None:
     """Render ``data`` inside a viewport with fixed height and full width."""
 
@@ -160,27 +161,45 @@ def render_uniform_video(
             const inner = document.getElementById('{inner_id}');
             const video = document.getElementById('{video_id}');
             if (!inner) return;
-            const fit = () => {{
-              const h = {fixed_h} + pad;
+            let viewportHeight = {fixed_h};
+            const applyHeight = () => {{
+              const h = viewportHeight + pad;
               if (window.frameElement) {{
                 window.frameElement.style.height = h + 'px';
               }}
             }};
+            const setViewportHeight = (value) => {{
+              const next = Number.parseFloat(value);
+              if (!Number.isFinite(next) || next <= 0) {{
+                viewportHeight = {fixed_h};
+              }} else {{
+                viewportHeight = next;
+              }}
+              applyHeight();
+            }};
             if (typeof ResizeObserver !== 'undefined') {{
-              new ResizeObserver(() => fit()).observe(inner);
+              new ResizeObserver(() => applyHeight()).observe(inner);
             }} else {{
-              window.addEventListener('resize', fit);
+              window.addEventListener('resize', applyHeight);
             }}
-            fit();
-            window.addEventListener('load', () => fit(), {{ once: true }});
+            applyHeight();
+            window.addEventListener('load', () => applyHeight(), {{ once: true }});
             if (video) {{
               const start = Math.max({start_time}, 0);
               video.addEventListener('loadedmetadata', () => {{
-                if (!start) return;
-                try {{
-                  video.currentTime = start;
-                }} catch (err) {{
-                  console.warn('Unable to seek video start time', err);
+                const vw = video.videoWidth || 0;
+                const vh = video.videoHeight || 0;
+                if (vh > 0 && vw > 0) {{
+                  const isPortrait = vh > vw;
+                  const targetHeight = isPortrait ? {portrait_height_px} : {fixed_h};
+                  setViewportHeight(targetHeight);
+                }}
+                if (start) {{
+                  try {{
+                    video.currentTime = start;
+                  }} catch (err) {{
+                    console.warn('Unable to seek video start time', err);
+                  }}
                 }}
               }}, {{ once: true }});
             }}
