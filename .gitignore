@@ -1,6 +1,8 @@
 # --- Project-specific ---
 data/
 project_tree.txt
+project_tree.cmd
+project_tree.json
 
 # --- Python bytecode & build artifacts ---
 __pycache__/
