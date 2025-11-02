@@ -397,6 +397,27 @@ def _generate_overlay_video(
     if not processed_size or processed_size[0] <= 0 or processed_size[1] <= 0:
         return None
 
+    is_df = False
+    try:
+        import pandas as pd  # noqa: WPS433
+
+        is_df = isinstance(frame_sequence, pd.DataFrame)
+    except Exception:
+        is_df = False
+
+    if is_df:
+        cols_x = [c for c in frame_sequence.columns if c.startswith("x")]
+        num_landmarks = len(cols_x)
+        normalized_sequence: list[list[dict[str, float]]] = []
+        for _, row in frame_sequence.iterrows():
+            frame_landmarks: list[dict[str, float]] = []
+            for i in range(num_landmarks):
+                x_val = float(row.get(f"x{i}", float("nan")))
+                y_val = float(row.get(f"y{i}", float("nan")))
+                frame_landmarks.append({"x": x_val, "y": y_val})
+            normalized_sequence.append(frame_landmarks)
+        frame_sequence = normalized_sequence
+
     processed_w = int(processed_size[0])
     processed_h = int(processed_size[1])
 
@@ -619,11 +640,13 @@ def run_pipeline(
                 frame_sequence=filtered_sequence,
                 crop_boxes=crop_boxes,
                 processed_size=processed_frame_size or target_size,
-                rotate=rotate,
+                rotate=processing_rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
             )
+            if overlay_video_path is not None:
+                logger.info("Overlay video generated at %s", overlay_video_path)
         except Exception:
             logger.exception("Failed to render overlay video")
 
