@@ -384,6 +384,7 @@ def _generate_overlay_video(
     sample_rate: int,
     target_fps: Optional[float],
     fps_for_writer: float,
+    rotate_from_metadata: bool = True,
 ) -> Optional[Path]:
     """Render a debug overlay video matching the original resolution."""
 
@@ -432,6 +433,10 @@ def _generate_overlay_video(
         max_frames=total_frames,
     )
 
+    output_rotate = 0
+    if rotate_from_metadata and rotate:
+        output_rotate = (360 - int(rotate)) % 360
+
     stats = render_landmarks_video(
         frames_iter,
         frame_sequence,
@@ -439,6 +444,7 @@ def _generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
+        output_rotate=output_rotate,
     )
 
     if stats.frames_written <= 0:
@@ -478,6 +484,7 @@ def run_pipeline(
 
     cap = _open_video_cap(video_path)
     manual_rotate = cfg.pose.rotate
+    rotate_from_metadata = manual_rotate is None
     processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
     metadata_rotation = 0
     warnings: list[str] = []
@@ -644,6 +651,7 @@ def run_pipeline(
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
+                rotate_from_metadata=rotate_from_metadata,
             )
             if overlay_video_path is not None:
                 logger.info("Overlay video generated at %s", overlay_video_path)
