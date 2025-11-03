@@ -28,7 +28,16 @@
 
   const fps = DATA.fps > 0 ? DATA.fps : 1.0;
 
-  const cursor = { type: "line", x0: 0, x1: 0, y0: 0, y1: 1, xref: "x", yref: "paper", line: { width: 2, dash: "dot", color: "#ef4444" } };
+  const cursor = {
+    type: "line",
+    x0: 0,
+    x1: 0,
+    y0: 0,
+    y1: 1,
+    xref: "x",
+    yref: "paper",
+    line: { width: 1, dash: "dot", color: "#ef4444" }
+  };
   const bands = (DATA.rep || []).map(([f0, f1]) => ({
     type: "rect", xref: "x", yref: "paper",
     x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
@@ -44,21 +53,85 @@
     hovermode: "x unified",
     xaxis: { title: (DATA.x_mode === "time") ? "Time (s)" : "Frame", zeroline: false },
     yaxis: { zeroline: false },
+    dragmode: "pan",
     shapes: [cursor, ...bands]
   };
 
   Plotly.newPlot(plot, traces, layout, CFG);
 
+  const hasTimeAxis = DATA.x_mode === "time";
+  const xMin = x.length ? x[0] : 0;
+  const xMax = x.length ? x[x.length - 1] : xMin;
+  const frameMaxFromData = hasTimeAxis ? Math.round(xMax * fps) : Math.round(xMax);
+  const videoFrameLimit = (video && Number.isFinite(video.duration))
+    ? Math.round(video.duration * fps)
+    : frameMaxFromData;
+  const frameUpperBound = Number.isFinite(videoFrameLimit)
+    ? Math.max(0, videoFrameLimit)
+    : frameMaxFromData;
+
   let lastT = -1;
+
+  function clampFrame(frame) {
+    if (!Number.isFinite(frame)) return 0;
+    if (frameUpperBound > 0) {
+      return Math.min(frameUpperBound, Math.max(0, Math.round(frame)));
+    }
+    return Math.max(0, Math.round(frame));
+  }
+
+  function frameFromX(xVal) {
+    const rawFrame = hasTimeAxis ? Math.round(xVal * fps) : Math.round(xVal);
+    return clampFrame(rawFrame);
+  }
+
+  function xFromFrame(frame) {
+    const clamped = clampFrame(frame);
+    return hasTimeAxis ? clamped / fps : clamped;
+  }
+
+  function setCursorForFrame(frame) {
+    const clamped = clampFrame(frame);
+    const time = clamped / fps;
+    if (Math.abs(time - lastT) < 1e-6) {
+      return { frame: clamped, time, x: xFromFrame(clamped) };
+    }
+    lastT = time;
+    const axisValue = xFromFrame(clamped);
+    Plotly.relayout(plot, {"shapes[0].x0": axisValue, "shapes[0].x1": axisValue});
+    return { frame: clamped, time, x: axisValue };
+  }
+
+  function seekVideoToFrame(frame, { pause = true } = {}) {
+    if (!video) return;
+    const { time } = setCursorForFrame(frame);
+    if (!Number.isFinite(time)) return;
+    try {
+      if (pause && !video.paused) {
+        video.pause();
+      }
+      if (Math.abs((video.currentTime || 0) - time) > 1 / fps) {
+        video.currentTime = Math.max(0, time);
+      }
+    } catch (err) {
+      console.warn("Seek error:", err);
+    }
+  }
+
+  function seekVideoToAxis(xVal, opts) {
+    if (!video) return;
+    const clampedX = Math.min(xMax, Math.max(xMin, xVal));
+    const frame = frameFromX(clampedX);
+    seekVideoToFrame(frame, opts);
+  }
+
   function updateCursorFromVideo() {
     if (!video) return;
     const rawT = video.currentTime || 0;
     const frame = Math.max(0, Math.round(rawT * fps));
     const t = frame / fps;
     if (Math.abs(t - lastT) < 0.01) return;
-    lastT = t;
-    const xVal = (DATA.x_mode === "time") ? t : frame;
-    Plotly.relayout(plot, {"shapes[0].x0": xVal, "shapes[0].x1": xVal});
+    setCursorForFrame(frame);
   }
 
   if (video) {
@@ -72,7 +145,7 @@
     updateCursorFromVideo();
   } else {
     const initialX = x.length ? x[0] : 0;
-    Plotly.relayout(plot, {"shapes[0].x0": initialX, "shapes[0].x1": initialX});
+    setCursorForFrame(frameFromX(initialX));
   }
 
   let rafId = null;
@@ -87,16 +160,43 @@
     video.addEventListener("ended", () => { cancelAnimationFrame(rafId); });
   }
 
+  let scrubbing = false;
+  let lastHoverSync = 0;
+
+  function finishScrub() {
+    scrubbing = false;
+  }
+
   if (video) {
+    plot.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target && ev.target.closest && ev.target.closest(".modebar")) return;
+      scrubbing = true;
+      try { video.pause(); } catch (err) {}
+    });
+    window.addEventListener("pointerup", finishScrub);
+    plot.addEventListener("pointerleave", (ev) => {
+      if (!ev.buttons) {
+        finishScrub();
+      }
+    });
+
+    plot.on("plotly_hover", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const isActiveDrag = scrubbing || (ev.event && ev.event.buttons === 1);
+      if (!isActiveDrag) return;
+      const xHover = ev.points[0].x;
+      const now = Date.now();
+      if (now - lastHoverSync < 40) return;
+      lastHoverSync = now;
+      seekVideoToAxis(xHover, { pause: true });
+    });
+
     plot.on("plotly_click", (ev) => {
       if (!ev || !ev.points || !ev.points.length) return;
       const xClicked = ev.points[0].x;
-      const targetFrame = (DATA.x_mode === "time")
-        ? Math.max(0, Math.round(xClicked * fps))
-        : Math.max(0, Math.round(xClicked));
-      const newTime = targetFrame / fps;
-      try { video.currentTime = Math.max(0, newTime); video.pause(); updateCursorFromVideo(); }
-      catch (err) { console.warn("Seek error:", err); }
+      seekVideoToAxis(xClicked, { pause: true });
+      finishScrub();
     });
   }
 
