@@ -106,6 +106,7 @@ def render_video_with_metrics_sync(
     key: str = "video_metrics_sync",
     max_width_px: int = 720,
     show_video: bool = False,
+    sync_channel: str | None = None,
 ) -> None:
     if metrics_df is None or metrics_df.empty:
         st.info("No metrics available to display.")
@@ -147,6 +148,7 @@ def render_video_with_metrics_sync(
         HAS_VIDEO=str(show_video_final).lower(),
         DATA_JSON=data_json,
         PLOT_CONFIG_JSON=plot_config_json,
+        SYNC_CHANNEL=json.dumps(sync_channel),
     )
 
     try:

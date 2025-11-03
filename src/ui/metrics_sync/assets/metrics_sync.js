@@ -6,10 +6,13 @@
   const videoId = "$VIDEO_ID";
   const plotId = "$PLOT_ID";
   const wrapperId = "$WRAPPER_ID";
+  const SYNC_CHANNEL = $SYNC_CHANNEL; // string o null
 
   const video   = HAS_VIDEO ? document.getElementById(videoId) : null;
   const plot    = document.getElementById(plotId);
   const wrapper = document.getElementById(wrapperId);
+  const bc = (SYNC_CHANNEL && typeof BroadcastChannel !== "undefined")
+    ? new BroadcastChannel(SYNC_CHANNEL) : null;
 
   const x = DATA.times.slice();
   const names = Object.keys(DATA.series || {});
@@ -36,8 +39,10 @@
     y1: 1,
     xref: "x",
     yref: "paper",
-    line: { width: 1, dash: "dot", color: "#ef4444" }
+    layer: "above",
+    line: { width: 2, dash: "dot", color: "#ef4444" }
   };
+  const CURSOR_INDEX = 0;
   const bands = (DATA.rep || []).map(([f0, f1]) => ({
     type: "rect", xref: "x", yref: "paper",
     x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
@@ -63,6 +68,7 @@
   const xMin = x.length ? x[0] : 0;
   const xMax = x.length ? x[x.length - 1] : xMin;
   const frameMaxFromData = hasTimeAxis ? Math.round(xMax * fps) : Math.round(xMax);
+  const EPS = (xMax - xMin) * 1e-3 || 1e-6;
   const videoFrameLimit = (video && Number.isFinite(video.duration))
     ? Math.round(video.duration * fps)
     : frameMaxFromData;
@@ -98,7 +104,10 @@
     }
     lastT = time;
     const axisValue = xFromFrame(clamped);
-    Plotly.relayout(plot, {"shapes[0].x0": axisValue, "shapes[0].x1": axisValue});
+    const nextCursor = { ...cursor, x0: axisValue, x1: axisValue };
+    const shapes = plot.layout && Array.isArray(plot.layout.shapes) ? plot.layout.shapes.slice() : [];
+    shapes[CURSOR_INDEX] = nextCursor;
+    Plotly.relayout(plot, { shapes });
     return { frame: clamped, time, x: axisValue };
   }
 
@@ -119,10 +128,11 @@
   }
 
   function seekVideoToAxis(xVal, opts) {
-    if (!video) return;
     const clampedX = Math.min(xMax, Math.max(xMin, xVal));
     const frame = frameFromX(clampedX);
-    seekVideoToFrame(frame, opts);
+    const state = setCursorForFrame(frame);
+    if (video) seekVideoToFrame(frame, opts);
+    if (bc) bc.postMessage({ type: "seek", t: state.time, origin: "metrics" });
   }
 
   function updateCursorFromVideo() {
@@ -132,6 +142,7 @@
     const t = frame / fps;
     if (Math.abs(t - lastT) < 0.01) return;
     setCursorForFrame(frame);
+    if (bc) bc.postMessage({ type: "time", t });
   }
 
   if (video) {
@@ -144,7 +155,8 @@
     });
     updateCursorFromVideo();
   } else {
-    const initialX = x.length ? x[0] : 0;
+    // Evita el borde exacto del eje para que sea visible
+    const initialX = x.length ? Math.min(xMax - EPS, Math.max(xMin + EPS, x[0])) : 0;
     setCursorForFrame(frameFromX(initialX));
   }
 
@@ -198,6 +210,46 @@
       seekVideoToAxis(xClicked, { pause: true });
       finishScrub();
     });
+  }
+
+  if (!video) {
+    plot.on("plotly_hover", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const isActiveDrag = (ev.event && ev.event.buttons === 1);
+      if (!isActiveDrag) return;
+      const xHover = ev.points[0].x;
+      const now = Date.now();
+      if (now - lastHoverSync < 40) return;
+      lastHoverSync = now;
+      seekVideoToAxis(xHover, { pause: true });
+    });
+
+    plot.on("plotly_click", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const xClicked = ev.points[0].x;
+      seekVideoToAxis(xClicked, { pause: true });
+      finishScrub();
+    });
+  }
+
+  // Canal de sincronía: recibir tiempo/seek externo
+  if (bc) {
+    bc.onmessage = (ev) => {
+      const msg = ev && ev.data ? ev.data : null;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "time" && Number.isFinite(msg.t)) {
+        const frame = Math.max(0, Math.round(msg.t * fps));
+        setCursorForFrame(frame);
+      } else if (msg.type === "seek" && Number.isFinite(msg.t)) {
+        const target = Math.max(0, msg.t);
+        if (video) {
+          try { if (!video.paused) video.pause(); video.currentTime = target; } catch (e) {}
+        } else {
+          const frame = Math.max(0, Math.round(target * fps));
+          setCursorForFrame(frame);
+        }
+      }
+    };
   }
 
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));
