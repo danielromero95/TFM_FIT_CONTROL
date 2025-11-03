@@ -51,14 +51,45 @@
   }));
 
   const layout = {
-    margin: {l: 40, r: 20, t: 10, b: 40},
+    // más espacio abajo para la leyenda horizontal
+    margin: { l: 40, r: 20, t: 10, b: 64 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    showlegend: true,
     hovermode: "x unified",
-    xaxis: { title: (DATA.x_mode === "time") ? "Time (s)" : "Frame", zeroline: false },
-    yaxis: { zeroline: false },
     dragmode: "pan",
+    showlegend: true,
+    // texto en blanco (aplica a ejes, leyenda, hoverlabel por defecto)
+    font: { color: "#ffffff" },
+    // ejes: ticks y títulos en blanco, rejilla sutil
+    xaxis: {
+      title: (DATA.x_mode === "time") ? "Time (s)" : "Frame",
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(255,255,255,0.08)",
+      gridwidth: 1,
+      linecolor: "rgba(255,255,255,0.20)",
+      ticks: "outside",
+      tickfont: { color: "#ffffff" },
+      titlefont: { color: "#ffffff" }
+    },
+    yaxis: {
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(255,255,255,0.08)",
+      gridwidth: 1,
+      linecolor: "rgba(255,255,255,0.20)",
+      ticks: "outside",
+      tickfont: { color: "#ffffff" },
+      titlefont: { color: "#ffffff" }
+    },
+    // leyenda horizontal debajo del gráfico
+    legend: {
+      orientation: "h",
+      x: 0, xanchor: "left",
+      y: -0.2, yanchor: "top",
+      bgcolor: "rgba(0,0,0,0)",
+      font: { color: "#ffffff" }
+    },
     shapes: [cursor, ...bands]
   };
 
