@@ -39,8 +39,10 @@
     y1: 1,
     xref: "x",
     yref: "paper",
-    line: { width: 1, dash: "dot", color: "#ef4444" }
+    layer: "above",
+    line: { width: 2, dash: "dot", color: "#ef4444" }
   };
+  const CURSOR_INDEX = 0;
   const bands = (DATA.rep || []).map(([f0, f1]) => ({
     type: "rect", xref: "x", yref: "paper",
     x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
@@ -66,6 +68,7 @@
   const xMin = x.length ? x[0] : 0;
   const xMax = x.length ? x[x.length - 1] : xMin;
   const frameMaxFromData = hasTimeAxis ? Math.round(xMax * fps) : Math.round(xMax);
+  const EPS = (xMax - xMin) * 1e-3 || 1e-6;
   const videoFrameLimit = (video && Number.isFinite(video.duration))
     ? Math.round(video.duration * fps)
     : frameMaxFromData;
@@ -101,7 +104,10 @@
     }
     lastT = time;
     const axisValue = xFromFrame(clamped);
-    Plotly.relayout(plot, {"shapes[0].x0": axisValue, "shapes[0].x1": axisValue});
+    const nextCursor = { ...cursor, x0: axisValue, x1: axisValue };
+    const shapes = plot.layout && Array.isArray(plot.layout.shapes) ? plot.layout.shapes.slice() : [];
+    shapes[CURSOR_INDEX] = nextCursor;
+    Plotly.relayout(plot, { shapes });
     return { frame: clamped, time, x: axisValue };
   }
 
@@ -149,7 +155,8 @@
     });
     updateCursorFromVideo();
   } else {
-    const initialX = x.length ? x[0] : 0;
+    // Evita el borde exacto del eje para que sea visible
+    const initialX = x.length ? Math.min(xMax - EPS, Math.max(xMin + EPS, x[0])) : 0;
     setCursorForFrame(frameFromX(initialX));
   }
 
