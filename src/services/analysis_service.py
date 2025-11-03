@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,74 @@ from src.services.errors import NoFramesExtracted, VideoOpenError
 
 
 logger = logging.getLogger(__name__)
+
+
+def _infer_upright_quadrant_from_sequence(
+    sequence: np.ndarray,
+    *,
+    sample: int = 25,
+    min_valid: int = 6,
+    dominance: float = 1.15,
+) -> int:
+    """Infer the clockwise rotation (0/90/180/270) required to make the subject upright."""
+
+    T = len(sequence) if sequence is not None else 0
+    if T == 0:
+        return 0
+
+    idxs = np.linspace(0, T - 1, num=min(T, sample), dtype=int)
+
+    angles: list[float] = []
+    votes: list[int] = []
+
+    for i in idxs:
+        frame = sequence[i]
+        if frame is None:
+            continue
+        try:
+            hx = (float(frame[23]["x"]) + float(frame[24]["x"])) * 0.5
+            hy = (float(frame[23]["y"]) + float(frame[24]["y"])) * 0.5
+            sx = (float(frame[11]["x"]) + float(frame[12]["x"])) * 0.5
+            sy = (float(frame[11]["y"]) + float(frame[12]["y"])) * 0.5
+        except Exception:
+            continue
+        if not (
+            math.isfinite(hx)
+            and math.isfinite(hy)
+            and math.isfinite(sx)
+            and math.isfinite(sy)
+        ):
+            continue
+
+        dx = sx - hx
+        dy = sy - hy
+
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            continue
+
+        ang = math.degrees(math.atan2(dx, -dy)) % 360.0
+        angles.append(ang)
+
+        ax, ay = abs(dx), abs(dy)
+        # Vote the corrective rotation (clockwise) required to make the subject upright.
+        # Vertical dominant: above (dy<0) => no rotation, below => 180° CW
+        if ay >= ax * dominance:
+            votes.append(0 if dy < 0 else 180)
+        # Horizontal dominant: head to the right (dx>0) => rotate 270° CW (-90°),
+        # head to the left => rotate 90° CW.
+        elif ax >= ay * dominance:
+            votes.append(270 if dx > 0 else 90)
+
+    if len(angles) < min_valid:
+        return 0
+
+    if votes:
+        counts = {v: votes.count(v) for v in (0, 90, 180, 270)}
+        return max(counts, key=counts.get)
+
+    median_ang = float(np.median(np.asarray(angles, dtype=float)))
+    quant = int(round(median_ang / 90.0) * 90) % 360
+    return (360 - quant) % 360
 
 
 @dataclass
@@ -384,7 +453,7 @@ def _generate_overlay_video(
     sample_rate: int,
     target_fps: Optional[float],
     fps_for_writer: float,
-    rotate_from_metadata: bool = True,
+    output_rotate: int = 0,
     progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> Optional[Path]:
     """Render a debug overlay video matching the original resolution."""
@@ -434,8 +503,6 @@ def _generate_overlay_video(
         max_frames=total_frames,
     )
 
-    output_rotate = 0
-
     stats = render_landmarks_video(
         frames_iter,
         frame_sequence,
@@ -443,7 +510,7 @@ def _generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
-        output_rotate=output_rotate,
+        output_rotate=int(output_rotate) % 360,
         tighten_to_subject=False,  # keep full frame; cropping handled upstream when needed
         subject_margin=0.15,
         progress_cb=progress_cb,
@@ -486,7 +553,6 @@ def run_pipeline(
 
     cap = _open_video_cap(video_path)
     manual_rotate = cfg.pose.rotate
-    rotate_from_metadata = manual_rotate is None
     processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
     warnings: list[str] = []
     skip_reason: Optional[str] = None
@@ -631,6 +697,11 @@ def run_pipeline(
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes = _filter_landmarks(df_raw_landmarks)
+    overlay_rotate_cw = _infer_upright_quadrant_from_sequence(filtered_sequence)
+    logger.info(
+        "Overlay rotation (clockwise) inferred from landmarks: %d°",
+        overlay_rotate_cw,
+    )
 
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
@@ -663,7 +734,7 @@ def run_pipeline(
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
-                rotate_from_metadata=False,
+                output_rotate=overlay_rotate_cw,
                 progress_cb=_overlay_progress,
             )
             if overlay_video_path is not None:
