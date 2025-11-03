@@ -6,10 +6,13 @@
   const videoId = "$VIDEO_ID";
   const plotId = "$PLOT_ID";
   const wrapperId = "$WRAPPER_ID";
+  const SYNC_CHANNEL = $SYNC_CHANNEL; // string o null
 
   const video   = HAS_VIDEO ? document.getElementById(videoId) : null;
   const plot    = document.getElementById(plotId);
   const wrapper = document.getElementById(wrapperId);
+  const bc = (SYNC_CHANNEL && typeof BroadcastChannel !== "undefined")
+    ? new BroadcastChannel(SYNC_CHANNEL) : null;
 
   const x = DATA.times.slice();
   const names = Object.keys(DATA.series || {});
@@ -119,10 +122,11 @@
   }
 
   function seekVideoToAxis(xVal, opts) {
-    if (!video) return;
     const clampedX = Math.min(xMax, Math.max(xMin, xVal));
     const frame = frameFromX(clampedX);
-    seekVideoToFrame(frame, opts);
+    const state = setCursorForFrame(frame);
+    if (video) seekVideoToFrame(frame, opts);
+    if (bc) bc.postMessage({ type: "seek", t: state.time, origin: "metrics" });
   }
 
   function updateCursorFromVideo() {
@@ -132,6 +136,7 @@
     const t = frame / fps;
     if (Math.abs(t - lastT) < 0.01) return;
     setCursorForFrame(frame);
+    if (bc) bc.postMessage({ type: "time", t });
   }
 
   if (video) {
@@ -198,6 +203,46 @@
       seekVideoToAxis(xClicked, { pause: true });
       finishScrub();
     });
+  }
+
+  if (!video) {
+    plot.on("plotly_hover", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const isActiveDrag = (ev.event && ev.event.buttons === 1);
+      if (!isActiveDrag) return;
+      const xHover = ev.points[0].x;
+      const now = Date.now();
+      if (now - lastHoverSync < 40) return;
+      lastHoverSync = now;
+      seekVideoToAxis(xHover, { pause: true });
+    });
+
+    plot.on("plotly_click", (ev) => {
+      if (!ev || !ev.points || !ev.points.length) return;
+      const xClicked = ev.points[0].x;
+      seekVideoToAxis(xClicked, { pause: true });
+      finishScrub();
+    });
+  }
+
+  // Canal de sincronía: recibir tiempo/seek externo
+  if (bc) {
+    bc.onmessage = (ev) => {
+      const msg = ev && ev.data ? ev.data : null;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "time" && Number.isFinite(msg.t)) {
+        const frame = Math.max(0, Math.round(msg.t * fps));
+        setCursorForFrame(frame);
+      } else if (msg.type === "seek" && Number.isFinite(msg.t)) {
+        const target = Math.max(0, msg.t);
+        if (video) {
+          try { if (!video.paused) video.pause(); video.currentTime = target; } catch (e) {}
+        } else {
+          const frame = Math.max(0, Math.round(target * fps));
+          setCursorForFrame(frame);
+        }
+      }
+    };
   }
 
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));

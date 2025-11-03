@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import inspect
 from base64 import b64encode
@@ -113,6 +114,7 @@ def render_uniform_video(
     bottom_margin: float = DEFAULT_VIDEO_BOTTOM_REM,
     fixed_height_px: int | None = VIDEO_VIEWPORT_HEIGHT_PX,
     portrait_height_px: int = 560,
+    sync_channel: str | None = None,
 ) -> None:
     """Render ``data`` inside a viewport with fixed height and full width."""
 
@@ -154,6 +156,7 @@ def render_uniform_video(
         </div>
         <script>
           (function() {{
+            const SYNC_CHANNEL = {json.dumps(sync_channel)};
             const fallbackPad = {iframe_pad_px};
             const padVar = getComputedStyle(document.documentElement).getPropertyValue('--fc-iframe-pad').trim();
             const parsedPad = Number.parseFloat(padVar || '');
@@ -210,6 +213,28 @@ def render_uniform_video(
                   }}
                 }}
               }}, {{ once: true }});
+
+              // BroadcastChannel sync (segundos)
+              const bc = (SYNC_CHANNEL && typeof BroadcastChannel !== 'undefined')
+                ? new BroadcastChannel(SYNC_CHANNEL) : null;
+              if (bc) {{
+                const publish = () => bc.postMessage({{ type: 'time', t: video.currentTime || 0 }});
+                ['timeupdate','seeked','play'].forEach((ev) => video.addEventListener(ev, publish));
+                const loop = () => {{
+                  if (!video.paused && !video.ended) {{
+                    bc.postMessage({{ type: 'time', t: video.currentTime || 0 }});
+                    requestAnimationFrame(loop);
+                  }}
+                }};
+                video.addEventListener('play', loop);
+                bc.onmessage = (ev) => {{
+                  const msg = ev && ev.data ? ev.data : null;
+                  if (!msg || typeof msg !== 'object') return;
+                  if (msg.type === 'seek' && Number.isFinite(msg.t)) {{
+                    try {{ video.currentTime = Math.max(0, msg.t); }} catch (e) {{}}
+                  }}
+                }};
+              }}
             }}
           }})();
         </script>

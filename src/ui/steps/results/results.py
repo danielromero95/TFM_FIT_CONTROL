@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -13,6 +13,7 @@ except Exception:
 
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
+from src.ui.metrics_sync.viewer import render_video_with_metrics_sync
 from src.ui.state import get_state
 from ..utils import step_container
 
@@ -153,7 +154,31 @@ def _results_panel() -> Dict[str, bool]:
                         key="metrics_multiselect",
                     )
                     if selected_metrics:
-                        st.line_chart(metrics_df[selected_metrics])
+                        rep_intervals = _compute_rep_intervals(
+                            metrics_df=metrics_df,
+                            report=report,
+                            stats=stats,
+                            numeric_columns=numeric_columns,
+                        )
+                        sync_channel = None
+                        if getattr(stats, "config_sha1", None):
+                            frames_val = getattr(stats, "frames", None)
+                            if frames_val is not None:
+                                sync_channel = f"vmx-sync-{stats.config_sha1}-{frames_val}"
+
+                        render_video_with_metrics_sync(
+                            video_path=None,
+                            metrics_df=metrics_df,
+                            selected_metrics=selected_metrics,
+                            fps=stats.fps_effective,
+                            rep_intervals=rep_intervals,
+                            start_at_s=None,
+                            scroll_zoom=True,
+                            key="results_video_metrics_sync",
+                            max_width_px=720,
+                            show_video=False,
+                            sync_channel=sync_channel,
+                        )
                     else:
                         st.info("Select at least one metric to visualize.")
                 else:

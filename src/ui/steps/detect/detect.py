@@ -37,6 +37,8 @@ def _detect_step() -> None:
         st.markdown("### 2. Detect the exercise")
 
         state = get_state()
+        report = getattr(state, "report", None)
+        stats = getattr(report, "stats", None)
         video_path = state.video_path
         debug_requested = bool((state.configure_values or {}).get("debug_video", True))
 
@@ -50,8 +52,7 @@ def _detect_step() -> None:
             else:
                 overlay_missing = True
 
-        if overlay_source is None and state.step in (Step.RUNNING, Step.RESULTS):
-            report = getattr(state, "report", None)
+        if overlay_source is None:
             candidate_value = None
             if report is not None:
                 for attr in (
@@ -73,11 +74,13 @@ def _detect_step() -> None:
                     overlay_missing = True
 
         base_video = str(video_path) if video_path else None
-        use_overlay = (
-            state.step in (Step.RUNNING, Step.RESULTS)
-            and overlay_source is not None
-        )
-        video_to_show = overlay_source if use_overlay else base_video
+        video_to_show = overlay_source or base_video
+
+        sync_channel = None
+        if stats and getattr(stats, "config_sha1", None):
+            frames_val = getattr(stats, "frames", None)
+            if frames_val is not None:
+                sync_channel = f"vmx-sync-{stats.config_sha1}-{frames_val}"
 
         if video_to_show:
             render_uniform_video(
@@ -85,6 +88,7 @@ def _detect_step() -> None:
                 key="detect_primary_video",
                 fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
                 bottom_margin=0.0,
+                sync_channel=sync_channel,
             )
 
         if (
