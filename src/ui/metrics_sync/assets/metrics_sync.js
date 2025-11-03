@@ -16,6 +16,9 @@
 
   const x = DATA.times.slice();
   const names = Object.keys(DATA.series || {});
+  const thr = Array.isArray(DATA.thr)
+    ? DATA.thr.filter((v) => Number.isFinite(v))
+    : [];
   if (!names.length) {
     plot.innerHTML = "<div style='color:#9ca3af'>No series to render.</div>";
     return;
@@ -43,6 +46,17 @@
     line: { width: 2, dash: "dot", color: "#ef4444" }
   };
   const CURSOR_INDEX = 0;
+  const thrShapes = thr.map((y) => ({
+    type: "line",
+    xref: "paper",
+    yref: "y",
+    x0: 0,
+    x1: 1,
+    y0: y,
+    y1: y,
+    layer: "above",
+    line: { width: 1, dash: "dot", color: "rgba(255,255,255,0.7)" }
+  }));
   const bands = (DATA.rep || []).map(([f0, f1]) => ({
     type: "rect", xref: "x", yref: "paper",
     x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
@@ -51,15 +65,44 @@
   }));
 
   const layout = {
-    margin: {l: 40, r: 20, t: 10, b: 40},
+    margin: { l: 40, r: 20, t: 10, b: 80 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     showlegend: true,
     hovermode: "x unified",
-    xaxis: { title: (DATA.x_mode === "time") ? "Time (s)" : "Frame", zeroline: false },
-    yaxis: { zeroline: false },
     dragmode: "pan",
-    shapes: [cursor, ...bands]
+    xaxis: {
+      title: (DATA.x_mode === "time") ? "Time (s)" : "Frame",
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(255,255,255,0.10)",
+      gridwidth: 1,
+      linecolor: "rgba(255,255,255,0.25)",
+      tickfont: { color: "#ffffff" },
+      titlefont: { color: "#ffffff" }
+    },
+    yaxis: {
+      zeroline: false,
+      showgrid: true,
+      gridcolor: "rgba(255,255,255,0.10)",
+      gridwidth: 1,
+      linecolor: "rgba(255,255,255,0.25)",
+      tickfont: { color: "#ffffff" }
+    },
+    hoverlabel: {
+      bgcolor: "rgba(17,24,39,0.85)",
+      bordercolor: "rgba(255,255,255,0.15)",
+      font: { color: "#ffffff" }
+    },
+    legend: {
+      orientation: "h",
+      x: 0,
+      y: -0.32,
+      xanchor: "left",
+      yanchor: "top",
+      font: { color: "#ffffff" }
+    },
+    shapes: [cursor, ...thrShapes, ...bands]
   };
 
   Plotly.newPlot(plot, traces, layout, CFG);
