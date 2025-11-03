@@ -435,8 +435,6 @@ def _generate_overlay_video(
     )
 
     output_rotate = 0
-    if rotate_from_metadata and rotate:
-        output_rotate = (360 - int(rotate)) % 360
 
     stats = render_landmarks_video(
         frames_iter,
@@ -665,7 +663,7 @@ def run_pipeline(
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
                 fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
-                rotate_from_metadata=rotate_from_metadata,
+                rotate_from_metadata=False,
                 progress_cb=_overlay_progress,
             )
             if overlay_video_path is not None:
