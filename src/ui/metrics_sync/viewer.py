@@ -101,6 +101,7 @@ def render_video_with_metrics_sync(
     selected_metrics: list[str],
     fps: float | int,
     rep_intervals: list[tuple[int, int]] | None = None,
+    thresholds: list[float] | tuple[float, float] | None = None,
     start_at_s: float | None = None,
     scroll_zoom: bool = True,
     key: str = "video_metrics_sync",
@@ -118,6 +119,24 @@ def render_video_with_metrics_sync(
     payload = _build_payload(metrics_df, selected_metrics, fps=fps)
     payload["rep"] = rep_intervals or []
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
+    thr_values: list[float] = []
+    if thresholds is not None:
+        if isinstance(thresholds, (int, float)):
+            candidates = [thresholds]
+        else:
+            try:
+                candidates = list(thresholds)
+            except TypeError:
+                candidates = [thresholds]
+        for value in candidates:
+            try:
+                fv = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(fv):
+                thr_values.append(fv)
+    if thr_values:
+        payload["thr"] = thr_values
 
     data_json = json.dumps(payload, separators=(",", ":"))
     plot_config_json = json.dumps(

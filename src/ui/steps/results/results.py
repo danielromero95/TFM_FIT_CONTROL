@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -160,6 +161,18 @@ def _results_panel() -> Dict[str, bool]:
                             stats=stats,
                             numeric_columns=numeric_columns,
                         )
+                        cfg_vals = state.configure_values or {}
+                        thresholds: List[float] = []
+                        for key in ("low", "high"):
+                            if key not in cfg_vals:
+                                continue
+                            try:
+                                value = float(cfg_vals[key])
+                            except (TypeError, ValueError):
+                                continue
+                            if not math.isfinite(value):
+                                continue
+                            thresholds.append(value)
                         sync_channel = None
                         if getattr(stats, "config_sha1", None):
                             frames_val = getattr(stats, "frames", None)
@@ -172,6 +185,7 @@ def _results_panel() -> Dict[str, bool]:
                             selected_metrics=selected_metrics,
                             fps=stats.fps_effective,
                             rep_intervals=rep_intervals,
+                            thresholds=thresholds,
                             start_at_s=None,
                             scroll_zoom=True,
                             key="results_video_metrics_sync",
