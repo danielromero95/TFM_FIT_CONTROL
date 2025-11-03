@@ -65,7 +65,7 @@
   }));
 
   const layout = {
-    margin: { l: 40, r: 20, t: 10, b: 80 },
+    margin: { l: 40, r: 20, t: 10, b: 40 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     showlegend: true,
@@ -95,11 +95,6 @@
       font: { color: "#ffffff" }
     },
     legend: {
-      orientation: "h",
-      x: 0,
-      y: -0.32,
-      xanchor: "left",
-      yanchor: "top",
       font: { color: "#ffffff" }
     },
     shapes: [cursor, ...thrShapes, ...bands]
