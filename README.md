@@ -2,7 +2,7 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.6 (03-11-2025)
+**Version:** 2.7 (03-11-2025)
 
 ---
 
@@ -69,6 +69,13 @@ streamlit run src/app.py
 5. Results: repetition count, metrics, optional debug video, downloads.
 
 ---
+## What’s new in 2.7
+
+- Video rotation is now fully corrected across the pipeline, preventing flipped overlays and ensuring exported debug videos respect the intended orientation.
+- Metrics visualization stays synchronized with playback: the cursor marker, overlays, and chart layout were refined so interactions remain frame-accurate even after relayouts.
+- BroadcastChannel synchronization links the detection view and metrics viewer, keeping multiple components in lockstep during playback.
+- Landmark-aware overlay adjustments keep rotations consistent when mixing rendered landmarks with captured frames.
+
 ## What’s new in 2.6
 
 - Single source of truth for repetition counting
