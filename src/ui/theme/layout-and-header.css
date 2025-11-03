@@ -10,6 +10,16 @@ header[data-testid="stHeader"] {
   z-index: 1000;
 }
 
+header[data-testid="stHeader"] .app-toolbar-title {
+  display: block;
+  color: var(--fc-fg);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.2;
+  margin-right: auto;
+  padding-left: 1rem;
+}
+
 /* Pack content closer to header: keep Streamlit paddings minimal */
 section[data-testid="stMain"], main { padding-top: 0 !important; }
 section[data-testid="stMain"] > div:first-child,
@@ -42,5 +52,10 @@ main [data-testid="column"] > div > [data-testid="stVerticalBlock"] {
   header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
 }
 @media (max-width: 420px) {
-  header[data-testid="stHeader"] .app-toolbar-title { display: none; }
+  header[data-testid="stHeader"] .app-toolbar-title {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
