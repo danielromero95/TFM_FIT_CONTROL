@@ -231,6 +231,31 @@ def calculate_metrics_from_sequence(
     x_norm = xs - hip_cx[:, None]
     y_norm = ys - hip_cy[:, None]
 
+    left_hip = _angle_deg(
+        x_norm[:, 11],
+        y_norm[:, 11],
+        x_norm[:, 23],
+        y_norm[:, 23],
+        x_norm[:, 25],
+        y_norm[:, 25],
+    )
+    right_hip = _angle_deg(
+        x_norm[:, 12],
+        y_norm[:, 12],
+        x_norm[:, 24],
+        y_norm[:, 24],
+        x_norm[:, 26],
+        y_norm[:, 26],
+    )
+
+    shoulder_mid_x = (x_norm[:, 11] + x_norm[:, 12]) * 0.5
+    shoulder_mid_y = (y_norm[:, 11] + y_norm[:, 12]) * 0.5
+    hip_mid_x = (x_norm[:, 23] + x_norm[:, 24]) * 0.5
+    hip_mid_y = (y_norm[:, 23] + y_norm[:, 24]) * 0.5
+    dx = np.abs(shoulder_mid_x - hip_mid_x)
+    dy = np.abs(shoulder_mid_y - hip_mid_y)
+    trunk_inclination_deg = np.degrees(np.arctan2(dx, dy + 1e-6))
+
     left_knee = _angle_deg(
         x_norm[:, 23],
         y_norm[:, 23],
@@ -275,13 +300,26 @@ def calculate_metrics_from_sequence(
             "right_knee": right_knee,
             "left_elbow": left_elbow,
             "right_elbow": right_elbow,
+            "left_hip": left_hip,
+            "right_hip": right_hip,
+            "trunk_inclination_deg": trunk_inclination_deg,
             "shoulder_width": shoulder_width,
             "foot_separation": foot_separation,
         }
     )
 
-    angle_columns = ["left_knee", "right_knee", "left_elbow", "right_elbow"]
+    angle_columns = [
+        "left_knee",
+        "right_knee",
+        "left_elbow",
+        "right_elbow",
+        "left_hip",
+        "right_hip",
+    ]
     raw_angles = dfm[angle_columns].copy()
+
+    for column in angle_columns:
+        dfm[f"raw_{column}"] = raw_angles[column]
 
     for column in angle_columns:
         dfm[column] = dfm[column].interpolate(method="linear", limit_direction="both")

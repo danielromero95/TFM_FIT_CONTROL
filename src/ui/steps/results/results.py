@@ -130,11 +130,17 @@ def _results_panel() -> Dict[str, bool]:
             if metrics_df is not None:
                 metrics_df = metrics_df.reset_index(drop=True)
 
-            numeric_columns: List[str] = [
-                c
-                for c in metrics_df.columns
-                if metrics_df[c].dtype.kind in "fi" and c != "frame_idx"
-            ] if metrics_df is not None else []
+            numeric_columns: List[str] = []
+            raw_numeric_columns: List[str] = []
+            if metrics_df is not None:
+                numeric_candidates = [
+                    c
+                    for c in metrics_df.columns
+                    if metrics_df[c].dtype.kind in "fi" and c != "frame_idx"
+                ]
+                raw_numeric_columns = [c for c in numeric_candidates if c.startswith("raw_")]
+                numeric_columns = [c for c in numeric_candidates if not c.startswith("raw_")]
+            metric_options = numeric_columns + raw_numeric_columns
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
@@ -147,11 +153,11 @@ def _results_panel() -> Dict[str, bool]:
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
-                if numeric_columns:
+                if metric_options:
                     selected_metrics = st.multiselect(
                         "View metrics",
-                        options=numeric_columns,
-                        default=numeric_columns[:3],
+                        options=metric_options,
+                        default=(numeric_columns[:3] if numeric_columns else metric_options[:3]),
                         key="metrics_multiselect",
                     )
                     if selected_metrics:
@@ -159,7 +165,7 @@ def _results_panel() -> Dict[str, bool]:
                             metrics_df=metrics_df,
                             report=report,
                             stats=stats,
-                            numeric_columns=numeric_columns,
+                            numeric_columns=(numeric_columns if numeric_columns else metric_options),
                         )
                         cfg_vals = state.configure_values or {}
                         thresholds: List[float] = []
