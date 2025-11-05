@@ -749,13 +749,20 @@ def run_pipeline(
         angle_range,
         metrics_warnings,
         metrics_skip_reason,
-    ) = _compute_metrics_and_angle(filtered_sequence, cfg.counting.primary_angle, fps_effective)
+        chosen_primary,
+    ) = _compute_metrics_and_angle(
+        filtered_sequence,
+        cfg.counting.primary_angle,
+        fps_effective,
+        exercise=detected_label,
+        view=detected_view,
+    )
     warnings.extend(metrics_warnings)
     if skip_reason is None and metrics_skip_reason is not None:
         skip_reason = metrics_skip_reason
     t_metrics_end = time.perf_counter()
 
-    primary_angle = cfg.counting.primary_angle
+    primary_angle = chosen_primary or cfg.counting.primary_angle
 
     if angle_range < cfg.counting.min_angle_excursion_deg and skip_reason is None:
         skip_reason = (
@@ -765,6 +772,8 @@ def run_pipeline(
         warnings.append(skip_reason)
 
     reps = 0
+    if chosen_primary and chosen_primary != cfg.counting.primary_angle:
+        cfg.counting.primary_angle = chosen_primary  # keep stats truthful; fingerprint stays as-is
     if skip_reason is None:
         t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
@@ -1014,9 +1023,59 @@ def _filter_landmarks(df_raw: "pd.DataFrame") -> tuple["pd.DataFrame", object]:
     return filter_and_interpolate_landmarks(df_raw)
 
 
+def _choose_primary_angle(
+    exercise: str | ExerciseType, view: str | ViewType, df: "pd.DataFrame"
+) -> str | None:
+    ex = as_exercise(exercise).value
+    vw = as_view(view).value
+    # Candidate map per exercise
+    candidates_map = {
+        "squat": ["left_knee", "right_knee"],
+        "bench_press": ["left_elbow", "right_elbow"],
+        "deadlift": ["left_hip", "right_hip"],
+    }
+    candidates = [c for c in candidates_map.get(ex, []) if c in df.columns]
+    if not candidates:
+        return None
+
+    def series_for(col: str):
+        # Prefer raw if present; else fall back to (interpolated) col
+        raw_name = f"raw_{col}"
+        base = df[raw_name] if raw_name in df.columns else df[col]
+        return pd.to_numeric(base, errors="coerce")
+
+    def quality(col: str) -> tuple[float, float]:
+        s = series_for(col)
+        finite = s.dropna()
+        if finite.empty:
+            return (0.0, 0.0)
+        coverage = float(finite.size) / float(max(1, s.size))
+        rom = float(finite.max() - finite.min())
+        return (coverage, rom)
+
+    # pick by coverage then ROM
+    candidates.sort(key=lambda c: quality(c), reverse=True)
+    chosen = candidates[0] if candidates else None
+    if chosen:
+        logger.info(
+            "PRIMARY AUTO-SELECT: exercise=%s view=%s candidates=%s → chosen=%s (coverage,ROM)=%s",
+            ex,
+            vw,
+            candidates,
+            chosen,
+            quality(chosen),
+        )
+    return chosen
+
+
 def _compute_metrics_and_angle(
-    df_seq: "pd.DataFrame", primary_angle: str, fps_effective: float
-) -> tuple["pd.DataFrame", float, list[str], Optional[str]]:
+    df_seq: "pd.DataFrame",
+    primary_angle: str,
+    fps_effective: float,
+    *,
+    exercise: ExerciseType | str = ExerciseType.UNKNOWN,
+    view: ViewType | str = ViewType.UNKNOWN,
+) -> tuple["pd.DataFrame", float, list[str], Optional[str], Optional[str]]:
     """Compute biomechanical metrics and derive the primary angle excursion."""
 
     warnings: list[str] = []
@@ -1025,22 +1084,34 @@ def _compute_metrics_and_angle(
     df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective)
     angle_range = 0.0
 
-    if not df_metrics.empty and primary_angle in df_metrics.columns:
-        series = df_metrics[primary_angle].dropna()
+    chosen_primary = primary_angle
+    if (not chosen_primary) or (chosen_primary == "auto") or (
+        chosen_primary not in df_metrics.columns
+    ):
+        chosen = _choose_primary_angle(exercise, view, df_metrics)
+        if chosen:
+            chosen_primary = chosen
+
+    if chosen_primary and chosen_primary in df_metrics.columns:
+        series = df_metrics[chosen_primary].dropna()
         if not series.empty:
             angle_range = float(series.max() - series.min())
         else:
             warnings.append(
-                f"No valid values could be obtained for the primary angle '{primary_angle}'."
+                f"No valid values could be obtained for the primary angle '{chosen_primary}'."
             )
             skip_reason = "The primary angle column does not contain valid data."
     else:
-        warnings.append(
-            f"The primary angle column '{primary_angle}' is not present in the metrics."
-        )
+        missing_column = chosen_primary or primary_angle
+        if missing_column:
+            warnings.append(
+                f"The primary angle column '{missing_column}' is not present in the metrics."
+            )
+        else:
+            warnings.append("No valid primary angle column could be determined from the metrics.")
         skip_reason = "The primary angle column was not found in the metrics."
 
-    return df_metrics, angle_range, warnings, skip_reason
+    return df_metrics, angle_range, warnings, skip_reason, chosen_primary
 
 
 def _maybe_count_reps(
