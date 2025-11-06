@@ -63,6 +63,7 @@ class Report:
     config_used: config.Config
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
+    effective_config_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Preserve the dictionary-based API used by the existing front-ends."""
@@ -83,5 +84,8 @@ class Report:
             "config_sha1": self.stats.config_sha1,
             "warnings": list(self.stats.warnings),
             "config_path": str(self.stats.config_path) if self.stats.config_path else None,
+            "effective_config_path": str(self.effective_config_path)
+            if self.effective_config_path
+            else None,
         }
         return legacy

@@ -154,10 +154,25 @@ def _results_panel() -> Dict[str, bool]:
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
                 if metric_options:
+                    # Prefer exercise-specific metrics for defaults
+                    ex = getattr(stats, "exercise_detected", "")
+                    ex_str = getattr(ex, "value", str(ex))
+                    preferred_by_ex = {
+                        "squat": ["left_knee", "right_knee", "trunk_inclination_deg"],
+                        "bench_press": ["left_elbow", "right_elbow", "shoulder_width"],
+                        "deadlift": ["left_hip", "right_hip", "trunk_inclination_deg"],
+                    }
+                    preferred = [m for m in preferred_by_ex.get(ex_str, []) if m in numeric_columns]
+                    chosen = getattr(stats, "primary_angle", None)
+                    if chosen and chosen in numeric_columns and chosen not in preferred:
+                        preferred = [chosen] + preferred
+                    default_selection = preferred[:3] or (
+                        numeric_columns[:3] if numeric_columns else metric_options[:3]
+                    )
                     selected_metrics = st.multiselect(
                         "View metrics",
                         options=metric_options,
-                        default=(numeric_columns[:3] if numeric_columns else metric_options[:3]),
+                        default=default_selection,
                         key="metrics_multiselect",
                     )
                     if selected_metrics:
@@ -239,6 +254,20 @@ def _results_panel() -> Dict[str, bool]:
 
             if stats.skip_reason:
                 st.error(f"Repetition counting skipped: {stats.skip_reason}")
+
+            eff_path = getattr(report, "effective_config_path", None)
+            if eff_path:
+                try:
+                    eff_bytes = Path(eff_path).read_bytes()
+                except Exception:
+                    pass
+                else:
+                    st.download_button(
+                        "Download effective config",
+                        data=eff_bytes,
+                        file_name=Path(eff_path).name,
+                        mime="application/json",
+                    )
 
             with st.expander("Run statistics (optional)", expanded=False):
                 try:

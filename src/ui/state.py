@@ -23,9 +23,7 @@ DEFAULT_EXERCISE_LABEL = "Auto-Detect"
 CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "low": 80,
     "high": 150,
-    "primary_angle": "left_knee",
-    "min_prominence": 10.0,
-    "min_distance_sec": 0.5,
+    "primary_angle": "auto",
     "debug_video": True,
     "use_crop": True,
 }
