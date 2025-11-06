@@ -169,11 +169,23 @@ def _results_panel() -> Dict[str, bool]:
                     default_selection = preferred[:3] or (
                         numeric_columns[:3] if numeric_columns else metric_options[:3]
                     )
+
+                    run_sig = getattr(stats, "config_sha1", "") or ""
+                    frames_val = getattr(stats, "frames", None)
+                    if frames_val is not None:
+                        run_sig = f"{run_sig}-{frames_val}"
+                    default_key = f"metrics_default_{run_sig}"
+
+                    if default_key not in st.session_state:
+                        st.session_state[default_key] = default_selection
+
+                    widget_key = f"metrics_multiselect_{run_sig}"
+
                     selected_metrics = st.multiselect(
                         "View metrics",
                         options=metric_options,
-                        default=default_selection,
-                        key="metrics_multiselect",
+                        default=st.session_state[default_key],
+                        key=widget_key,
                     )
                     if selected_metrics:
                         rep_intervals = _compute_rep_intervals(

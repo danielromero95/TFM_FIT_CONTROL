@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.state import CONFIG_DEFAULTS, Step, get_state, go_to
+from src.ui.state import CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step, get_state, go_to
+from src.ui.steps.detect import EXERCISE_TO_CONFIG
 from ..utils import step_container
+
+
+def _primary_candidates_for(ex_key: str) -> list[str]:
+    return {
+        "squat": ["left_knee", "right_knee"],
+        "bench_press": ["left_elbow", "right_elbow"],
+        "deadlift": ["left_hip", "right_hip"],
+    }.get(ex_key, [])
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
@@ -17,15 +26,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
         cfg_values.pop("target_fps", None)
         cfg_values["use_crop"] = True
-
-        if disabled:
-            current_step = state.step
-            if current_step == Step.RUNNING:
-                st.info("The configuration is displayed for reference while the analysis runs.")
-            elif current_step == Step.RESULTS:
-                st.info("Configuration values used for the analysis are shown below.")
-            else:
-                st.info("Configuration is read-only at this stage.")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -48,12 +48,30 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             )
 
         # Primary angle is auto-selected downstream; show as read-only
-        _primary_angle_display = st.text_input(
+        chosen_primary = None
+        if state.step == Step.RESULTS and state.report is not None and getattr(
+            state.report, "stats", None
+        ):
+            chosen_primary = getattr(state.report.stats, "primary_angle", None)
+
+        exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
+        ex_key = EXERCISE_TO_CONFIG.get(
+            exercise_label, EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat")
+        )
+        candidates = _primary_candidates_for(ex_key)
+        primary_display_value = (
+            str(chosen_primary) if chosen_primary else (" / ".join(candidates) if candidates else "auto")
+        )
+
+        st.text_input(
             "Primary angle (auto)",
-            value="auto",
+            value=primary_display_value,
             disabled=True,
             key="cfg_primary_angle",
         )
+
+        if chosen_primary:
+            st.caption(f"Primary usado en el conteo: **{chosen_primary}**")
 
         debug_video = st.checkbox(
             "Generate debug video",
