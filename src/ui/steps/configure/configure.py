@@ -47,32 +47,13 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 key="cfg_high",
             )
 
-        primary_angle = st.text_input(
-            "Primary angle",
-            value=str(cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"])),
-            disabled=disabled,
+        # Primary angle is auto-selected downstream; show as read-only
+        _primary_angle_display = st.text_input(
+            "Primary angle (auto)",
+            value="auto",
+            disabled=True,
             key="cfg_primary_angle",
         )
-
-        col3, col4 = st.columns(2)
-        with col3:
-            min_prominence = st.number_input(
-                "Minimum prominence",
-                min_value=0.0,
-                value=float(cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])),
-                step=0.5,
-                disabled=disabled,
-                key="cfg_min_prominence",
-            )
-        with col4:
-            min_distance_sec = st.number_input(
-                "Minimum distance (s)",
-                min_value=0.0,
-                value=float(cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])),
-                step=0.1,
-                disabled=disabled,
-                key="cfg_min_distance",
-            )
 
         debug_video = st.checkbox(
             "Generate debug video",
@@ -84,9 +65,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         current_values = {
             "low": float(low),
             "high": float(high),
-            "primary_angle": primary_angle,
-            "min_prominence": float(min_prominence),
-            "min_distance_sec": float(min_distance_sec),
+            "primary_angle": "auto",
             "debug_video": bool(debug_video),
             "use_crop": True,
         }

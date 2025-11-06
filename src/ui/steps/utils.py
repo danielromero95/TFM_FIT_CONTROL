@@ -63,15 +63,8 @@ def prepare_pipeline_inputs(
 
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
-    cfg.counting.primary_angle = str(
-        cfg_values.get("primary_angle", CONFIG_DEFAULTS["primary_angle"])
-    )
-    cfg.counting.min_prominence = float(
-        cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])
-    )
-    cfg.counting.min_distance_sec = float(
-        cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])
-    )
+    # Always run with auto and let the pipeline choose the best side/angle
+    cfg.counting.primary_angle = "auto"
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
     cfg.pose.use_crop = True
 

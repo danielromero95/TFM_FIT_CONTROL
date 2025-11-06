@@ -764,6 +764,21 @@ def run_pipeline(
 
     primary_angle = chosen_primary or cfg.counting.primary_angle
 
+    # Auto-tune counting thresholds for this run
+    auto_prom, auto_dist = _auto_counting_params(detected_label, df_metrics, chosen_primary)
+    cfg.counting.min_prominence = float(auto_prom)
+    cfg.counting.min_distance_sec = float(auto_dist)
+    warnings.append(
+        f"Auto-tuned: prominence ≥ {auto_prom:.1f}°  ·  min distance = {auto_dist:.2f}s."
+    )
+    logger.info(
+        "COUNT AUTO-TUNE: exercise=%s primary=%s -> prominence=%.1f° distance=%.2fs",
+        getattr(as_exercise(detected_label), "value", str(detected_label)),
+        primary_angle,
+        auto_prom,
+        auto_dist,
+    )
+
     if angle_range < cfg.counting.min_angle_excursion_deg and skip_reason is None:
         skip_reason = (
             f"The range of motion ({angle_range:.2f}°) is below the required minimum "
@@ -790,6 +805,12 @@ def run_pipeline(
         logger.info("DEBUG MODE: Saving intermediate data...")
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
+
+    effective_config_path = output_paths.session_dir / "config_effective.json"
+    effective_cfg_dict = cfg.to_serializable_dict()
+    effective_config_path.write_text(
+        json.dumps(effective_cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     notify(100, "PIPELINE COMPLETED")
     t5 = time.perf_counter()
@@ -841,6 +862,7 @@ def run_pipeline(
         overlay_video_path=overlay_video_path,
         stats=stats,
         config_used=cfg,
+        effective_config_path=effective_config_path,
     )
 
 
@@ -1066,6 +1088,42 @@ def _choose_primary_angle(
             quality(chosen),
         )
     return chosen
+
+
+def _trimmed_rom_deg(df: "pd.DataFrame", col: str) -> float:
+    """
+    Compute a robust ROM using P90 - P10 of the selected angle.
+    Prefer raw_ series if available; fallback to processed column.
+    """
+    if df is None or not col:
+        return 0.0
+    raw = f"raw_{col}"
+    base = df[raw] if raw in df.columns else df[col] if col in df.columns else None
+    if base is None:
+        return 0.0
+    s = pd.to_numeric(base, errors="coerce").dropna()
+    if s.empty:
+        return 0.0
+    p10 = float(np.percentile(s.to_numpy(dtype=float), 10))
+    p90 = float(np.percentile(s.to_numpy(dtype=float), 90))
+    return max(0.0, p90 - p10)
+
+
+def _auto_counting_params(
+    exercise: ExerciseType | str, df_metrics: "pd.DataFrame", primary: str | None
+) -> tuple[float, float]:
+    """
+    Choose (min_prominence_deg, min_distance_sec) automatically.
+    Prominence scales with ROM; distance is per-exercise cadence guard.
+    """
+    ex = as_exercise(exercise).value
+    rom = _trimmed_rom_deg(df_metrics, primary or "")
+    # 20% of trimmed ROM, clamped to [5°, 30°]
+    prom = max(5.0, min(30.0, 0.20 * rom))
+    # conservative lower-bounds per exercise
+    dist_map = {"squat": 0.50, "bench_press": 0.35, "deadlift": 0.65}
+    dist = float(dist_map.get(ex, 0.50))
+    return prom, dist
 
 
 def _compute_metrics_and_angle(
