@@ -116,6 +116,11 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.configure_values = CONFIG_DEFAULTS.copy()
     state.ui_rev = 0
     state.step = Step.UPLOAD
+
+    for key in list(st.session_state.keys()):
+        if key.startswith("metrics_multiselect_") or key.startswith("metrics_default_"):
+            del st.session_state[key]
+
     if not preserve_upload:
         state.upload_data = None
         state.upload_token = None
