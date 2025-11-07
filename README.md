@@ -2,7 +2,7 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.7 (03-11-2025)
+**Version:** 2.8 (07-11-2025)
 
 ---
 
@@ -69,6 +69,15 @@ streamlit run src/app.py
 5. Results: repetition count, metrics, optional debug video, downloads.
 
 ---
+## What’s new in 2.8
+
+- **Smarter primary angle selection.** The analysis pipeline now chooses the most complete joint angle for the detected exercise, auto-tunes the prominence/distance thresholds, and exports the effective run configuration so repetition counting matches the captured motion.
+- **Expanded metric coverage.** Hip hinge angles and trunk inclination are computed alongside the existing knee and elbow metrics and surface as exercise-aware defaults when plotting results.
+- **Contextual metric guidance.** The results metric picker highlights the primary counting angle, resets selections per run, and adds inline help popovers that explain each metric and how it relates to rep counting.
+- **Visual threshold overlays.** The synchronized metrics viewer can render configured low/high thresholds together with repetition bands while keeping the legend in a compact layout beneath the chart.
+
+---
+
 ## What’s new in 2.7
 
 - Video rotation is now fully corrected across the pipeline, preventing flipped overlays and ensuring exported debug videos respect the intended orientation.
