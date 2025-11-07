@@ -105,7 +105,45 @@
     shapes: [cursor, ...thrShapes, ...bands]
   };
 
+  const allNames = names.slice();
+  const allAngular = allNames.length > 0 && allNames.every((n) => (
+    n.includes("knee") || n.includes("elbow") || n.includes("hip") || n === "trunk_inclination_deg"
+  ));
+  const allAngVel = allNames.length > 0 && allNames.every((n) => n.startsWith("ang_vel_"));
+  if (allAngVel) {
+    layout.yaxis.title = "Angular velocity (deg/s)";
+  } else if (allAngular) {
+    layout.yaxis.title = "Angle (deg)";
+  } else {
+    layout.yaxis.title = "Value";
+  }
+
   Plotly.newPlot(plot, traces, layout, CFG);
+
+  const DESCR = (DATA.desc || {});
+
+  function applyLegendTooltips() {
+    try {
+      const root = plot.querySelector('g.legend');
+      if (!root) return;
+      const texts = root.querySelectorAll('text.legendtext');
+      texts.forEach(t => {
+        const label = (t.textContent || '').trim();
+        const desc = DESCR[label];
+        if (desc) {
+          t.setAttribute('title', desc);
+          const parent = t.closest('g.legendtoggle, g.traces') || t;
+          parent.setAttribute('title', desc);
+        }
+      });
+    } catch (_) {}
+  }
+
+  applyLegendTooltips();
+  plot.on && plot.on('plotly_afterplot', applyLegendTooltips);
+  plot.on && plot.on('plotly_update', applyLegendTooltips);
+  plot.on && plot.on('plotly_restyle', applyLegendTooltips);
+  plot.on && plot.on('plotly_relayout', applyLegendTooltips);
 
   const hasTimeAxis = DATA.x_mode === "time";
   const xMin = x.length ? x[0] : 0;

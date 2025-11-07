@@ -19,6 +19,55 @@ from src.ui.state import get_state
 from ..utils import step_container
 
 
+def _metric_descriptions_for(
+    ex_str: str,
+    low_thr: float | int | None,
+    available: list[str],
+) -> dict[str, str]:
+    low_txt = f"{float(low_thr):.0f}°" if low_thr is not None else "the lower threshold"
+    d = {
+        "trunk_inclination_deg": "Torso tilt (deg)\nAngle between shoulder–hip line and vertical.",
+        "shoulder_width": "Shoulder width (normalized)\nHorizontal distance between shoulders.",
+        "foot_separation": "Foot separation (normalized)\nHorizontal distance between ankles/feet.",
+    }
+
+    if ex_str == "squat":
+        d["left_knee"] = (
+            f"Left knee angle (thigh–shank)\nReps counted when the primary knee dips below {low_txt}."
+        )
+        d["right_knee"] = (
+            f"Right knee angle (thigh–shank)\nReps counted when the primary knee dips below {low_txt}."
+        )
+    elif ex_str == "bench_press":
+        d["left_elbow"] = (
+            f"Left elbow angle (upper arm–forearm)\nValleys near {low_txt} mark each rep."
+        )
+        d["right_elbow"] = (
+            f"Right elbow angle (upper arm–forearm)\nValleys near {low_txt} mark each rep."
+        )
+        d["shoulder_width"] += "\nUseful to monitor grip consistency."
+    elif ex_str == "deadlift":
+        d["left_hip"] = (
+            f"Hip angle (torso–thigh, left)\nReps valid when hip angle rises above {low_txt}."
+        )
+        d["right_hip"] = (
+            f"Hip angle (torso–thigh, right)\nReps valid when hip angle rises above {low_txt}."
+        )
+        d["trunk_inclination_deg"] += "\nUseful to track hip hinge."
+
+    for name in list(available):
+        if name.startswith("ang_vel_"):
+            base = name.removeprefix("ang_vel_")
+            d[name] = f"Angular velocity of {base.replace('_', ' ')} (deg/s)."
+        if name.startswith("raw_"):
+            base = name.removeprefix("raw_")
+            d[name] = (
+                f"Raw (uninterpolated) samples of '{base}'.\nMay include gaps from low-visibility frames."
+            )
+
+    return {k: v for k, v in d.items() if k in available}
+
+
 def _compute_rep_intervals(
     metrics_df: pd.DataFrame,
     report: Report,
@@ -181,11 +230,24 @@ def _results_panel() -> Dict[str, bool]:
 
                     widget_key = f"metrics_multiselect_{run_sig}"
 
+                    ex = getattr(stats, "exercise_detected", "")
+                    ex_str = getattr(ex, "value", str(ex))
+                    low_thr = None
+                    try:
+                        low_thr = float((state.configure_values or {}).get("low"))
+                    except Exception:
+                        pass
+                    metric_desc = _metric_descriptions_for(ex_str, low_thr, metric_options)
+                    primary = getattr(stats, "primary_angle", None)
+                    if primary and primary in metric_desc:
+                        metric_desc[primary] = f"PRIMARY — {metric_desc[primary]}"
+
                     selected_metrics = st.multiselect(
                         "View metrics",
                         options=metric_options,
                         default=st.session_state[default_key],
                         key=widget_key,
+                        help="Hover the legend to read metric definitions.",
                     )
                     if selected_metrics:
                         rep_intervals = _compute_rep_intervals(
@@ -225,6 +287,7 @@ def _results_panel() -> Dict[str, bool]:
                             max_width_px=720,
                             show_video=False,
                             sync_channel=sync_channel,
+                            metric_descriptions=metric_desc,
                         )
                     else:
                         st.info("Select at least one metric to visualize.")
