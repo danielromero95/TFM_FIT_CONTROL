@@ -51,3 +51,10 @@ DEFAULT_USE_CROP = True
 DEFAULT_GENERATE_VIDEO = True
 DEFAULT_DEBUG_MODE = True
 DEFAULT_DARK_MODE = False
+
+# --- HEAVY MEDIA GUARDS ---
+OVERLAY_MAX_LONG_SIDE = 1280          # píxeles (p.ej. 720p/1080p-lite)
+OVERLAY_DISABLE_OVER_BYTES = 40 * 1024 * 1024  # 40 MB
+PREVIEW_DISABLE_OVER_MP = 2.5         # desactiva preview si megapíxeles > 2.5
+PREVIEW_MAX_FPS_HEAVY = 5.0           # reduce preview FPS cuando es pesado
+OVERLAY_FPS_CAP = 15.0                # límite superior para FPS del overlay

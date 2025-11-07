@@ -188,6 +188,21 @@ class IncrementalExerciseFeatureExtractor:
         self._initialised = False
         self._done = False
 
+    def wants_frame(self, frame_idx: int) -> bool:
+        """Return True if this frame would be sampled given stride/max_frames/_done."""
+
+        if self._done or self._samples >= self.max_frames:
+            return False
+        stride = self._stride if self._stride and self._stride > 0 else 1
+        try:
+            idx = int(frame_idx)
+        except (TypeError, ValueError):
+            return False
+        stride_int = int(stride) if stride else 1
+        if stride_int <= 0:
+            stride_int = 1
+        return (idx % stride_int) == 0
+
     def _compute_stride(self) -> int:
         if self.source_fps <= 0.0:
             approx_source = max(self.target_fps, DEFAULT_SAMPLING_RATE)
@@ -220,10 +235,10 @@ class IncrementalExerciseFeatureExtractor:
         """Optionally sample ``frame`` and update the incremental feature buffers."""
 
         self._frames_considered += 1
-        if self._done or frame_idx % self._stride != 0:
-            return
         if self._samples >= self.max_frames:
             self._done = True
+            return
+        if not self.wants_frame(frame_idx):
             return
 
         self._ensure_pose()
@@ -263,10 +278,10 @@ class IncrementalExerciseFeatureExtractor:
         del width, height, ts_ms  # these values are not required for feature extraction
 
         self._frames_considered += 1
-        if self._done or frame_idx % self._stride != 0:
-            return
         if self._samples >= self.max_frames:
             self._done = True
+            return
+        if not self.wants_frame(frame_idx):
             return
 
         feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers

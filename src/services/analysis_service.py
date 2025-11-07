@@ -53,6 +53,19 @@ from src.services.errors import NoFramesExtracted, VideoOpenError
 logger = logging.getLogger(__name__)
 
 
+def _downcast_landmarks_df(df: "pd.DataFrame") -> "pd.DataFrame":
+    import numpy as np
+
+    if df is None or df.empty:
+        return df
+    if "frame_idx" in df.columns:
+        df["frame_idx"] = df["frame_idx"].astype(np.int32, copy=False)
+    float_cols = [c for c in df.columns if c.startswith(("x", "y", "z", "v", "crop_"))]
+    for c in float_cols:
+        df[c] = df[c].astype(np.float32, copy=False)
+    return df
+
+
 def _infer_upright_quadrant_from_sequence(
     sequence: np.ndarray,
     *,
@@ -304,26 +317,30 @@ def _stream_pose_and_detection(
                     row.update({"crop_x1": np.nan, "crop_y1": np.nan, "crop_x2": np.nan, "crop_y2": np.nan})
 
                 if detection_extractor is not None and not detection_error:
-                    def _coerce(value: Any) -> float:
-                        try:
-                            return float(value)
-                        except (TypeError, ValueError):
-                            return float("nan")
-
-                    arr = np.empty((33, 4), dtype=float)
-                    for landmark_index in range(33):
-                        arr[landmark_index, 0] = _coerce(row[f"x{landmark_index}"])
-                        arr[landmark_index, 1] = _coerce(row[f"y{landmark_index}"])
-                        arr[landmark_index, 2] = _coerce(row[f"z{landmark_index}"])
-                        arr[landmark_index, 3] = _coerce(row[f"v{landmark_index}"])
                     try:
-                        detection_extractor.add_landmarks(
-                            frame_idx,
-                            arr,
-                            width,
-                            height,
-                            ts_ms,
-                        )
+                        if getattr(detection_extractor, "_done", False) or not detection_extractor.wants_frame(frame_idx):
+                            pass
+                        else:
+                            def _coerce(value: Any) -> float:
+                                try:
+                                    return float(value)
+                                except (TypeError, ValueError):
+                                    return float("nan")
+
+                            arr = np.empty((33, 4), dtype=float)
+                            for landmark_index in range(33):
+                                arr[landmark_index, 0] = _coerce(row[f"x{landmark_index}"])
+                                arr[landmark_index, 1] = _coerce(row[f"y{landmark_index}"])
+                                arr[landmark_index, 2] = _coerce(row[f"z{landmark_index}"])
+                                arr[landmark_index, 3] = _coerce(row[f"v{landmark_index}"])
+
+                            detection_extractor.add_landmarks(
+                                frame_idx,
+                                arr,
+                                width,
+                                height,
+                                ts_ms,
+                            )
                     except Exception:  # pragma: no cover - best effort guard
                         logger.exception("Automatic exercise detection failed during streaming")
                         detection_error = True
@@ -371,7 +388,12 @@ def _stream_pose_and_detection(
         except Exception:  # pragma: no cover - detection fallback
             logger.exception("Automatic exercise detection failed during finalization")
             detection_result = DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
-    df_landmarks = pd.DataFrame.from_records(rows)
+    df_landmarks = _downcast_landmarks_df(pd.DataFrame.from_records(rows))
+    logger.debug(
+        "landmarks df dtypes: %s | shape=%s",
+        dict(df_landmarks.dtypes.apply(lambda x: str(x))),
+        df_landmarks.shape,
+    )
     return _StreamingPoseResult(
         df_landmarks=df_landmarks,
         frames_processed=frames_processed,
@@ -416,6 +438,7 @@ def _iter_original_frames_for_overlay(
     sample_rate: int,
     target_fps: Optional[float],
     max_frames: int,
+    max_long_side: Optional[int] = None,
 ):
     """Yield original-resolution frames using the same sampling strategy as the pipeline."""
 
@@ -436,7 +459,16 @@ def _iter_original_frames_for_overlay(
     iterator = extract_frames_stream(**kwargs)
     produced = 0
     for finfo in iterator:
-        yield finfo.array
+        frame = finfo.array
+        if max_long_side and max_long_side > 0:
+            h, w = frame.shape[:2]
+            m = max(h, w)
+            if m > max_long_side:
+                scale = max_long_side / float(m)
+                new_w = max(1, int(round(w * scale)))
+                new_h = max(1, int(round(h * scale)))
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        yield frame
         produced += 1
         if max_frames and produced >= max_frames:
             break
@@ -455,6 +487,7 @@ def _generate_overlay_video(
     fps_for_writer: float,
     output_rotate: int = 0,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    overlay_max_long_side: Optional[int] = None,
 ) -> Optional[Path]:
     """Render a debug overlay video matching the original resolution."""
 
@@ -493,7 +526,12 @@ def _generate_overlay_video(
     processed_h = int(processed_size[1])
 
     overlay_path = session_dir / f"{session_dir.name}_overlay.mp4"
-    fps_value = fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0
+    fps_value = min(
+        float(fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0),
+        float(getattr(getattr(config, "debug", object()), "overlay_fps_cap", 15.0))
+        if hasattr(config, "debug")
+        else 15.0,
+    )
 
     frames_iter = _iter_original_frames_for_overlay(
         video_path,
@@ -501,6 +539,7 @@ def _generate_overlay_video(
         sample_rate=sample_rate,
         target_fps=target_fps,
         max_frames=total_frames,
+        max_long_side=overlay_max_long_side,
     )
 
     stats = render_landmarks_video(
@@ -573,9 +612,47 @@ def run_pipeline(
     target_size = (cfg.pose.target_width, cfg.pose.target_height)
     target_fps_for_sampling: Optional[float] = None
 
+    file_size_bytes = 0
+    w = 0
+    h = 0
+    megapixels = 0.0
+    is_heavy_by_size = False
+    is_heavy_by_mp = False
+    is_heavy_media = False
+
     try:
         info, fps_original, fps_warning, prefer_reader_fps = _read_info_and_initial_sampling(
             cap, video_path
+        )
+
+        video_path_obj = Path(video_path)
+        try:
+            file_size_bytes = int(video_path_obj.stat().st_size)
+        except Exception:
+            file_size_bytes = 0
+
+        w = int(info.width or 0)
+        h = int(info.height or 0)
+        megapixels = (w * h) / 1e6 if (w > 0 and h > 0) else 0.0
+
+        is_heavy_by_size = (
+            cfg.debug.overlay_disable_over_bytes > 0
+            and file_size_bytes >= cfg.debug.overlay_disable_over_bytes
+        )
+        is_heavy_by_mp = (
+            cfg.debug.preview_disable_over_mp > 0.0
+            and megapixels >= cfg.debug.preview_disable_over_mp
+        )
+        is_heavy_media = bool(is_heavy_by_size or is_heavy_by_mp)
+
+        logger.info(
+            "HEAVY CHECK — size=%.1fMB, res=%dx%d (%.2fMP) -> heavy_size=%s heavy_mp=%s",
+            file_size_bytes / (1024 * 1024) if file_size_bytes else 0.0,
+            w,
+            h,
+            megapixels,
+            is_heavy_by_size,
+            is_heavy_by_mp,
         )
 
         initial_sample_rate = _compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
@@ -637,6 +714,32 @@ def run_pipeline(
         detection_source = fps_effective if fps_effective > 0 else fps_original
         if detection_source <= 0:
             detection_source = fps_from_reader
+        preview_cb_to_use = preview_callback
+        preview_fps_to_use = (
+            preview_fps
+            if preview_fps is not None
+            else getattr(getattr(cfg, "debug", object()), "preview_fps", None)
+        )
+
+        if is_heavy_media:
+            if (
+                cfg.debug.preview_disable_over_mp > 0.0
+                and megapixels >= cfg.debug.preview_disable_over_mp
+            ):
+                preview_cb_to_use = None
+                logger.info("Preview desactivado por resolución alta (%.2f MP)", megapixels)
+            else:
+                if preview_fps_to_use is None or preview_fps_to_use <= 0:
+                    preview_fps_to_use = cfg.debug.preview_fps_heavy
+                else:
+                    preview_fps_to_use = float(
+                        min(preview_fps_to_use, cfg.debug.preview_fps_heavy)
+                    )
+                logger.info(
+                    "Preview limitado a %.1f FPS por tamaño de archivo",
+                    preview_fps_to_use,
+                )
+
         streaming_result = _stream_pose_and_detection(
             raw_iter,
             cfg,
@@ -648,9 +751,11 @@ def run_pipeline(
                 else None
             ),
             debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
-            preview_callback=preview_callback,
-            preview_fps=preview_fps if preview_fps is not None else getattr(
-                getattr(cfg, "debug", object()), "preview_fps", None
+            preview_callback=preview_cb_to_use,
+            preview_fps=(
+                preview_fps_to_use
+                if preview_fps_to_use is not None
+                else getattr(getattr(cfg, "debug", object()), "preview_fps", None)
             ),
         )
         df_raw_landmarks = streaming_result.df_landmarks
@@ -705,6 +810,8 @@ def run_pipeline(
 
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
+    overlay_disabled = False
+    overlay_scale_side: Optional[int] = None
     if cfg.debug.generate_debug_video:
         if debug_video_path_stream is not None:
             notify(65, "EXTRA STAGE: Debug video saved during streaming.")
@@ -712,6 +819,27 @@ def run_pipeline(
         else:
             notify(65, "EXTRA STAGE: Debug video skipped (no frames recorded).")
 
+        if is_heavy_by_size:
+            warnings.append(
+                f"Overlay desactivado por tamaño de archivo ({file_size_bytes / (1024*1024):.1f} MB)."
+            )
+            overlay_disabled = True
+            logger.info(
+                "Overlay desactivado por tamaño de archivo (%.1f MB)",
+                file_size_bytes / (1024 * 1024) if file_size_bytes else 0.0,
+            )
+        elif is_heavy_by_mp and cfg.debug.overlay_max_long_side > 0:
+            overlay_scale_side = int(cfg.debug.overlay_max_long_side)
+            warnings.append(
+                f"Overlay reescalado (lado máx. {overlay_scale_side}px) por alta resolución ({megapixels:.2f} MP)."
+            )
+            logger.info(
+                "Overlay reescalado a lado máximo %d px por resolución alta (%.2f MP)",
+                overlay_scale_side,
+                megapixels,
+            )
+
+    if cfg.debug.generate_debug_video and not overlay_disabled:
         try:
             def _overlay_progress(written: int, total: int) -> None:
                 # total puede ser 0 si el renderer no lo sabe todavía
@@ -733,14 +861,20 @@ def run_pipeline(
                 rotate=processing_rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
-                fps_for_writer=fps_effective if fps_effective > 0 else fps_original,
+                fps_for_writer=min(
+                    fps_effective if fps_effective > 0 else fps_original,
+                    cfg.debug.overlay_fps_cap,
+                ),
                 output_rotate=overlay_rotate_cw,
                 progress_cb=_overlay_progress,
+                overlay_max_long_side=overlay_scale_side,
             )
             if overlay_video_path is not None:
                 logger.info("Overlay video generated at %s", overlay_video_path)
         except Exception:
             logger.exception("Failed to render overlay video")
+    elif cfg.debug.generate_debug_video:
+        logger.info("Overlay omitido por heurísticas de medio pesado.")
 
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
