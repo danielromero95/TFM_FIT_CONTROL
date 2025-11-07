@@ -26,6 +26,11 @@ from .settings import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_PREVIEW_FPS,
     DEFAULT_LANDMARK_MIN_VISIBILITY,
+    OVERLAY_MAX_LONG_SIDE,
+    OVERLAY_DISABLE_OVER_BYTES,
+    PREVIEW_DISABLE_OVER_MP,
+    PREVIEW_MAX_FPS_HEAVY,
+    OVERLAY_FPS_CAP,
 )
 
 
@@ -73,6 +78,11 @@ class DebugConfig:
     debug_mode: bool = DEFAULT_DEBUG_MODE
     preview_fps: float = DEFAULT_PREVIEW_FPS
     min_visibility: float = DEFAULT_LANDMARK_MIN_VISIBILITY
+    overlay_max_long_side: int = OVERLAY_MAX_LONG_SIDE
+    overlay_disable_over_bytes: int = OVERLAY_DISABLE_OVER_BYTES
+    preview_disable_over_mp: float = PREVIEW_DISABLE_OVER_MP
+    preview_fps_heavy: float = PREVIEW_MAX_FPS_HEAVY
+    overlay_fps_cap: float = OVERLAY_FPS_CAP
 
 
 @dataclass
