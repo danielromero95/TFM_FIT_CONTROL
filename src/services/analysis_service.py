@@ -6,7 +6,7 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple, Union
 
@@ -141,6 +141,16 @@ class _StreamingPoseResult:
     detection: Optional[DetectionResult]
     debug_video_path: Optional[Path]
     processed_size: Optional[tuple[int, int]] = None
+
+
+@dataclass(frozen=True)
+class AutoTuneResult:
+    min_prominence: float
+    min_distance_sec: float
+    refractory_sec: float
+    cadence_period_sec: float | None = None
+    iqr_deg: float | None = None
+    multipliers: dict[str, float] = field(default_factory=dict)
 
 
 # Prioriza mp4v para evitar dependencias de libopenh264 en Windows
@@ -526,12 +536,7 @@ def _generate_overlay_video(
     processed_h = int(processed_size[1])
 
     overlay_path = session_dir / f"{session_dir.name}_overlay.mp4"
-    fps_value = min(
-        float(fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0),
-        float(getattr(getattr(config, "debug", object()), "overlay_fps_cap", 15.0))
-        if hasattr(config, "debug")
-        else 15.0,
-    )
+    fps_value = float(fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0)
 
     frames_iter = _iter_original_frames_for_overlay(
         video_path,
@@ -852,6 +857,19 @@ def run_pipeline(
                     pct = base
                 notify(pct, f"EXTRA STAGE: Rendering debug video... ({written}/{total})")
 
+            base_overlay_fps = fps_effective if fps_effective > 0 else fps_original
+            overlay_cap_raw = getattr(cfg.debug, "overlay_fps_cap", 0.0)
+            try:
+                overlay_cap_value = float(overlay_cap_raw)
+            except (TypeError, ValueError):
+                overlay_cap_value = 0.0
+            overlay_cap = overlay_cap_value if overlay_cap_value > 0 else 0.0
+            fps_for_overlay = base_overlay_fps if base_overlay_fps > 0 else overlay_cap
+            if overlay_cap > 0 and fps_for_overlay > 0:
+                fps_for_overlay = min(fps_for_overlay, overlay_cap)
+            elif fps_for_overlay <= 0:
+                fps_for_overlay = overlay_cap
+
             overlay_video_path = _generate_overlay_video(
                 Path(video_path),
                 output_paths.session_dir,
@@ -861,10 +879,7 @@ def run_pipeline(
                 rotate=processing_rotate,
                 sample_rate=sample_rate,
                 target_fps=target_fps_for_sampling,
-                fps_for_writer=min(
-                    fps_effective if fps_effective > 0 else fps_original,
-                    cfg.debug.overlay_fps_cap,
-                ),
+                fps_for_writer=fps_for_overlay,
                 output_rotate=overlay_rotate_cw,
                 progress_cb=_overlay_progress,
                 overlay_max_long_side=overlay_scale_side,
@@ -899,19 +914,45 @@ def run_pipeline(
     primary_angle = chosen_primary or cfg.counting.primary_angle
 
     # Auto-tune counting thresholds for this run
-    auto_prom, auto_dist = _auto_counting_params(detected_label, df_metrics, chosen_primary)
-    cfg.counting.min_prominence = float(auto_prom)
-    cfg.counting.min_distance_sec = float(auto_dist)
+    auto_params = _auto_counting_params(
+        detected_label,
+        df_metrics,
+        chosen_primary,
+        fps_effective,
+        cfg.counting,
+        view=detected_view,
+    )
+    cfg.counting.min_prominence = float(auto_params.min_prominence)
+    cfg.counting.min_distance_sec = float(auto_params.min_distance_sec)
+    cfg.counting.refractory_sec = float(auto_params.refractory_sec)
     warnings.append(
-        f"Auto-tuned: prominence ≥ {auto_prom:.1f}°  ·  min distance = {auto_dist:.2f}s."
+        "Auto-tuned: prominence ≥ "
+        f"{auto_params.min_prominence:.1f}°  ·  min distance = {auto_params.min_distance_sec:.2f}s  ·  refractory = {auto_params.refractory_sec:.2f}s."
     )
     logger.info(
-        "COUNT AUTO-TUNE: exercise=%s primary=%s -> prominence=%.1f° distance=%.2fs",
+        "COUNT AUTO-TUNE: exercise=%s primary=%s -> prominence=%.1f° distance=%.2fs refractory=%.2fs",
         getattr(as_exercise(detected_label), "value", str(detected_label)),
         primary_angle,
-        auto_prom,
-        auto_dist,
+        auto_params.min_prominence,
+        auto_params.min_distance_sec,
+        auto_params.refractory_sec,
     )
+
+    if cfg.debug.debug_mode:
+        smoothing_info = df_metrics.attrs.get("smoothing", {})
+        logger.info("DEBUG TELEMETRY: smoothing=%s", smoothing_info)
+        logger.info(
+            "DEBUG TELEMETRY: view=%s multipliers=%s cadence=%.2fs IQR=%.1f° → prominence=%.1f° distance=%.2fs refractory=%.2fs",
+            getattr(as_view(detected_view), "value", str(detected_view)),
+            auto_params.multipliers,
+            auto_params.cadence_period_sec
+            if auto_params.cadence_period_sec is not None
+            else float("nan"),
+            auto_params.iqr_deg if auto_params.iqr_deg is not None else float("nan"),
+            auto_params.min_prominence,
+            auto_params.min_distance_sec,
+            auto_params.refractory_sec,
+        )
 
     if angle_range < cfg.counting.min_angle_excursion_deg and skip_reason is None:
         skip_reason = (
@@ -920,6 +961,11 @@ def run_pipeline(
         )
         warnings.append(skip_reason)
 
+    count_overrides = {
+        "min_prominence": float(auto_params.min_prominence),
+        "min_distance_sec": float(auto_params.min_distance_sec),
+        "refractory_sec": float(auto_params.refractory_sec),
+    }
     reps = 0
     if chosen_primary and chosen_primary != cfg.counting.primary_angle:
         cfg.counting.primary_angle = chosen_primary  # keep stats truthful; fingerprint stays as-is
@@ -927,12 +973,14 @@ def run_pipeline(
         t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
         reps, count_warnings = _maybe_count_reps(
-            df_metrics, cfg, fps_effective, skip_reason
+            df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
         )
         warnings.extend(count_warnings)
     else:
         notify(90, "STAGE 5: Counting skipped due to quality constraints.")
-        reps, count_warnings = _maybe_count_reps(df_metrics, cfg, fps_effective, skip_reason)
+        reps, count_warnings = _maybe_count_reps(
+            df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
+        )
         warnings.extend(count_warnings)
 
     if cfg.debug.debug_mode:
@@ -1243,21 +1291,166 @@ def _trimmed_rom_deg(df: "pd.DataFrame", col: str) -> float:
     return max(0.0, p90 - p10)
 
 
+def _iqr_deg(df: "pd.DataFrame", col: str) -> float | None:
+    if df is None or not col:
+        return None
+    raw = f"raw_{col}"
+    base = df[raw] if raw in df.columns else df[col] if col in df.columns else None
+    if base is None:
+        return None
+    series = pd.to_numeric(base, errors="coerce").dropna()
+    if series.empty:
+        return None
+    values = series.to_numpy(dtype=float)
+    q75, q25 = np.percentile(values, [75, 25])
+    return max(0.0, float(q75 - q25))
+
+
+def _simple_peak_indices(values: np.ndarray, min_gap: int) -> list[int]:
+    indices: list[int] = []
+    for idx in range(1, len(values) - 1):
+        v_prev, v, v_next = values[idx - 1], values[idx], values[idx + 1]
+        if not (np.isfinite(v_prev) and np.isfinite(v) and np.isfinite(v_next)):
+            continue
+        if v > v_prev and v >= v_next:
+            if indices and idx - indices[-1] < min_gap:
+                if v > values[indices[-1]]:
+                    indices[-1] = idx
+            else:
+                indices.append(idx)
+    return indices
+
+
+def _estimate_cadence_period(
+    df: "pd.DataFrame", fps: float, columns: Optional[list[str]] = None
+) -> float | None:
+    if df is None or fps is None or fps <= 0:
+        return None
+
+    if columns is None:
+        columns = []
+        for base in ("left_knee", "right_knee"):
+            raw = f"raw_{base}"
+            if raw in df.columns:
+                columns.append(raw)
+            elif base in df.columns:
+                columns.append(base)
+    else:
+        columns = [col for col in columns if col in df.columns]
+
+    if not columns:
+        return None
+
+    diffs: list[float] = []
+    min_distance = int(max(1, round(float(fps) * 0.25)))
+
+    try:  # pragma: no cover - SciPy optional
+        from scipy.signal import find_peaks as _find_peaks
+    except Exception:  # pragma: no cover - SciPy optional
+        _find_peaks = None
+
+    for col in columns:
+        series = pd.to_numeric(df[col], errors="coerce")
+        if series.isna().all():
+            continue
+        filled = series.interpolate(method="linear", limit_direction="both")
+        values = filled.to_numpy(dtype=float)
+        if values.size < 3:
+            continue
+
+        if _find_peaks is not None:
+            peaks, _ = _find_peaks(values, distance=min_distance)
+            peak_indices = peaks.tolist()
+        else:
+            peak_indices = _simple_peak_indices(values, min_distance)
+
+        if len(peak_indices) >= 2:
+            diffs.extend(np.diff(peak_indices))
+
+    if not diffs:
+        return None
+
+    median_frames = float(np.median(np.asarray(diffs, dtype=float)))
+    if not np.isfinite(median_frames) or median_frames <= 0:
+        return None
+    return median_frames / float(fps)
+
+
 def _auto_counting_params(
-    exercise: ExerciseType | str, df_metrics: "pd.DataFrame", primary: str | None
-) -> tuple[float, float]:
+    exercise: ExerciseType | str,
+    df_metrics: "pd.DataFrame",
+    primary: str | None,
+    fps: float,
+    counting_cfg: "config.CountingConfig",
+    *,
+    view: ViewType | str = ViewType.UNKNOWN,
+) -> AutoTuneResult:
     """
-    Choose (min_prominence_deg, min_distance_sec) automatically.
-    Prominence scales with ROM; distance is per-exercise cadence guard.
+    Infer counting parameters based on motion cadence and signal robustness.
     """
-    ex = as_exercise(exercise).value
+
+    prom_default = float(getattr(counting_cfg, "min_prominence", 0.0) or 0.0)
+    dist_default = float(getattr(counting_cfg, "min_distance_sec", 0.5) or 0.5)
+    refractory_default = float(getattr(counting_cfg, "refractory_sec", 0.4) or 0.4)
+
     rom = _trimmed_rom_deg(df_metrics, primary or "")
-    # 20% of trimmed ROM, clamped to [5°, 30°]
-    prom = max(5.0, min(30.0, 0.20 * rom))
-    # conservative lower-bounds per exercise
-    dist_map = {"squat": 0.50, "bench_press": 0.35, "deadlift": 0.65}
-    dist = float(dist_map.get(ex, 0.50))
-    return prom, dist
+    prom_candidates = [max(5.0, 0.20 * rom)] if rom > 0 else [5.0]
+    iqr = _iqr_deg(df_metrics, primary or "")
+    if iqr is not None and iqr > 0:
+        prom_candidates.append(max(9.0, 0.35 * iqr))
+    prom_candidates.append(prom_default)
+    prom = max(prom_candidates)
+
+    cadence_period = _estimate_cadence_period(df_metrics, fps)
+    if cadence_period is not None and np.isfinite(cadence_period):
+        min_distance = float(np.clip(0.35 * cadence_period, 0.35, 1.2))
+        refractory = float(np.clip(0.25 * cadence_period, 0.25, 0.8))
+    else:
+        if dist_default:
+            min_distance = dist_default
+        else:
+            ex_val = as_exercise(exercise).value
+            dist_map = {"squat": 0.50, "bench_press": 0.35, "deadlift": 0.65}
+            min_distance = float(dist_map.get(ex_val, 0.50))
+        refractory = refractory_default
+        cadence_period = None
+
+    multipliers = {"prominence": 1.0, "distance": 1.0, "refractory": 1.0}
+    view_enum = as_view(view)
+    if view_enum == ViewType.SIDE:
+        multipliers["prominence"] = 1.1
+        multipliers["distance"] = 0.95
+    elif view_enum == ViewType.FRONT:
+        multipliers["prominence"] = 0.9
+        multipliers["distance"] = 1.05
+        multipliers["refractory"] = 1.1
+
+    prom *= multipliers["prominence"]
+    min_distance *= multipliers["distance"]
+    refractory *= multipliers["refractory"]
+
+    if not np.isfinite(prom) or prom <= 0:
+        prom = max(5.0, prom_default or 5.0)
+    prom = float(np.clip(prom, 5.0, 60.0))
+
+    if not np.isfinite(min_distance) or min_distance <= 0:
+        min_distance = dist_default
+    min_distance = float(np.clip(min_distance, 0.25, 2.0))
+
+    if not np.isfinite(refractory) or refractory <= 0:
+        refractory = refractory_default
+    refractory = float(np.clip(refractory, 0.20, 1.5))
+    if refractory > min_distance:
+        refractory = max(0.20, min_distance * 0.9)
+
+    return AutoTuneResult(
+        min_prominence=prom,
+        min_distance_sec=min_distance,
+        refractory_sec=refractory,
+        cadence_period_sec=cadence_period,
+        iqr_deg=iqr,
+        multipliers=multipliers,
+    )
 
 
 def _compute_metrics_and_angle(
@@ -1311,13 +1504,17 @@ def _maybe_count_reps(
     cfg: config.Config,
     fps_effective: float,
     skip_reason: Optional[str],
+    *,
+    overrides: Optional[dict[str, float]] = None,
 ) -> tuple[int, list[str]]:
     """Count repetitions unless ``skip_reason`` indicates the stage was skipped."""
 
     if skip_reason is not None:
         return 0, []
 
-    result, debug_info = count_repetitions_with_config(df_metrics, cfg.counting, fps_effective)
+    result, debug_info = count_repetitions_with_config(
+        df_metrics, cfg.counting, fps_effective, overrides=overrides
+    )
     stage_warnings: list[str] = []
     if result == 0 and not debug_info.valley_indices:
         stage_warnings.append("No repetitions were detected with the current parameters.")

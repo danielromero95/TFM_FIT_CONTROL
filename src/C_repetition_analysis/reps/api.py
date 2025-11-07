@@ -83,6 +83,8 @@ def count_repetitions_with_config(
     df_metrics: pd.DataFrame,
     counting_cfg: config.CountingConfig,
     fps: float,
+    *,
+    overrides: dict[str, float] | None = None,
 ) -> Tuple[int, CountingDebugInfo]:
     """
     Count repetitions using configuration-driven parameters.
@@ -94,6 +96,11 @@ def count_repetitions_with_config(
 
     Returns:
         (repetition_count, CountingDebugInfo)
+
+    Keyword Args:
+        overrides: optional dictionary with keys ``min_prominence``, ``min_distance_sec`` and
+            ``refractory_sec`` to temporarily adjust the thresholds without mutating the
+            provided configuration object.
     """
     angle_column = counting_cfg.primary_angle
 
@@ -109,9 +116,15 @@ def count_repetitions_with_config(
     if not angles:
         return 0, CountingDebugInfo([], [])
 
+    overrides = overrides or {}
+
     fps_safe = float(fps) if fps and fps > 0 else 1.0
-    distance_frames = max(1, int(round(counting_cfg.min_distance_sec * fps_safe)))
-    prominence_thr = float(counting_cfg.min_prominence)
+    min_distance_sec = float(
+        overrides.get("min_distance_sec", counting_cfg.min_distance_sec)
+    )
+    prominence_thr = float(overrides.get("min_prominence", counting_cfg.min_prominence))
+
+    distance_frames = max(1, int(round(min_distance_sec * fps_safe)))
 
     reps, debug = _count_reps_by_valleys(
         angle_sequence=angles,
@@ -119,7 +132,8 @@ def count_repetitions_with_config(
         distance=distance_frames,
     )
 
-    refractory_frames = max(0, int(round(float(counting_cfg.refractory_sec) * fps_safe)))
+    refractory_sec = float(overrides.get("refractory_sec", counting_cfg.refractory_sec))
+    refractory_frames = max(0, int(round(refractory_sec * fps_safe)))
     if refractory_frames > 0 and debug.valley_indices:
         filtered_idx, filtered_prom = _apply_refractory_filter(
             debug.valley_indices, debug.prominences, refractory_frames
@@ -128,7 +142,12 @@ def count_repetitions_with_config(
         reps = len(filtered_idx)
 
     logger.debug(
-        "Repetition count=%d (distance=%d frames, prominence>=%.3f, refractory=%d frames).",
-        reps, distance_frames, prominence_thr, refractory_frames
+        "Repetition count=%d (distance=%d frames ≈ %.2fs, prominence>=%.3f, refractory=%d frames ≈ %.2fs).",
+        reps,
+        distance_frames,
+        distance_frames / fps_safe,
+        prominence_thr,
+        refractory_frames,
+        refractory_frames / fps_safe,
     )
     return reps, debug

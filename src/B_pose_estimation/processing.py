@@ -96,7 +96,12 @@ def extract_landmarks_from_frames(
 
 
 def filter_and_interpolate_landmarks(
-    df_raw: pd.DataFrame, min_confidence: float = 0.5
+    df_raw: pd.DataFrame,
+    min_confidence: float = 0.5,
+    *,
+    vis_hysteresis_low: float = 0.35,
+    vis_hysteresis_high: float = 0.55,
+    vis_hang: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray | None]:
     """Filter landmarks below ``min_confidence`` and interpolate gaps."""
     logger.info("Filtering and interpolating %d landmark frames.", len(df_raw))
@@ -120,10 +125,52 @@ def filter_and_interpolate_landmarks(
     zs = df_raw[cols_z].to_numpy(dtype=float, copy=True)
     vs = df_raw[cols_v].to_numpy(dtype=float, copy=False)
 
-    mask_valid = (vs >= min_confidence) & np.isfinite(xs) & np.isfinite(ys)
-    xs[~mask_valid] = np.nan
-    ys[~mask_valid] = np.nan
-    zs[~mask_valid] = np.nan
+    finite_xy = np.isfinite(xs) & np.isfinite(ys)
+
+    def _apply_visibility_hysteresis(column: np.ndarray) -> np.ndarray:
+        """Return a boolean visibility mask with hysteresis for a visibility column."""
+
+        n = column.shape[0]
+        visible = np.zeros(n, dtype=bool)
+        state = False
+        seen_high = False
+        hang_remaining = 0
+
+        for idx, raw_val in enumerate(column):
+            val = float(raw_val) if np.isfinite(raw_val) else 0.0
+
+            next_state = state
+
+            if val >= vis_hysteresis_high:
+                seen_high = True
+                next_state = True
+                hang_remaining = max(0, vis_hang)
+            elif seen_high:
+                if val < vis_hysteresis_low:
+                    if state and hang_remaining > 0:
+                        hang_remaining -= 1
+                    else:
+                        next_state = False
+                        hang_remaining = 0
+                elif not state and val >= min_confidence:
+                    next_state = True
+                    hang_remaining = max(0, vis_hang)
+            else:
+                next_state = val >= min_confidence
+
+            state = next_state
+            visible[idx] = state
+
+        return visible
+
+    visibility_mask = np.zeros_like(xs, dtype=bool)
+    for column_index in range(xs.shape[1]):
+        col_mask = _apply_visibility_hysteresis(vs[:, column_index])
+        visibility_mask[:, column_index] = col_mask & finite_xy[:, column_index]
+
+    xs[~visibility_mask] = np.nan
+    ys[~visibility_mask] = np.nan
+    zs[~visibility_mask] = np.nan
 
     def _interp_columns(arr: np.ndarray) -> np.ndarray:
         """Interpolate each landmark column independently."""
@@ -142,7 +189,11 @@ def filter_and_interpolate_landmarks(
     ys_interp = _interp_columns(ys)
     zs_interp = _interp_columns(zs)
 
-    vis_output = np.where(np.isfinite(vs), vs, 0.0)
+    vis_output = np.where(
+        visibility_mask,
+        np.where(np.isfinite(vs), vs, min_confidence),
+        0.0,
+    )
 
     def _build_landmark(x: float, y: float, z: float, v: float) -> dict[str, float]:
         return {
@@ -216,7 +267,8 @@ def calculate_metrics_from_sequence(
     sequence: np.ndarray,
     fps: float,
     *,
-    smooth_window: int = 0,
+    smooth_window: int = 7,
+    sg_poly: int = 2,
     vel_method: str = "forward",
 ) -> pd.DataFrame:
     """Compute biomechanical metrics for the provided landmark sequence."""
@@ -321,13 +373,81 @@ def calculate_metrics_from_sequence(
     for column in angle_columns:
         dfm[f"raw_{column}"] = raw_angles[column]
 
-    for column in angle_columns:
-        dfm[column] = dfm[column].interpolate(method="linear", limit_direction="both")
+    smoothing_meta: dict[str, float | int | str | None] = {
+        "method": "none",
+        "window": None,
+        "poly": None,
+    }
+    savgol_available = False
+    savgol_filter = None
+    if smooth_window >= 5:
+        try:
+            from scipy.signal import savgol_filter as _savgol_filter
+
+            savgol_filter = _savgol_filter
+            savgol_available = True
+        except Exception:  # pragma: no cover - SciPy optional at runtime
+            savgol_available = False
+
+    def _maybe_apply_savgol(
+        series: pd.Series,
+    ) -> tuple[pd.Series, tuple[str, int, int] | None]:
+        if not savgol_available:
+            return series, None
+
+        values = series.to_numpy(dtype=float)
+        n = values.size
+        if n < 5:
+            return series, None
+
+        window = min(smooth_window, n if n % 2 == 1 else n - 1)
+        if window < 5:
+            return series, None
+        if window % 2 == 0:
+            window = max(5, window - 1)
+        if window > n:
+            window = n if n % 2 == 1 else n - 1
+        if window < 5:
+            return series, None
+
+        poly = min(max(1, sg_poly), window - 1)
+        if poly >= window:
+            poly = window - 1
+        if poly < 1:
+            return series, None
+
+        try:
+            filtered = savgol_filter(values, window_length=window, polyorder=poly, mode="interp")
+        except ValueError:
+            return series, None
+
+        return pd.Series(filtered, index=series.index), ("savgol", int(window), int(poly))
+
+    def _apply_smoothing(series: pd.Series) -> tuple[pd.Series, tuple[str, int, int] | None]:
+        if smooth_window >= 5:
+            smoothed, desc = _maybe_apply_savgol(series)
+            if desc is not None:
+                return smoothed, desc
         if smooth_window >= 3:
-            dfm[column] = dfm[column].rolling(smooth_window, center=True, min_periods=1).mean()
+            rolled = series.rolling(smooth_window, center=True, min_periods=1).mean()
+            return rolled, ("rolling_mean", int(smooth_window), 0)
+        return series, None
+
+    for column in angle_columns:
+        interpolated = dfm[column].interpolate(method="linear", limit_direction="both")
+        smoothed_series, desc = _apply_smoothing(interpolated)
+        dfm[column] = smoothed_series
+        if desc is not None:
+            smoothing_meta = {
+                "method": desc[0],
+                "window": desc[1],
+                "poly": desc[2] if desc[0] == "savgol" else None,
+            }
         dfm[f"ang_vel_{column}"] = angular_velocity(
             dfm[column].to_numpy(), fps, method=vel_method
         )
+
+    dfm.attrs["smoothing"] = smoothing_meta
 
     # Knee symmetry
     L = raw_angles["left_knee"].to_numpy()
