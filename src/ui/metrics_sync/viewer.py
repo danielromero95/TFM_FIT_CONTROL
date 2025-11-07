@@ -35,13 +35,14 @@ def _build_payload(
     fps: float | int,
     *,
     max_points: int = 3000,
+    descriptions: dict[str, str] | None = None,
 ) -> dict:
     # Normalize FPS
     fps = float(fps) if float(fps) > 0 else 1.0
 
     n = int(len(df))
     if n <= 0:
-        return {"times": [], "series": {}, "fps": fps, "x_mode": "frame"}
+        return {"times": [], "series": {}, "fps": fps, "x_mode": "frame", "desc": {}}
 
     # Compute stride once based on total points
     stride = 1
@@ -85,7 +86,14 @@ def _build_payload(
         for j, name in enumerate(present):
             series[name] = obj[:, j].tolist()
 
-    return {"times": times, "series": series, "fps": fps, "x_mode": x_mode}
+    # --- NEW: attach descriptions for present series
+    desc_map: dict[str, str] = {}
+    if descriptions:
+        for name in present:
+            if name in descriptions:
+                desc_map[name] = descriptions[name]
+
+    return {"times": times, "series": series, "fps": fps, "x_mode": x_mode, "desc": desc_map}
 
 
 @st.cache_data(show_spinner=False)
@@ -108,6 +116,7 @@ def render_video_with_metrics_sync(
     max_width_px: int = 720,
     show_video: bool = False,
     sync_channel: str | None = None,
+    metric_descriptions: dict[str, str] | None = None,
 ) -> None:
     if metrics_df is None or metrics_df.empty:
         st.info("No metrics available to display.")
@@ -116,7 +125,12 @@ def render_video_with_metrics_sync(
         st.info("Select at least one metric to plot.")
         return
 
-    payload = _build_payload(metrics_df, selected_metrics, fps=fps)
+    payload = _build_payload(
+        metrics_df,
+        selected_metrics,
+        fps=fps,
+        descriptions=metric_descriptions,
+    )
     payload["rep"] = rep_intervals or []
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []

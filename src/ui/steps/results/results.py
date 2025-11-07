@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -17,6 +18,55 @@ from src.pipeline_data import Report, RunStats
 from src.ui.metrics_sync.viewer import render_video_with_metrics_sync
 from src.ui.state import get_state
 from ..utils import step_container
+
+
+def _metric_descriptions_for(
+    ex_str: str,
+    low_thr: float | int | None,
+    available: list[str],
+) -> dict[str, str]:
+    low_txt = f"{float(low_thr):.0f}°" if low_thr is not None else "the lower threshold"
+    d = {
+        "trunk_inclination_deg": "Torso tilt (deg)\nAngle between shoulder–hip line and vertical.",
+        "shoulder_width": "Shoulder width (normalized)\nHorizontal distance between shoulders.",
+        "foot_separation": "Foot separation (normalized)\nHorizontal distance between ankles/feet.",
+    }
+
+    if ex_str == "squat":
+        d["left_knee"] = (
+            f"Left knee angle (thigh–shank)\nReps counted when the primary knee dips below {low_txt}."
+        )
+        d["right_knee"] = (
+            f"Right knee angle (thigh–shank)\nReps counted when the primary knee dips below {low_txt}."
+        )
+    elif ex_str == "bench_press":
+        d["left_elbow"] = (
+            f"Left elbow angle (upper arm–forearm)\nValleys near {low_txt} mark each rep."
+        )
+        d["right_elbow"] = (
+            f"Right elbow angle (upper arm–forearm)\nValleys near {low_txt} mark each rep."
+        )
+        d["shoulder_width"] += "\nUseful to monitor grip consistency."
+    elif ex_str == "deadlift":
+        d["left_hip"] = (
+            f"Hip angle (torso–thigh, left)\nReps valid when hip angle rises above {low_txt}."
+        )
+        d["right_hip"] = (
+            f"Hip angle (torso–thigh, right)\nReps valid when hip angle rises above {low_txt}."
+        )
+        d["trunk_inclination_deg"] += "\nUseful to track hip hinge."
+
+    for name in list(available):
+        if name.startswith("ang_vel_"):
+            base = name.removeprefix("ang_vel_")
+            d[name] = f"Angular velocity of {base.replace('_', ' ')} (deg/s)."
+        if name.startswith("raw_"):
+            base = name.removeprefix("raw_")
+            d[name] = (
+                f"Raw (uninterpolated) samples of '{base}'.\nMay include gaps from low-visibility frames."
+            )
+
+    return {k: v for k, v in d.items() if k in available}
 
 
 def _compute_rep_intervals(
@@ -181,11 +231,133 @@ def _results_panel() -> Dict[str, bool]:
 
                     widget_key = f"metrics_multiselect_{run_sig}"
 
+                    ex = getattr(stats, "exercise_detected", "")
+                    ex_str = getattr(ex, "value", str(ex))
+                    low_thr = None
+                    try:
+                        low_thr = float((state.configure_values or {}).get("low"))
+                    except Exception:
+                        pass
+                    metric_desc = _metric_descriptions_for(ex_str, low_thr, metric_options)
+                    primary = getattr(stats, "primary_angle", None)
+                    if primary and primary in metric_desc:
+                        metric_desc[primary] = f"PRIMARY — {metric_desc[primary]}"
+
+                    container_id = f"vmx-msel-{run_sig}"
+                    st.markdown(f'<div id="{container_id}">', unsafe_allow_html=True)
+
                     selected_metrics = st.multiselect(
                         "View metrics",
                         options=metric_options,
                         default=st.session_state[default_key],
                         key=widget_key,
+                        help="Click/hover the ? next to each metric to read its definition.",
+                    )
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                    st.markdown(
+                        """
+<style>
+.vmx-opt-help{position:absolute; right:8px; top:50%; transform:translateY(-50%);
+  width:22px;height:22px; display:inline-flex; align-items:center; justify-content:center;
+  border-radius:999px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06);
+  cursor:pointer; font:700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e5e7eb;}
+.vmx-opt-help:hover{background:rgba(255,255,255,.14)}
+.vmx-opt-wrap{position:relative; padding-right:34px !important;}
+.vmx-pop{position:fixed; z-index:99999; max-width:320px; background:#111827; color:#e5e7eb;
+  border:1px solid rgba(255,255,255,.15); box-shadow:0 12px 24px rgba(0,0,0,.4);
+  border-radius:10px; padding:.6rem .75rem; font-size:.875rem;}
+.vmx-pop strong{color:#f59e0b;}
+</style>
+""",
+                        unsafe_allow_html=True,
+                    )
+
+                    st.markdown(
+                        f"""
+<script>
+(function() {{
+  const DESC = {json.dumps(metric_desc).replace("</", "<\\/")};
+  const ROOT_ID = {json.dumps(container_id)};
+  const PRIMARY = {json.dumps(primary if 'primary' in locals() else None)};
+
+  // Crea popover simple
+  function showPop(text, target){
+    hidePop();
+    const p = document.createElement('div');
+    p.className = 'vmx-pop';
+    p.innerHTML = text;
+    document.body.appendChild(p);
+    const r = target.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - p.offsetWidth - 8, r.right - 6 - p.offsetWidth);
+    const y = r.top + window.scrollY + r.height + 6;
+    p.style.left = (x < 8 ? 8 : x) + 'px';
+    p.style.top = y + 'px';
+    window.__vmxPop = p;
+    setTimeout(()=>document.addEventListener('click', hidePop, {once:true}), 0);
+  }
+  function hidePop(){
+    if (window.__vmxPop){ window.__vmxPop.remove(); window.__vmxPop=null; }
+  }
+
+  function instrumentOptions(listbox){
+    if (!listbox) return;
+    const options = listbox.querySelectorAll('[role="option"]');
+    options.forEach(opt=>{
+      if (opt.__vmxHelp) return;
+      opt.__vmxHelp = true;
+
+      // Contenido textual de la opción (etiqueta)
+      const label = (opt.textContent || '').trim();
+      // BaseWeb mete iconos/checkbox; intentamos localizar el span con el texto
+      const textNode = opt.querySelector('div,span');
+      if (textNode) textNode.classList.add('vmx-opt-wrap');
+
+      const desc = DESC[label];
+      if (!desc) return;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'vmx-opt-help';
+      btn.title = desc;                // tooltip nativo en hover
+      btn.textContent = '?';
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();           // no seleccionar/deseleccionar
+        showPop('<div>'+desc.replace(/\\n/g,'<br>')+'</div>', btn);
+      }, {passive:true});
+      opt.appendChild(btn);
+
+      // Marca PRIMARY en tooltip si aplica
+      if (PRIMARY && label === PRIMARY && !/PRIMARY/.test(btn.title)){
+        btn.title = 'PRIMARY — ' + btn.title;
+      }
+    });
+  }
+
+  function watch(){
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return;
+    // El menú del multiselect vive en un portal; observamos el documento para capturarlo
+    const obs = new MutationObserver(()=>{
+      // Busca el listbox más cercano al root cuando el menú está abierto
+      const listboxes = document.querySelectorAll('[role="listbox"]');
+      listboxes.forEach(lb=>{
+        // Filtra por opciones que pertenecen a nuestro selector (coinciden etiquetas conocidas)
+        const hasAny = Array.from(lb.querySelectorAll('[role="option"]'))
+          .some(o => DESC[(o.textContent||'').trim()]);
+        if (hasAny) instrumentOptions(lb);
+      });
+    });
+    obs.observe(document.body, {childList:true, subtree:true});
+  }
+  // init
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+  else watch();
+})();
+</script>
+""",
+                        unsafe_allow_html=True,
                     )
                     if selected_metrics:
                         rep_intervals = _compute_rep_intervals(
@@ -225,6 +397,7 @@ def _results_panel() -> Dict[str, bool]:
                             max_width_px=720,
                             show_video=False,
                             sync_channel=sync_channel,
+                            metric_descriptions=metric_desc,
                         )
                     else:
                         st.info("Select at least one metric to visualize.")
