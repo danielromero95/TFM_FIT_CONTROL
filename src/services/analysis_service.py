@@ -31,7 +31,7 @@ from src.B_pose_estimation.estimators import (
     PoseEstimator,
     RoiPoseEstimator,
 )
-from src.B_pose_estimation.processing import (
+from src.B_pose_estimation.pipeline import (
     calculate_metrics_from_sequence,
     filter_and_interpolate_landmarks,
 )
@@ -271,7 +271,9 @@ def _stream_pose_and_detection(
                 emit_preview = preview_active and (frame_idx % stride_preview == 0)
                 overlay_points_needed = emit_preview or debug_video_path is not None
 
-                landmarks, _annotated, crop_box = estimator.estimate(frame)
+                result = estimator.estimate(frame)
+                landmarks = result.landmarks
+                crop_box = result.crop_box
                 row: dict[str, float] = {"frame_idx": int(frame_idx)}
                 overlay_points: dict[int, tuple[int, int]] = {}
 
