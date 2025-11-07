@@ -1,0 +1,137 @@
+"""Geometry helpers shared across pose estimation modules."""
+
+from __future__ import annotations
+
+from typing import Iterable, Optional, Sequence, Tuple
+
+import numpy as np
+
+from .constants import LANDMARK_COUNT
+from .types import Landmark, PoseSequence
+
+
+def landmarks_from_proto(landmarks: Iterable[object]) -> list[Landmark]:
+    """Convert Mediapipe landmarks to :class:`Landmark` objects."""
+
+    converted: list[Landmark] = []
+    for lm in landmarks:
+        converted.append(
+            Landmark(
+                x=float(getattr(lm, "x", np.nan)),
+                y=float(getattr(lm, "y", np.nan)),
+                z=float(getattr(lm, "z", np.nan)),
+                visibility=float(getattr(lm, "visibility", np.nan)),
+            )
+        )
+    return converted
+
+
+def landmarks_to_pixel_xy(landmarks: Sequence[Landmark], width: int, height: int) -> np.ndarray:
+    """Return an ``(N, 2)`` array with pixel coordinates."""
+
+    arr = np.empty((len(landmarks), 2), dtype=float)
+    for idx, lm in enumerate(landmarks):
+        arr[idx, 0] = float(lm.x) * width
+        arr[idx, 1] = float(lm.y) * height
+    return arr
+
+
+def bounding_box_from_landmarks(
+    landmarks: Sequence[Landmark], width: int, height: int
+) -> Optional[Tuple[float, float, float, float]]:
+    """Return ``(xmin, ymin, xmax, ymax)`` in pixel coordinates or ``None``."""
+
+    if not landmarks:
+        return None
+    xy = landmarks_to_pixel_xy(landmarks, width, height)
+    if xy.size == 0:
+        return None
+    x_min, y_min = float(np.min(xy[:, 0])), float(np.min(xy[:, 1]))
+    x_max, y_max = float(np.max(xy[:, 0])), float(np.max(xy[:, 1]))
+    return x_min, y_min, x_max, y_max
+
+
+def expand_and_clip_box(
+    bbox: Tuple[float, float, float, float], width: int, height: int, margin: float
+) -> list[int]:
+    """Expand ``bbox`` by ``margin`` and clip to image boundaries."""
+
+    x_min, y_min, x_max, y_max = bbox
+    dx = (x_max - x_min) * float(margin)
+    dy = (y_max - y_min) * float(margin)
+    x1 = max(int(np.floor(x_min - dx)), 0)
+    y1 = max(int(np.floor(y_min - dy)), 0)
+    x2 = min(int(np.ceil(x_max + dx)), width)
+    y2 = min(int(np.ceil(y_max + dy)), height)
+
+    if x2 <= x1:
+        if x1 >= width:
+            x1 = max(width - 1, 0)
+        x2 = min(width, x1 + 1)
+        x1 = max(0, x2 - 1)
+    if y2 <= y1:
+        if y1 >= height:
+            y1 = max(height - 1, 0)
+        y2 = min(height, y1 + 1)
+        y1 = max(0, y2 - 1)
+
+    return [x1, y1, x2, y2]
+
+
+def sequence_to_coordinate_arrays(
+    sequence: PoseSequence,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Convert a pose sequence into ``(x, y, z, visibility)`` arrays."""
+
+    T = len(sequence)
+    n = LANDMARK_COUNT
+    xs = np.full((T, n), np.nan, dtype=float)
+    ys = np.full((T, n), np.nan, dtype=float)
+    zs = np.full((T, n), np.nan, dtype=float)
+    vs = np.full((T, n), np.nan, dtype=float)
+
+    for t, frame in enumerate(sequence):
+        if frame is None:
+            continue
+        for j, lm in enumerate(frame):
+            try:
+                xs[t, j] = float(lm.get("x", np.nan))
+                ys[t, j] = float(lm.get("y", np.nan))
+                zs[t, j] = float(lm.get("z", np.nan))
+                visibility = lm.get("visibility", np.nan)
+                vs[t, j] = float(visibility) if np.isfinite(visibility) else np.nan
+            except Exception:
+                continue
+
+    return xs, ys, zs, vs
+
+
+def angle_abc_deg(
+    ax: np.ndarray,
+    ay: np.ndarray,
+    bx: np.ndarray,
+    by: np.ndarray,
+    cx: np.ndarray,
+    cy: np.ndarray,
+) -> np.ndarray:
+    """Vectorised angle ABC in degrees for each row."""
+
+    v1x, v1y = ax - bx, ay - by
+    v2x, v2y = cx - bx, cy - by
+    dot = v1x * v2x + v1y * v2y
+    n1 = np.hypot(v1x, v1y)
+    n2 = np.hypot(v2x, v2y)
+    denom = n1 * n2
+    cos = np.where(denom > 0, dot / denom, np.nan)
+    cos = np.clip(cos, -1.0, 1.0)
+    return np.degrees(np.arccos(cos))
+
+
+__all__ = [
+    "angle_abc_deg",
+    "bounding_box_from_landmarks",
+    "expand_and_clip_box",
+    "landmarks_from_proto",
+    "landmarks_to_pixel_xy",
+    "sequence_to_coordinate_arrays",
+]
