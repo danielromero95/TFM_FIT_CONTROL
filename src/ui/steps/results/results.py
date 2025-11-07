@@ -479,24 +479,8 @@ def _render_metric_help(widget_key: str, anchor_id: str, descriptions: Dict[str,
         "anchorId": anchor_id,
         "descriptions": descriptions,
     }
-    helper_js_core = (
-        _METRIC_HELP_SCRIPT_TEMPLATE
-        .replace("<script>", "")
-        .replace("</script>", "")
-        .replace("__PAYLOAD__", json.dumps(payload))
-    )
-    shim = f"""
-    <script>
-    (function() {{
-      var code = {json.dumps(helper_js_core)};
-      var s = window.parent.document.createElement('script');
-      s.type = 'text/javascript';
-      s.text = code;
-      window.parent.document.body.appendChild(s);
-    }})();
-    </script>
-    """
-    components_html(shim, height=0)
+    script = _METRIC_HELP_SCRIPT_TEMPLATE.replace("__PAYLOAD__", json.dumps(payload))
+    components_html(script, height=0)
 
 
 def _ensure_metric_help_styles() -> None:
@@ -558,9 +542,12 @@ _METRIC_HELP_SCRIPT_TEMPLATE = """
 <script>
 (function() {
   const payload = __PAYLOAD__;
-  // Run inside the same document (no iframes)
-  const doc = document;
-  const globalState = window.__metricHelpGlobal = window.__metricHelpGlobal || {};
+  const parentWindow = window.parent;
+  if (!parentWindow || !parentWindow.document) {
+    return;
+  }
+  const doc = parentWindow.document;
+  const globalState = parentWindow.__metricHelpGlobal = parentWindow.__metricHelpGlobal || {};
   globalState.registry = globalState.registry || {};
   const registry = globalState.registry;
   registry[payload.widgetKey] = registry[payload.widgetKey] || {};
@@ -748,8 +735,8 @@ _METRIC_HELP_SCRIPT_TEMPLATE = """
     });
     doc.body.appendChild(popover);
     const rect = button.getBoundingClientRect();
-    popover.style.left = (rect.left + window.scrollX) + 'px';
-    popover.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+    popover.style.left = (rect.left + parentWindow.scrollX) + 'px';
+    popover.style.top = (rect.bottom + parentWindow.scrollY + 6) + 'px';
     globalState.activePopover = { element: popover, button: button };
   }
 
