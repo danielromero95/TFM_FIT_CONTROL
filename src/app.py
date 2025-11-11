@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.config import APP_NAME
 from src.config.settings import configure_environment
 from src.ui.assets import inject_css, inject_js
 from src.ui.state import AppState, Step, get_state, go_to, reset_state, safe_rerun
@@ -25,11 +26,8 @@ from src.ui.steps.results import _results_panel, _results_summary
 from src.ui.steps.running import _running_step
 from src.ui.steps.upload import _upload_step
 
-APP_TITLE = "Exercise Performance Analyzer"
-
-
 configure_environment()
-st.set_page_config(layout="wide", page_title=APP_TITLE)
+st.set_page_config(layout="wide", page_title=APP_NAME)
 
 ENABLE_JS_ENHANCEMENTS = os.getenv("ENABLE_JS_ENHANCEMENTS", "1") == "1"
 
@@ -92,7 +90,7 @@ def _reset_app() -> None:
 def main() -> None:
     if threading.current_thread() is threading.main_thread():
         inject_css()
-        inject_js(title=APP_TITLE, enable=ENABLE_JS_ENHANCEMENTS)
+        inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)
 
     results_action = AppAction.NONE
     col_left, col_mid, col_right = st.columns(3)
