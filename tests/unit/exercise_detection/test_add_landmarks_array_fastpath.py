@@ -2,9 +2,9 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from src.exercise_detection.exercise_detector import (
-    _build_features_from_landmark_array,
-    _build_features_from_landmarks,
+from exercise_detection.features import (
+    build_features_from_landmark_array,
+    build_features_from_landmarks,
 )
 
 
@@ -29,8 +29,8 @@ def test_feature_parity_list_vs_array_minimal_case():
         arr[i, 2] = 0.0
         arr[i, 3] = 1.0
 
-    feat_list = _build_features_from_landmarks(lms)
-    feat_arr = _build_features_from_landmark_array(arr)
+    feat_list = build_features_from_landmarks(lms)
+    feat_arr = build_features_from_landmark_array(arr)
 
     assert set(feat_list.keys()) == set(feat_arr.keys())
     for key in feat_list.keys():

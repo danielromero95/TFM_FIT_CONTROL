@@ -1,9 +1,43 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import cv2
 import pytest
 
 np = pytest.importorskip("numpy")
 
 from src.D_visualization import render_landmarks_video, transcode_video
 from src.D_visualization.landmark_geometry import _normalize_points_for_frame
+
+
+class _RecordingWriter:
+    def __init__(self, output_path: Path, code: str) -> None:
+        self.output_path = Path(output_path)
+        self.output_path.write_bytes(b"stub")
+        self.code = code
+        self.frames: list[np.ndarray] = []
+
+    def write(self, frame: np.ndarray) -> None:
+        self.frames.append(np.asarray(frame))
+
+    def release(self) -> None:  # pragma: no cover - nothing to clean up
+        pass
+
+
+class _WriterFactory:
+    def __init__(self, *, supported: set[str] | None = None) -> None:
+        self.supported = supported or {"mp4v"}
+        self.created: list[_RecordingWriter] = []
+
+    def open(self, path: str, fps: float, size, prefs):
+        for code in prefs:
+            if code not in self.supported:
+                continue
+            writer = _RecordingWriter(Path(path), code)
+            self.created.append(writer)
+            return writer, code
+        raise RuntimeError(f"No supported codec in {prefs}")
 
 
 def test_mapping_without_crop_matches_expected_pixels():
@@ -45,9 +79,15 @@ def _make_test_frames(count: int, width: int = 640, height: int = 360):
         yield frame
 
 
-def test_writer_fps_fallback_and_counts(tmp_path):
+def test_writer_fps_fallback_and_counts(tmp_path, monkeypatch):
     output = tmp_path / "out.mp4"
     frames = list(_make_test_frames(3))
+    factory = _WriterFactory()
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_renderers._open_writer",
+        lambda path, fps, size, prefs: factory.open(path, fps, size, prefs),
+    )
+
     stats = render_landmarks_video(
         frames,
         [None, None, None],
@@ -56,16 +96,23 @@ def test_writer_fps_fallback_and_counts(tmp_path):
         fps=0.0,
         processed_size=(256, 256),
     )
+
     assert stats.frames_in == 3
     assert stats.frames_written == 3
     assert stats.skipped_empty == 3
     assert output.exists()
-    assert output.stat().st_size > 0
+    assert factory.created[0].frames and len(factory.created[0].frames) == 3
 
 
-def test_writer_codec_fallback(tmp_path):
+def test_writer_codec_fallback(tmp_path, monkeypatch):
     output = tmp_path / "fallback.mp4"
     frames = list(_make_test_frames(2))
+    factory = _WriterFactory(supported={"mp4v"})
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_renderers._open_writer",
+        lambda path, fps, size, prefs: factory.open(path, fps, size, prefs),
+    )
+
     stats = render_landmarks_video(
         frames,
         [None, None],
@@ -75,14 +122,20 @@ def test_writer_codec_fallback(tmp_path):
         processed_size=(256, 256),
         codec_preference=("ZZZZ", "mp4v"),
     )
+
     assert stats.used_fourcc == "mp4v"
     assert output.exists()
-    assert output.stat().st_size > 0
+    assert factory.created[0].code == "mp4v"
 
 
-def test_transcode_video_rewrites_file_when_possible(tmp_path):
+def test_transcode_video_rewrites_file_when_possible(tmp_path, monkeypatch):
     src = tmp_path / "source.mp4"
     frames = list(_make_test_frames(2))
+    render_factory = _WriterFactory(supported={"mp4v"})
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_renderers._open_writer",
+        lambda path, fps, size, prefs: render_factory.open(path, fps, size, prefs),
+    )
     render_landmarks_video(
         frames,
         [None, None],
@@ -92,6 +145,38 @@ def test_transcode_video_rewrites_file_when_possible(tmp_path):
         processed_size=(256, 256),
         codec_preference=("mp4v",),
     )
+
+    class _FakeCapture:
+        def __init__(self, _path: str) -> None:
+            self._frames = iter(frames)
+
+        def isOpened(self) -> bool:
+            return True
+
+        def get(self, prop: int) -> float:
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return float(frames[0].shape[1])
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return float(frames[0].shape[0])
+            return 0.0
+
+        def read(self):
+            try:
+                frame = next(self._frames)
+            except StopIteration:
+                return False, None
+            return True, frame
+
+        def release(self) -> None:  # pragma: no cover - nothing to clean up
+            pass
+
+    transcode_factory = _WriterFactory(supported={"mp4v"})
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_video_io._open_writer",
+        lambda path, fps, size, prefs: transcode_factory.open(path, fps, size, prefs),
+    )
+    monkeypatch.setattr("src.D_visualization.landmark_video_io.cv2.VideoCapture", _FakeCapture)
+
     dst = tmp_path / "h264.mp4"
     success, codec = transcode_video(
         str(src),
@@ -99,7 +184,8 @@ def test_transcode_video_rewrites_file_when_possible(tmp_path):
         fps=25.0,
         codec_preference=("mp4v",),
     )
+
     assert success
     assert codec == "mp4v"
     assert dst.exists()
-    assert dst.stat().st_size > 0
+    assert transcode_factory.created[0].frames

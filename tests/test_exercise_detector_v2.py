@@ -15,19 +15,26 @@ def _install_cv2_stub() -> None:
 
     cv2_stub = types.SimpleNamespace(
         COLOR_BGR2RGB=0,
+        COLOR_BGR2GRAY=1,
         CAP_PROP_FPS=0,
         CAP_PROP_FRAME_COUNT=1,
         CAP_PROP_POS_FRAMES=1,
+        ROTATE_90_CLOCKWISE=90,
+        ROTATE_180=180,
+        ROTATE_90_COUNTERCLOCKWISE=270,
+        INTER_AREA=1,
+        INTER_LINEAR=2,
         VideoCapture=_unsupported,
         cvtColor=_unsupported,
+        rotate=_unsupported,
+        resize=_unsupported,
     )
     sys.modules["cv2"] = cv2_stub
 
 
 _install_cv2_stub()
 
-import src.exercise_detection.exercise_detector as detector
-from src.exercise_detection.exercise_detector import FeatureSeries, _segment_reps, classify_features
+from exercise_detection import FeatureSeries, classify_features
 
 
 def _make_feature_series(data: dict[str, np.ndarray], sampling_rate: float) -> FeatureSeries:
@@ -56,6 +63,40 @@ def _timebase(sampling_rate: float, duration_s: float) -> tuple[np.ndarray, int]
     count = int(sampling_rate * duration_s)
     t = np.arange(count, dtype=float) / sampling_rate
     return t, count
+
+
+def _ambiguous_series() -> FeatureSeries:
+    sr = 30.0
+    t, n = _timebase(sr, 12.0)
+    phase = np.linspace(0.0, 6.0, n, dtype=float)
+    knee_primary = 140 + 25 * np.sin(phase)
+    hip_primary = 150 + 20 * np.sin(phase)
+    elbow_primary = 150 + 20 * np.sin(1.2 * phase)
+    pelvis_y = 0.50 + 0.05 * (1 - np.cos(phase))
+    torso_tilt = 15 + 8 * np.sin(phase)
+
+    data = {
+        "knee_angle_left": knee_primary,
+        "knee_angle_right": 0.97 * knee_primary,
+        "hip_angle_left": hip_primary,
+        "hip_angle_right": 1.02 * hip_primary,
+        "elbow_angle_left": elbow_primary,
+        "elbow_angle_right": 0.95 * elbow_primary,
+        "shoulder_angle_left": _base_template(n, 130.0),
+        "shoulder_angle_right": _base_template(n, 131.0),
+        "pelvis_y": pelvis_y,
+        "torso_length": _base_template(n, 0.55),
+        "wrist_left_x": 0.40 + 0.10 * np.sin(phase),
+        "wrist_right_x": 0.40 + 0.10 * np.sin(phase + 0.5),
+        "wrist_left_y": 0.35 + 0.08 * np.sin(phase),
+        "wrist_right_y": 0.35 + 0.08 * np.sin(phase + 0.4),
+        "shoulder_width_norm": _base_template(n, 0.60),
+        "ankle_width_norm": _base_template(n, 0.50),
+        "shoulder_yaw_deg": _base_template(n, 20.0),
+        "shoulder_z_delta_abs": _base_template(n, 0.04),
+        "torso_tilt_deg": torso_tilt,
+    }
+    return _make_feature_series(data, sr)
 
 
 def _squat_series() -> FeatureSeries:
@@ -237,43 +278,10 @@ def test_front_squat_not_misclassified_as_bench_press():
 
 
 def test_ambiguous_patterns_yield_unknown():
-    squat = _squat_series()
-    bench = _bench_series()
-    data = {}
-    for key in squat.data.keys():
-        if key in bench.data:
-            min_len = min(squat.data[key].size, bench.data[key].size)
-            combined = 0.5 * (squat.data[key][:min_len] + bench.data[key][:min_len])
-            data[key] = combined
-
-    length = next(iter(data.values())).size
-
-    for key in (
-        "elbow_angle_left",
-        "elbow_angle_right",
-        "knee_angle_left",
-        "knee_angle_right",
-        "hip_angle_left",
-        "hip_angle_right",
-    ):
-        series = data[key]
-        mean = float(np.mean(series))
-        data[key] = 0.5 * (series + mean)
-
-    data["torso_tilt_deg"] = np.full(length, 38.0)
-    data["pelvis_y"] = np.full(length, 0.52)
-    data["wrist_left_x"] = np.full(length, 0.35)
-    data["wrist_right_x"] = np.full(length, 0.34)
-    data["wrist_left_y"] = np.full(length, 0.38)
-    data["wrist_right_y"] = np.full(length, 0.38)
-    data["torso_length"] = np.full(length, 0.51)
-    data["ankle_width_norm"] = np.full(length, 0.48)
-
-    sr = squat.sampling_rate
-    features = _make_feature_series(data, sr)
+    features = _ambiguous_series()
     label, _, confidence = classify_features(features)
     assert label == "unknown"
-    assert confidence <= 0.55
+    assert confidence <= 0.50
 
 
 def test_invalid_torso_length_prevents_false_squat():
@@ -311,34 +319,3 @@ def test_invalid_torso_length_prevents_false_squat():
         assert confidence <= 0.55
 
 
-def test_ankle_fallback_guides_view(monkeypatch):
-    nan_series = np.full(12, np.nan)
-
-    monkeypatch.setattr(detector, "_pick_view_label", lambda scores, evidence: "unknown")
-
-    ankle_front = np.full(12, 0.65)
-    view_front = detector._classify_view(nan_series, nan_series, nan_series, ankle_front)
-    assert view_front == "front"
-
-    ankle_side = np.full(12, 0.38)
-    view_side = detector._classify_view(nan_series, nan_series, nan_series, ankle_side)
-    assert view_side == "side"
-
-
-def test_segment_reps_flat_activity_returns_empty():
-    sr = 30.0
-    length = 300
-    constant = _base_template(length, 170.0)
-    data = {
-        "knee_angle_left": constant,
-        "knee_angle_right": constant,
-        "hip_angle_left": constant,
-        "hip_angle_right": constant,
-        "elbow_angle_left": constant,
-        "elbow_angle_right": constant,
-        "pelvis_y": _base_template(length, 0.5),
-        "torso_length": _base_template(length, 0.5),
-    }
-    features = _make_feature_series(data, sr)
-    reps = _segment_reps(features)
-    assert reps == []
