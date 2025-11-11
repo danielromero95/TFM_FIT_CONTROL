@@ -5,7 +5,6 @@ from pathlib import Path
 
 # --- GENERAL CONFIGURATION ---
 APP_NAME = "Gym Performance Analyzer"
-ORGANIZATION_NAME = "GymPerformance"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".mpg", ".mpeg", ".wmv"}
 
 # --- FILE PATHS ---
