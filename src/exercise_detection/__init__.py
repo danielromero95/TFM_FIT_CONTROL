@@ -5,15 +5,21 @@ from .exercise_detector import (
     FeatureSeries,
     classify_features,
     detect_exercise,
+    detect_exercise_from_frames,
     extract_features,
+    extract_features_from_frames,
     make_detection_result,
 )
+from .incremental import IncrementalExerciseFeatureExtractor
 
 __all__ = [
     "DetectionResult",
     "FeatureSeries",
     "classify_features",
     "detect_exercise",
+    "detect_exercise_from_frames",
     "extract_features",
+    "extract_features_from_frames",
     "make_detection_result",
+    "IncrementalExerciseFeatureExtractor",
 ]
