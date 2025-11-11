@@ -36,11 +36,7 @@ from src.B_pose_estimation.pipeline import (
     filter_and_interpolate_landmarks,
 )
 from src.C_repetition_analysis.reps.api import count_repetitions_with_config
-from src.D_visualization.video_landmarks import (
-    OverlayStyle,
-    draw_pose_on_frame,
-    render_landmarks_video,
-)
+from src.D_visualization import OverlayStyle, draw_pose_on_frame, render_landmarks_video
 from src.exercise_detection.exercise_detector import (
     DetectionResult,
     IncrementalExerciseFeatureExtractor,
