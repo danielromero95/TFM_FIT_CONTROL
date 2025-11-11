@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src import config
-from src.C_repetition_analysis.reps.api import count_repetitions_with_config
+from src.C_repetition_analysis.repetition_counter import count_repetitions_with_config
 
 
 def _make_cfg(**overrides):
