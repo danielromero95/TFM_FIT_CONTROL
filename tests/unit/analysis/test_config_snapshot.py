@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import Any
 
 
-# Provide lightweight stubs for heavy optional dependencies so analysis_service imports cleanly.
+# Provide lightweight stubs for heavy optional dependencies so the analysis package imports cleanly.
 if "cv2" not in sys.modules:
     class _FakeVideoCapture:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
@@ -99,7 +99,7 @@ if "scipy" not in sys.modules:
     sys.modules["scipy.signal"] = fake_signal
 
 from src import config
-from src.services.analysis_service import _prepare_output_paths
+from src.C_analysis import _prepare_output_paths
 
 
 def test_config_snapshot_uses_session_directory(tmp_path) -> None:

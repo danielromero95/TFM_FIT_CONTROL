@@ -1,14 +1,17 @@
 # tests/test_pipeline_prefetch.py
 
+from __future__ import annotations
+
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 
 from src import config
-from src.C_repetition_analysis.repetition_counter import CountingDebugInfo
-from src.services.analysis_service import run_pipeline
 from src.A_preprocessing.video_metadata import VideoInfo
+from src.C_analysis import run_pipeline
+from src.C_analysis.streaming import StreamingPoseResult
 
 
 def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
@@ -25,62 +28,92 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
 
     frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(20)]
 
+    class _DummyCap:
+        def release(self) -> None:  # pragma: no cover - best effort cleanup
+            pass
+
+        def get(self, _prop) -> float:  # pragma: no cover - simple stub
+            return 30.0
+
+    monkeypatch.setattr("src.C_analysis.pipeline.open_video_cap", lambda _path: _DummyCap())
+
     monkeypatch.setattr(
-        "src.services.analysis_service.read_video_file_info",
-        lambda *args, **kwargs: VideoInfo(
-            path=Path(args[0] if args else kwargs.get("path", video_path)),
-            width=640,
-            height=480,
-            fps=30.0,
-            frame_count=600,
-            duration_sec=20.0,
-            rotation=0,
-            codec="H264",
-            fps_source="metadata",
+        "src.C_analysis.pipeline.read_info_and_initial_sampling",
+        lambda _cap, _video_path: (
+            VideoInfo(
+                path=Path(_video_path),
+                width=640,
+                height=480,
+                fps=30.0,
+                frame_count=600,
+                duration_sec=20.0,
+                rotation=0,
+                codec="H264",
+                fps_source="metadata",
+            ),
+            30.0,
+            None,
+            False,
         ),
     )
 
     monkeypatch.setattr(
-        "src.services.analysis_service.extract_and_preprocess_frames",
-        lambda **kwargs: (frames, 30.0),
+        "src.C_analysis.pipeline.extract_processed_frames_stream",
+        lambda **_: frames,
     )
 
-    def _fake_extract_landmarks(
-        *, frames, use_crop, min_detection_confidence, min_visibility
-    ):  # type: ignore[override]
-        length = len(frames)
-        return pd.DataFrame({"frame": range(length)})
+    def _fake_stream_pose_and_detection(*_args, **kwargs):
+        assert kwargs.get("detection_enabled") is False
+        return StreamingPoseResult(
+            df_landmarks=pd.DataFrame({"frame_idx": range(len(frames))}),
+            frames_processed=len(frames),
+            detection=None,
+            debug_video_path=None,
+            processed_size=(2, 2),
+        )
 
     monkeypatch.setattr(
-        "src.services.analysis_service.extract_landmarks_from_frames",
-        _fake_extract_landmarks,
-    )
-
-    def _fake_filter(df_raw_landmarks):  # type: ignore[override]
-        return df_raw_landmarks.copy(), []
-
-    monkeypatch.setattr(
-        "src.services.analysis_service.filter_and_interpolate_landmarks",
-        _fake_filter,
-    )
-
-    def _fake_metrics(_sequence, _fps):
-        return pd.DataFrame({cfg.counting.primary_angle: [90.0, 80.0, 105.0]})
-
-    monkeypatch.setattr(
-        "src.services.analysis_service.calculate_metrics_from_sequence",
-        _fake_metrics,
+        "src.C_analysis.pipeline.stream_pose_and_detection",
+        _fake_stream_pose_and_detection,
     )
 
     monkeypatch.setattr(
-        "src.services.analysis_service.count_repetitions_with_config",
-        lambda df, counting_cfg, fps: (2, CountingDebugInfo(valley_indices=[1], prominences=[1.0])),
+        "src.C_analysis.pipeline.filter_landmarks",
+        lambda df: (df.copy(), []),
     )
 
-    def _fail_detect(*args, **kwargs):  # pragma: no cover - should not be invoked
-        raise AssertionError("detect_exercise should not be called when prefetched")
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.infer_upright_quadrant_from_sequence",
+        lambda _sequence: 0,
+    )
 
-    monkeypatch.setattr("src.services.analysis_service.detect_exercise", _fail_detect)
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.compute_metrics_and_angle",
+        lambda *_args, **_kwargs: (
+            pd.DataFrame({cfg.counting.primary_angle: [90.0, 80.0, 105.0]}),
+            (80.0, 105.0),
+            [],
+            None,
+            cfg.counting.primary_angle,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.auto_counting_params",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            min_prominence=1.0,
+            min_distance_sec=1.0,
+            refractory_sec=0.5,
+            cadence_period_sec=None,
+            iqr_deg=None,
+            multipliers={},
+        ),
+    )
+
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.maybe_count_reps",
+        lambda *_args, **_kwargs: (2, []),
+    )
 
     report = run_pipeline(
         str(video_path),

@@ -1,5 +1,3 @@
-"""Unit tests for domain-specific pipeline exceptions."""
-
 from __future__ import annotations
 
 import sys
@@ -9,7 +7,8 @@ from typing import Any
 
 import pytest
 
-# Provide lightweight stubs for heavy optional dependencies so analysis_service imports cleanly.
+# Provide lightweight stubs for heavy optional dependencies so the analysis
+# package can import even when optional wheels are missing in the environment.
 if "cv2" not in sys.modules:
     class _FakeVideoCapture:
         _next_open: bool = False
@@ -70,7 +69,7 @@ if "cv2" not in sys.modules:
 if "numpy" not in sys.modules:
     fake_numpy = ModuleType("numpy")
 
-    def _stub_np(*args: Any, **kwargs: Any):  # pragma: no cover - should not be called in these tests
+    def _stub_np(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not be used here
         raise NotImplementedError("numpy stub")
 
     fake_numpy.array = _stub_np
@@ -79,15 +78,33 @@ if "numpy" not in sys.modules:
     fake_numpy.where = _stub_np
     fake_numpy.isnan = _stub_np
     fake_numpy.interp = _stub_np
+    fake_numpy.linspace = _stub_np
+    fake_numpy.isfinite = _stub_np
+    fake_numpy.asarray = _stub_np
+    fake_numpy.median = _stub_np
+    fake_numpy.percentile = _stub_np
+    fake_numpy.float32 = float
+    fake_numpy.float64 = float
+    fake_numpy.int32 = int
     sys.modules["numpy"] = fake_numpy
 
 if "pandas" not in sys.modules:
     fake_pandas = ModuleType("pandas")
 
-    class _FakeDataFrame:  # pragma: no cover - only to satisfy type hints
-        pass
+    class _FakeDataFrame:  # pragma: no cover - minimal placeholder
+        empty = True
 
-    def _stub_pd(*args: Any, **kwargs: Any):  # pragma: no cover - should not be called in these tests
+        def copy(self, *_args: Any, **_kwargs: Any) -> "_FakeDataFrame":
+            return self
+
+        def to_csv(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - stubbed
+            pass
+
+        @property
+        def columns(self):  # pragma: no cover - stubbed
+            return []
+
+    def _stub_pd(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not run here
         raise NotImplementedError("pandas stub")
 
     fake_pandas.DataFrame = _FakeDataFrame
@@ -100,7 +117,7 @@ if "scipy" not in sys.modules:
     fake_scipy = ModuleType("scipy")
     fake_signal = ModuleType("scipy.signal")
 
-    def _stub_scipy(*args: Any, **kwargs: Any):  # pragma: no cover - should not be called in these tests
+    def _stub_scipy(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not be used here
         raise NotImplementedError("scipy stub")
 
     fake_signal.find_peaks = _stub_scipy
@@ -111,8 +128,9 @@ if "scipy" not in sys.modules:
 
 from src import config
 from src.A_preprocessing.video_metadata import VideoInfo
-from src.services import analysis_service
-from src.services.errors import NoFramesExtracted, VideoOpenError
+from src.C_analysis import run_pipeline
+from src.C_analysis.errors import NoFramesExtracted, VideoOpenError
+from src.C_analysis.streaming import StreamingPoseResult
 
 
 def _make_cfg(tmp_path: Path) -> config.Config:
@@ -121,19 +139,22 @@ def _make_cfg(tmp_path: Path) -> config.Config:
     cfg.output.base_dir = base_dir
     cfg.output.counts_dir = base_dir / "counts"
     cfg.output.poses_dir = base_dir / "poses"
+    cfg.debug.generate_debug_video = False
+    cfg.debug.debug_mode = False
     return cfg
 
 
-def test_run_pipeline_raises_video_open_error(tmp_path: Path) -> None:
+def test_run_pipeline_raises_video_open_error(monkeypatch, tmp_path: Path) -> None:
     cfg = _make_cfg(tmp_path)
     video_path = tmp_path / "missing_video.mp4"
 
-    # Ensure the next capture reports failure to open.
-    analysis_service.cv2.VideoCapture._next_open = False  # type: ignore[attr-defined]
+    def _fail_open(_path: str) -> None:
+        raise VideoOpenError("could not open video")
+
+    monkeypatch.setattr("src.C_analysis.pipeline.open_video_cap", _fail_open)
 
     with pytest.raises(VideoOpenError):
-        analysis_service.run_pipeline(str(video_path), cfg)
-    analysis_service.cv2.VideoCapture._next_open = False  # type: ignore[attr-defined]
+        run_pipeline(str(video_path), cfg)
 
 
 def test_run_pipeline_raises_no_frames_extracted(monkeypatch, tmp_path: Path) -> None:
@@ -153,18 +174,32 @@ def test_run_pipeline_raises_no_frames_extracted(monkeypatch, tmp_path: Path) ->
         fps_source="metadata",
     )
 
-    monkeypatch.setattr(analysis_service, "read_video_file_info", lambda *_, **__: fake_info)
-
     class _DummyCap:
         def release(self) -> None:
             pass
 
-    monkeypatch.setattr(analysis_service, "_open_video_cap", lambda _path: _DummyCap())
+        def get(self, *_args: Any, **_kwargs: Any) -> float:
+            return 30.0
+
+    monkeypatch.setattr("src.C_analysis.pipeline.open_video_cap", lambda _path: _DummyCap())
     monkeypatch.setattr(
-        analysis_service,
-        "extract_and_preprocess_frames",
-        lambda **_: ([], 0.0),
+        "src.C_analysis.pipeline.read_info_and_initial_sampling",
+        lambda _cap, _video_path: (fake_info, 30.0, None, False),
+    )
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.extract_processed_frames_stream",
+        lambda **_: [],
+    )
+    monkeypatch.setattr(
+        "src.C_analysis.pipeline.stream_pose_and_detection",
+        lambda *_args, **_kwargs: StreamingPoseResult(
+            df_landmarks=sys.modules["pandas"].DataFrame(),
+            frames_processed=0,
+            detection=None,
+            debug_video_path=None,
+            processed_size=None,
+        ),
     )
 
     with pytest.raises(NoFramesExtracted):
-        analysis_service.run_pipeline(str(video_path), cfg)
+        run_pipeline(str(video_path), cfg)
