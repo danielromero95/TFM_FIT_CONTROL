@@ -1,11 +1,18 @@
+# tests/conftest.py
 """Test configuration helpers."""
-
-import os
+from pathlib import Path
 import sys
 
-# Locate the project root (parent directory of ``tests``).
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+# Repo root = parent de 'tests'
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
 
-# Ensure the project root is on PYTHONPATH for imports.
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Asegura que los paquetes en src/ son importables
+src_str = str(SRC)
+if src_str not in sys.path:
+    sys.path.insert(0, src_str)
+
+# (Opcional) si quieres mantener también la raíz, ponla detrás
+root_str = str(ROOT)
+if root_str not in sys.path:
+    sys.path.append(root_str)

@@ -1,0 +1,15 @@
+# requirements.txt
+numpy<2
+pandas
+scipy
+scikit-learn
+streamlit>=1.30
+mediapipe>=0.10
+opencv-contrib-python-headless>=4.8
+protobuf<5
+cachetools==5.3.3
+
+# Herramientas de desarrollo / tests
+pytest
+pytest-cov
+ruff
