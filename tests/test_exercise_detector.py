@@ -7,7 +7,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from src.exercise_detection.exercise_detector import FeatureSeries, classify_features
+from exercise_detection import FeatureSeries, classify_features
 
 
 def _base_feature_data(length: int) -> dict[str, np.ndarray]:

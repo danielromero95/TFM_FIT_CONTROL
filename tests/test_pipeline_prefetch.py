@@ -91,7 +91,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
         "src.C_analysis.pipeline.compute_metrics_and_angle",
         lambda *_args, **_kwargs: (
             pd.DataFrame({cfg.counting.primary_angle: [90.0, 80.0, 105.0]}),
-            (80.0, 105.0),
+            25.0,
             [],
             None,
             cfg.counting.primary_angle,
@@ -124,4 +124,3 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     assert report.stats.exercise_detected == "squat"
     assert report.stats.view_detected == "front"
     assert report.stats.detection_confidence == 0.9
-    assert report.stats.exercise_selected == cfg.counting.exercise

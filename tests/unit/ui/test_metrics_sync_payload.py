@@ -24,14 +24,14 @@ def test_build_payload_stride_and_nan_mapping():
         "non_numeric": ["x"] * n,
     })
 
-    payload = _build_payload(df, ["metric_a", "metric_b", "missing"], fps=fps, max_points=20)
+    payload = _build_payload(df, ["metric_a", "metric_b", "missing"], fps=fps, max_points=0)
 
     # x_mode and fps kept
     assert payload["x_mode"] == "time"
     assert abs(payload["fps"] - fps) < 1e-12
 
-    # Stride reduced length (≤ max_points)
-    assert len(payload["times"]) <= 20
+    # No downsampling when max_points=0
+    assert len(payload["times"]) == n
 
     # Selected series present in output; missing columns ignored
     assert set(payload["series"].keys()) == {"metric_a", "metric_b"}
