@@ -2,11 +2,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from src.D_visualization.video_landmarks import (
-    _normalize_points_for_frame,
-    render_landmarks_video,
-    transcode_video,
-)
+from src.D_visualization import render_landmarks_video, transcode_video
+from src.D_visualization.landmark_geometry import _normalize_points_for_frame
 
 
 def test_mapping_without_crop_matches_expected_pixels():
