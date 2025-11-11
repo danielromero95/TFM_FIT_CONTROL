@@ -13,7 +13,7 @@ try:
 except Exception:
     find_peaks = None  # pragma: no cover
 
-from src.C_repetition_analysis.reps.api import count_repetitions_with_config
+from src.C_repetition_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_sync.viewer import render_video_with_metrics_sync
 from src.ui.state import get_state

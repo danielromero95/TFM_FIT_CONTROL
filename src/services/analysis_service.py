@@ -35,7 +35,7 @@ from src.B_pose_estimation.pipeline import (
     calculate_metrics_from_sequence,
     filter_and_interpolate_landmarks,
 )
-from src.C_repetition_analysis.reps.api import count_repetitions_with_config
+from src.C_repetition_analysis.repetition_counter import count_repetitions_with_config
 from src.D_visualization import OverlayStyle, draw_pose_on_frame, render_landmarks_video
 from src.exercise_detection.exercise_detector import (
     DetectionResult,
