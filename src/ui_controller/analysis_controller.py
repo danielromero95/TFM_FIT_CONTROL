@@ -12,7 +12,7 @@ import numpy as np
 
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
-from src.services.analysis_service import run_pipeline
+from src.C_analysis import run_pipeline
 from src.ui_controller.progress import phase_for, make_progress_callback
 
 

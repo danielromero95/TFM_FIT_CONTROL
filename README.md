@@ -88,7 +88,7 @@ streamlit run src/app.py
 
 - Single source of truth for repetition counting
 
-- New package: src/C_repetition_analysis/ with repetition_counter.py.
+- Nuevo paquete: src/C_analysis/ con repetition_counter.py y el resto de utilidades de análisis.
 
 - Removed legacy src/D_modeling/ package and unused fault_detection.py.
 

@@ -1,10 +1,9 @@
 import math
 import sys
-import types
 from types import ModuleType, SimpleNamespace
 
 
-# Provide lightweight stubs for heavy optional dependencies so analysis_service imports cleanly.
+# Provide lightweight stubs for heavy optional dependencies so the analysis package imports cleanly.
 if "cv2" not in sys.modules:
     class _FakeVideoCapture:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -95,7 +94,7 @@ if "scipy" not in sys.modules:
     sys.modules["scipy"] = fake_scipy
     sys.modules["scipy.signal"] = fake_signal
 
-from src.services.analysis_service import SamplingPlan, make_sampling_plan
+from src.C_analysis import SamplingPlan, make_sampling_plan
 
 
 def make_cfg(target_fps=None, manual_sample_rate=None):
