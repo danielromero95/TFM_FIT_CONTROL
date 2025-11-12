@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from src.config.constants import MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import (
     DEFAULT_LANDMARK_MIN_VISIBILITY,
     DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS,
@@ -212,7 +212,10 @@ def stream_pose_and_detection(
     processed_size: Optional[tuple[int, int]] = None
 
     try:
-        with estimator_cls(min_detection_confidence=MIN_DETECTION_CONFIDENCE) as estimator:
+        with estimator_cls(
+            min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+            min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
+        ) as estimator:
             for frame_idx, frame in enumerate(frames):
                 frames_processed += 1
                 height, width = frame.shape[:2]

@@ -11,7 +11,7 @@ class PoseGraphPool:
     """Pool of Mediapipe ``Pose`` graphs keyed by configuration."""
 
     _lock = threading.Lock()
-    _free: Dict[Tuple[bool, int, float], List[object]] = {}
+    _free: Dict[Tuple[bool, int, float, float], List[object]] = {}
     _all: List[object] = []
     _imported = False
     mp_pose = None
@@ -34,12 +34,14 @@ class PoseGraphPool:
         static_image_mode: bool,
         model_complexity: int,
         min_detection_confidence: float,
-    ) -> tuple[object, Tuple[bool, int, float]]:
+        min_tracking_confidence: float,
+    ) -> tuple[object, Tuple[bool, int, float, float]]:
         cls._ensure_imports()
         key = (
             bool(static_image_mode),
             int(model_complexity),
             float(min_detection_confidence),
+            float(min_tracking_confidence),
         )
         with cls._lock:
             bucket = cls._free.get(key)
@@ -52,13 +54,15 @@ class PoseGraphPool:
             static_image_mode=static_image_mode,
             model_complexity=model_complexity,
             min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence,
+            smooth_landmarks=True,
         )
         with cls._lock:
             cls._all.append(inst)
         return inst, key
 
     @classmethod
-    def release(cls, inst: object, key: Tuple[bool, int, float]) -> None:
+    def release(cls, inst: object, key: Tuple[bool, int, float, float]) -> None:
         with cls._lock:
             cls._free.setdefault(key, []).append(inst)
 

@@ -13,7 +13,11 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY
+from src.config.constants import (
+    MIN_DETECTION_CONFIDENCE,
+    MIN_TRACKING_CONFIDENCE,
+)
+from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY, MODEL_COMPLEXITY
 from src.core.types import ExerciseType, ViewType
 
 from .classification import classify_features
@@ -119,11 +123,11 @@ class IncrementalExerciseFeatureExtractor:
 
         pose_kwargs = dict(
             static_image_mode=False,
-            model_complexity=1,
+            model_complexity=MODEL_COMPLEXITY,
             smooth_landmarks=True,
             enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+            min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+            min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         )
         self._pose = mp_pose_module.Pose(**pose_kwargs)
         self._pose_landmark = mp_pose_module.PoseLandmark
