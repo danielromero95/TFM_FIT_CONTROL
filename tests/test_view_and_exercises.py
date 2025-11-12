@@ -59,6 +59,15 @@ def test_low_bar_squat_remains_squat():
     assert view == "side"
 
 
+def test_front_squat_prefers_front_view():
+    features = make_front_squat_features()
+
+    label, view, confidence = classify_features(features)
+    assert label == "squat"
+    assert view == "front"
+    assert confidence >= 0.45
+
+
 def test_borderline_hinge_prefers_deadlift():
     features = make_borderline_hinge_features()
 
@@ -232,6 +241,17 @@ def make_squat_features() -> FeatureSeries:
         shoulder_z=0.12,
         ankle_width=0.34,
     )
+    for key in (
+        "shoulder_right_y",
+        "hip_right_y",
+        "knee_right_x",
+        "knee_right_y",
+        "ankle_right_x",
+        "ankle_right_y",
+        "wrist_right_x",
+        "wrist_right_y",
+    ):
+        data[key] = np.full(FRAMES, np.nan)
     return FeatureSeries(data=data, sampling_rate=SAMPLING_RATE, valid_frames=FRAMES, total_frames=FRAMES)
 
 
@@ -240,6 +260,46 @@ def make_low_bar_squat_features() -> FeatureSeries:
     data = {key: value.copy() for key, value in features.data.items()}
     data["torso_tilt_deg"] = 22 + 24 * (0.5 - 0.5 * np.cos(2 * np.pi * np.linspace(0, 1, FRAMES)))
     data["shoulder_yaw_deg"] = np.full(FRAMES, 28.0)
+    return FeatureSeries(data=data, sampling_rate=SAMPLING_RATE, valid_frames=FRAMES, total_frames=FRAMES)
+
+
+def make_front_squat_features() -> FeatureSeries:
+    t = np.linspace(0, 1, FRAMES)
+    cycle = 0.5 - 0.5 * np.cos(2 * np.pi * t)
+
+    knee = 170 - 65 * cycle
+    hip = 165 - 55 * cycle
+    elbow = 110 - 5 * np.sin(2 * np.pi * t)
+    torso = 18 + 18 * cycle
+
+    shoulder_y = np.full(FRAMES, 0.35)
+    hip_y = np.full(FRAMES, 0.55)
+    knee_y = 0.7 - 0.05 * cycle
+    ankle_y = np.full(FRAMES, 0.95)
+
+    ankle_x = 0.18 + 0.02 * np.sin(2 * np.pi * t)
+    knee_x = 0.2 + 0.07 * cycle
+    wrist_x = 0.24 + 0.02 * cycle
+    wrist_y = 0.38 + 0.03 * np.sin(2 * np.pi * t)
+
+    data = _assemble_clip(
+        knee=knee,
+        hip=hip,
+        elbow=elbow,
+        torso=torso,
+        shoulder_y=shoulder_y,
+        hip_y=hip_y,
+        knee_x=knee_x,
+        knee_y=knee_y,
+        ankle_x=ankle_x,
+        ankle_y=ankle_y,
+        wrist_x=wrist_x,
+        wrist_y=wrist_y,
+        shoulder_width=0.52,
+        shoulder_yaw=28.0,
+        shoulder_z=0.09,
+        ankle_width=0.52,
+    )
     return FeatureSeries(data=data, sampling_rate=SAMPLING_RATE, valid_frames=FRAMES, total_frames=FRAMES)
 
 
