@@ -78,6 +78,45 @@ def expand_and_clip_box(
     return [x1, y1, x2, y2]
 
 
+def smooth_bounding_box(
+    previous: Optional[Tuple[float, float, float, float]],
+    new_bbox: Tuple[float, float, float, float],
+    *,
+    factor: float,
+    width: int,
+    height: int,
+) -> Tuple[float, float, float, float]:
+    """Blend ``new_bbox`` with ``previous`` keeping the result inside the frame."""
+
+    alpha = float(np.clip(factor, 0.0, 0.99))
+    new_arr = np.array(new_bbox, dtype=float)
+    new_arr[0::2] = np.clip(new_arr[0::2], 0.0, float(max(width, 1)))
+    new_arr[1::2] = np.clip(new_arr[1::2], 0.0, float(max(height, 1)))
+
+    if previous is None:
+        blended = new_arr
+    else:
+        prev_arr = np.array(previous, dtype=float)
+        prev_arr[0::2] = np.clip(prev_arr[0::2], 0.0, float(max(width, 1)))
+        prev_arr[1::2] = np.clip(prev_arr[1::2], 0.0, float(max(height, 1)))
+        blended = alpha * prev_arr + (1.0 - alpha) * new_arr
+
+    # Guarantee a strictly positive box size before conversion to integers.
+    x1, y1, x2, y2 = blended.tolist()
+    if x2 <= x1:
+        center_x = (x1 + x2) * 0.5
+        half_width = max(1.0, (x2 - x1) * 0.5)
+        x1 = np.clip(center_x - half_width, 0.0, float(width - 1 if width > 1 else 0))
+        x2 = np.clip(center_x + half_width, x1 + 1.0, float(width))
+    if y2 <= y1:
+        center_y = (y1 + y2) * 0.5
+        half_height = max(1.0, (y2 - y1) * 0.5)
+        y1 = np.clip(center_y - half_height, 0.0, float(height - 1 if height > 1 else 0))
+        y2 = np.clip(center_y + half_height, y1 + 1.0, float(height))
+
+    return float(x1), float(y1), float(x2), float(y2)
+
+
 def sequence_to_coordinate_arrays(
     sequence: PoseSequence,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -131,6 +170,7 @@ __all__ = [
     "angle_abc_deg",
     "bounding_box_from_landmarks",
     "expand_and_clip_box",
+    "smooth_bounding_box",
     "landmarks_from_proto",
     "landmarks_to_pixel_xy",
     "sequence_to_coordinate_arrays",

@@ -169,6 +169,67 @@ def test_classify_deadlift_like_features() -> None:
     assert confidence >= 0.6
 
 
+def test_classify_deadlift_front_view_features() -> None:
+    length = 48
+    data = _base_feature_data(length)
+    data["knee_angle_left"] = np.linspace(150.0, 175.0, length)
+    data["knee_angle_right"] = np.linspace(149.0, 174.0, length)
+    data["hip_angle_left"] = np.linspace(35.0, 115.0, length)
+    data["hip_angle_right"] = np.linspace(37.0, 118.0, length)
+    data["elbow_angle_left"] = np.full(length, 176.0)
+    data["elbow_angle_right"] = np.full(length, 175.0)
+    data["wrist_left_y"] = np.linspace(0.72, 0.92, length)
+    data["wrist_right_y"] = np.linspace(0.73, 0.93, length)
+    data["torso_tilt_deg"] = np.linspace(28.0, 46.0, length)
+    data["shoulder_width_norm"] = np.full(length, 0.58)
+    data["shoulder_yaw_deg"] = np.full(length, 6.0)
+    data["shoulder_z_delta_abs"] = np.full(length, 0.012)
+    data["ankle_left_x"] = np.linspace(0.47, 0.48, length)
+    data["ankle_right_x"] = np.linspace(0.52, 0.53, length)
+    data["knee_left_x"] = np.linspace(0.46, 0.47, length)
+    data["knee_right_x"] = np.linspace(0.53, 0.54, length)
+
+    features = _make_feature_series(data)
+    label, view, confidence = classify_features(features)
+
+    assert label == "deadlift"
+    assert view == "front"
+    assert confidence >= 0.5
+
+
+def test_front_deadlift_with_knee_noise_prefers_deadlift() -> None:
+    length = 56
+    data = _base_feature_data(length)
+    data["knee_angle_left"] = np.linspace(108.0, 150.0, length)
+    data["knee_angle_right"] = np.linspace(109.0, 149.0, length)
+    data["hip_angle_left"] = np.linspace(32.0, 118.0, length)
+    data["hip_angle_right"] = np.linspace(34.0, 120.0, length)
+    data["elbow_angle_left"] = np.full(length, 176.0)
+    data["elbow_angle_right"] = np.full(length, 175.0)
+    data["wrist_left_y"] = np.linspace(0.70, 0.92, length)
+    data["wrist_right_y"] = np.linspace(0.71, 0.93, length)
+    data["wrist_left_x"] = np.linspace(0.44, 0.48, length)
+    data["wrist_right_x"] = np.linspace(0.52, 0.56, length)
+    data["hip_left_y"] = np.linspace(0.58, 0.63, length)
+    data["hip_right_y"] = np.linspace(0.58, 0.63, length)
+    data["pelvis_y"] = np.linspace(0.50, 0.64, length)
+    data["torso_tilt_deg"] = np.linspace(36.0, 55.0, length)
+    data["shoulder_width_norm"] = np.full(length, 0.60)
+    data["shoulder_yaw_deg"] = np.full(length, 7.0)
+    data["shoulder_z_delta_abs"] = np.full(length, 0.015)
+    data["knee_left_x"] = np.linspace(0.455, 0.47, length)
+    data["knee_right_x"] = np.linspace(0.53, 0.545, length)
+    data["ankle_left_x"] = np.linspace(0.44, 0.455, length)
+    data["ankle_right_x"] = np.linspace(0.545, 0.56, length)
+
+    features = _make_feature_series(data)
+    label, view, confidence = classify_features(features)
+
+    assert label == "deadlift"
+    assert view == "front"
+    assert confidence >= 0.5
+
+
 def test_classify_low_signal_returns_unknown() -> None:
     length = 30
     data = _base_feature_data(length)
