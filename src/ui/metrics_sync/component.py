@@ -1,63 +1,48 @@
+"""Componente HTML para visualizar métricas sincronizadas con el vídeo."""
+
 from __future__ import annotations
 
 import inspect
 import json
 import uuid
+from importlib.resources import files
 from math import ceil
 from string import Template
-from typing import Iterable
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-from importlib.resources import files
 from streamlit.components.v1 import html
 
 from src.ui.video import get_video_source
 
 
-def _series_list(s: Iterable[float]) -> list[float | None]:
-    out: list[float | None] = []
-    for v in s:
-        if pd.isna(v):
-            out.append(None)
-        else:
-            try:
-                out.append(float(v))
-            except Exception:
-                out.append(None)
-    return out
-
-
 def _build_payload(
     df: pd.DataFrame,
-    selected: list[str],
+    selected: Sequence[str],
     fps: float | int,
     *,
     max_points: int = 3000,
 ) -> dict:
-    # Normalize FPS
+    """Normaliza los datos seleccionados para enviarlos al frontend Plotly."""
+
     fps = float(fps) if float(fps) > 0 else 1.0
 
     n = int(len(df))
     if n <= 0:
         return {"times": [], "series": {}, "fps": fps, "x_mode": "frame"}
 
-    # Compute stride once based on total points
     stride = 1
     if max_points and n > int(max_points):
         stride = max(1, int(ceil(n / float(max_points))))
 
-    # Build a single index array for all downsampling
     idx = np.arange(0, n, stride, dtype=int)
 
-    # X axis: time from frame_idx (if present), otherwise frame index
     if "frame_idx" in df.columns:
-        # to_numpy avoids per-row Python overhead; coerce to float64
         frames = pd.to_numeric(df["frame_idx"], errors="coerce").to_numpy(
             dtype="float64", copy=False
         )
-        # Fallback if all-NaN: use 0..n-1
         if not np.isfinite(frames).any():
             frames = np.arange(n, dtype="float64")
         times_arr = frames[idx] / fps
@@ -66,22 +51,16 @@ def _build_payload(
         times_arr = idx.astype("float64", copy=False)
         x_mode = "frame"
 
-    # Convert times to Python scalars
     times = times_arr.tolist()
 
-    # Prepare selected series that exist in the frame
     present = [c for c in selected if c in df.columns]
     series: dict[str, list[float | None]] = {}
     if present:
-        # Single materialization: (n, k)
         data = df[present].to_numpy(dtype="float64", copy=False)
-        # Downsample rows
         data_ds = data[idx, :]
-        # Vectorized NaN -> None conversion for JSON (object dtype)
         mask = np.isfinite(data_ds)
         obj = data_ds.astype(object)
         obj[~mask] = None
-        # Export one list per series
         for j, name in enumerate(present):
             series[name] = obj[:, j].tolist()
 
@@ -90,7 +69,9 @@ def _build_payload(
 
 @st.cache_data(show_spinner=False)
 def _load_asset_text(name: str) -> str:
-    path = files("src.ui.metrics_sync").joinpath("assets", name)
+    """Carga un recurso estático desde ``src.ui.assets.metrics_sync``."""
+
+    path = files("src.ui.assets.metrics_sync").joinpath(name)
     return path.read_text(encoding="utf-8")
 
 
@@ -98,10 +79,10 @@ def render_video_with_metrics_sync(
     *,
     video_path: str | None = None,
     metrics_df: pd.DataFrame,
-    selected_metrics: list[str],
+    selected_metrics: Sequence[str],
     fps: float | int,
     rep_intervals: list[tuple[int, int]] | None = None,
-    thresholds: list[float] | tuple[float, float] | None = None,
+    thresholds: Sequence[float] | float | None = None,
     start_at_s: float | None = None,
     scroll_zoom: bool = True,
     key: str = "video_metrics_sync",
@@ -109,6 +90,8 @@ def render_video_with_metrics_sync(
     show_video: bool = False,
     sync_channel: str | None = None,
 ) -> None:
+    """Renderiza el panel combinado de vídeo y curvas temporales."""
+
     if metrics_df is None or metrics_df.empty:
         st.info("No metrics available to display.")
         return
@@ -121,20 +104,17 @@ def render_video_with_metrics_sync(
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []
     if thresholds is not None:
+        candidates: Sequence[float]
         if isinstance(thresholds, (int, float)):
-            candidates = [thresholds]
+            candidates = [float(thresholds)]
         else:
             try:
-                candidates = list(thresholds)
+                candidates = [float(v) for v in thresholds]
             except TypeError:
-                candidates = [thresholds]
+                candidates = [float(thresholds)]
         for value in candidates:
-            try:
-                fv = float(value)
-            except (TypeError, ValueError):
-                continue
-            if np.isfinite(fv):
-                thr_values.append(fv)
+            if np.isfinite(value):
+                thr_values.append(float(value))
     if thr_values:
         payload["thr"] = thr_values
 

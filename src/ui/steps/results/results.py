@@ -1,3 +1,5 @@
+"""Vistas responsables de mostrar y exportar los resultados del análisis."""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +17,7 @@ except Exception:
 
 from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
-from src.ui.metrics_sync.viewer import render_video_with_metrics_sync
+from src.ui.metrics_sync import render_video_with_metrics_sync
 from src.ui.state import get_state
 from ..utils import step_container
 

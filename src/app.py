@@ -1,5 +1,5 @@
 # src/app.py
-"""Streamlit front-end for the analysis pipeline."""
+"""Interfaz Streamlit que orquesta el pipeline de análisis."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ st.set_page_config(layout="wide", page_title=APP_NAME)
 ENABLE_JS_ENHANCEMENTS = os.getenv("ENABLE_JS_ENHANCEMENTS", "1") == "1"
 
 class AppAction(Enum):
-    """Typed representation of the actions emitted by the results panel."""
+    """Acciones posibles emitidas por el panel de resultados."""
 
     NONE = "none"
     ADJUST = "adjust"
@@ -40,7 +40,7 @@ class AppAction(Enum):
 
 
 def should_render_detect(state: AppState) -> bool:
-    """Return True when the detect column should be displayed."""
+    """Indica si debe mostrarse la columna del paso de detección."""
 
     return bool(
         state.step in (Step.DETECT, Step.CONFIGURE, Step.RUNNING, Step.RESULTS)
@@ -49,7 +49,7 @@ def should_render_detect(state: AppState) -> bool:
 
 
 def middle_mode(state: AppState) -> str:
-    """Determine the rendering mode for the middle column."""
+    """Determina qué vista debe renderizarse en la columna central."""
 
     if state.step == Step.CONFIGURE:
         return "configure"
@@ -61,7 +61,7 @@ def middle_mode(state: AppState) -> str:
 
 
 def _results_action_from_payload(payload: dict[str, bool] | None) -> AppAction:
-    """Translate the results panel payload into a typed action."""
+    """Convierte la respuesta del panel de resultados en una acción tipada."""
 
     if not payload:
         return AppAction.NONE
@@ -73,7 +73,7 @@ def _results_action_from_payload(payload: dict[str, bool] | None) -> AppAction:
 
 
 def handle_results_action(action: AppAction) -> None:
-    """Execute the side-effects associated with a results action."""
+    """Ejecuta los efectos secundarios asociados a cada acción."""
 
     if action is AppAction.ADJUST:
         go_to(Step.CONFIGURE)

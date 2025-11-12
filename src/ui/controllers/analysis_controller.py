@@ -1,24 +1,27 @@
+"""Funciones para orquestar la ejecución del pipeline desde la UI."""
+
 from __future__ import annotations
 
 import atexit
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from queue import SimpleQueue, Empty
+from queue import Empty, SimpleQueue
 from typing import Callable, Optional, Tuple
 
-import streamlit as st
 import numpy as np
-
+import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from src.C_analysis import run_pipeline
-from src.ui_controller.progress import phase_for, make_progress_callback
+
+from .progress import make_progress_callback, phase_for
 
 
-# --- Recursos cacheados: un único executor y una única cola por sesión ----------
 @st.cache_resource
 def get_executor() -> ThreadPoolExecutor:
+    """Crea un ``ThreadPoolExecutor`` único por sesión de Streamlit."""
+
     ex = ThreadPoolExecutor(max_workers=1)
     atexit.register(ex.shutdown, wait=False, cancel_futures=True)
     return ex
@@ -26,11 +29,15 @@ def get_executor() -> ThreadPoolExecutor:
 
 @st.cache_resource
 def get_progress_queue() -> SimpleQueue:
+    """Devuelve la cola compartida para publicar estados de progreso."""
+
     return SimpleQueue()
 
 
 @dataclass(frozen=True)
 class RunHandle:
+    """Pequeño contenedor para vincular un ``run_id`` con su ``Future``."""
+
     run_id: str
     future: Future
 
@@ -44,11 +51,8 @@ def start_run(
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
 ) -> RunHandle:
-    """
-    Lanza run_pipeline en background con callback de progreso
-    y devuelve un RunHandle con (run_id, future). La cola de progreso
-    global es la de get_progress_queue().
-    """
+    """Inicia ``run_pipeline`` en segundo plano y retorna su identificador."""
+
     from uuid import uuid4
 
     run_id = uuid4().hex
@@ -58,6 +62,8 @@ def start_run(
     ctx = get_script_run_ctx()
 
     def _job():
+        """Encapsula la ejecución del pipeline dentro del hilo de trabajo."""
+
         if ctx is not None:
             try:
                 add_script_run_ctx(threading.current_thread(), ctx=ctx)
@@ -81,6 +87,8 @@ def start_run(
 
 
 def cancel_run(handle: RunHandle) -> None:
+    """Intenta cancelar un análisis en curso de forma preventiva."""
+
     try:
         handle.future.cancel()
     except Exception:
@@ -88,11 +96,8 @@ def cancel_run(handle: RunHandle) -> None:
 
 
 def poll_progress(handle: RunHandle, last_progress: int, *, debug_enabled: bool) -> tuple[int, str]:
-    """
-    Lee la cola global y consolida el progreso para el run_id del handle.
-    Devuelve (latest_progress, latest_phase). Si no hay novedades, devuelve
-    el último valor recibido.
-    """
+    """Agrupa los mensajes de la cola de progreso y devuelve el estado visible."""
+
     queue = get_progress_queue()
     latest = int(max(0, min(100, last_progress)))
     phase = phase_for(latest, debug_enabled=debug_enabled)

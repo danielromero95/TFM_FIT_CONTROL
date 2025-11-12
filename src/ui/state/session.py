@@ -1,75 +1,19 @@
+"""Operaciones con efectos secundarios sobre el estado almacenado en Streamlit."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
-from concurrent.futures import Future
 
 import streamlit as st
 
-from src.config.settings import (
-    DEFAULT_GENERATE_VIDEO,
-    DEFAULT_PREVIEW_FPS,
-    DEFAULT_USE_CROP,
-    SQUAT_HIGH_THRESH,
-    SQUAT_LOW_THRESH,
-)
+from src.config.settings import DEFAULT_PREVIEW_FPS
 
-
-class Step(str, Enum):
-    UPLOAD = "upload"
-    DETECT = "detect"
-    CONFIGURE = "configure"
-    RUNNING = "running"
-    RESULTS = "results"
-
-
-DEFAULT_EXERCISE_LABEL = "Auto-Detect"
-CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
-    "low": float(SQUAT_LOW_THRESH),
-    "high": float(SQUAT_HIGH_THRESH),
-    "primary_angle": "auto",
-    "debug_video": bool(DEFAULT_GENERATE_VIDEO),
-    "use_crop": bool(DEFAULT_USE_CROP),
-}
-
-
-@dataclass
-class AppState:
-    step: Step = Step.UPLOAD
-    upload_data: Optional[Dict[str, Any]] = None
-    upload_token: Optional[Tuple[str, int, str]] = None
-    active_upload_token: Optional[Tuple[str, int, str]] = None
-    ui_rev: int = 0
-    video_path: Optional[str] = None
-    exercise: str = DEFAULT_EXERCISE_LABEL
-    exercise_pending_update: Optional[str] = None
-    view: str = ""  # "", "front", "side"
-    view_pending_update: Optional[str] = None
-    detect_result: Optional[Dict[str, Any]] = None
-    configure_values: Dict[str, float | str | bool] = field(
-        default_factory=lambda: CONFIG_DEFAULTS.copy()
-    )
-    report: Optional[Any] = None
-    pipeline_error: Optional[str] = None
-    count_path: Optional[str] = None
-    metrics_path: Optional[str] = None
-    cfg_fingerprint: Optional[str] = None
-    last_run_success: bool = False
-    video_uploader: Any = None
-    analysis_future: Future | None = None
-    progress_value_from_cb: int = 0
-    phase_text_from_cb: str = "Preparando..."
-    run_id: str | None = None
-    preview_enabled: bool = False
-    preview_fps: float = float(DEFAULT_PREVIEW_FPS)
-    preview_frame_count: int = 0
-    preview_last_ts_ms: float = 0.0
-    overlay_video_path: Optional[str] = None
+from .model import AppState, CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step
 
 
 def get_state() -> AppState:
+    """Obtiene o crea la instancia de ``AppState`` guardada en la sesión."""
+
     if "app_state" not in st.session_state:
         st.session_state.app_state = AppState()
     state: AppState = st.session_state.app_state
@@ -81,10 +25,14 @@ def get_state() -> AppState:
 
 
 def go_to(step: Step) -> None:
+    """Actualiza el paso activo del asistente."""
+
     st.session_state.app_state.step = step
 
 
 def reset_state(*, preserve_upload: bool = False) -> None:
+    """Restablece el ``AppState`` manteniendo opcionalmente la subida actual."""
+
     state = get_state()
     video_path = state.video_path
     if video_path:
@@ -134,7 +82,7 @@ def reset_state(*, preserve_upload: bool = False) -> None:
 
 
 def safe_rerun() -> None:
-    """Attempt to rerun the Streamlit script using the stable API first."""
+    """Intenta relanzar el script con la API estable y cae al método legacy."""
 
     try:
         st.rerun()
