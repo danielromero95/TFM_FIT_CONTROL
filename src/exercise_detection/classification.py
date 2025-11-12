@@ -66,6 +66,13 @@ from .types import FeatureSeries
 
 logger = logging.getLogger(__name__)
 
+# TODO move to constants.py
+SQUAT_CONFLICT_PENALTY = 0.4
+DEADLIFT_CONFLICT_PENALTY = 0.3
+SQUAT_ARMS_UP_CAP_RATIO = 0.70
+DEADLIFT_NO_MOVEMENT_SCORE_CAP = 0.4
+DEADLIFT_VETO_SQUAT_CLAMP = 0.2
+
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     """Clasificar ejercicio y vista con las heurísticas de la vista lateral."""
@@ -254,24 +261,34 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         if np.isfinite(bar_vertical_range_norm) and bar_vertical_range_norm >= BENCH_BAR_RANGE_MIN_NORM:
             bench_score += 0.4
 
+    wrists_up = (
+        np.isfinite(wrist_shoulder_norm_med)
+        and abs(wrist_shoulder_norm_med) <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
+    )
+    elbows_flexed = (
+        np.isfinite(elbow_bottom_med)
+        and SQUAT_ELBOW_BOTTOM_MIN_DEG <= elbow_bottom_med <= SQUAT_ELBOW_BOTTOM_MAX_DEG
+    )
+    arms_up_cue = wrists_up and elbows_flexed
+
     squat_score = 0.0
+    squat_penalties = 0.0
     squat_posture = (
         (np.isfinite(knee_bottom_med) and knee_bottom_med <= SQUAT_KNEE_BOTTOM_MAX_DEG)
         or (np.isfinite(hip_bottom_med) and hip_bottom_med <= SQUAT_HIP_BOTTOM_MAX_DEG)
     )
+    lower_body_score = 0.0
     if squat_posture:
         if np.isfinite(knee_bottom_med) and knee_bottom_med <= SQUAT_KNEE_BOTTOM_MAX_DEG:
-            squat_score += 1.0
+            lower_body_score += 1.0
         if np.isfinite(hip_bottom_med) and hip_bottom_med <= SQUAT_HIP_BOTTOM_MAX_DEG:
-            squat_score += 0.6
+            lower_body_score += 0.6
+        squat_score += lower_body_score
         if np.isfinite(torso_bottom_med) and torso_bottom_med <= SQUAT_TORSO_TILT_MAX_DEG:
             squat_score += 0.6
-        if np.isfinite(wrist_shoulder_norm_med) and abs(wrist_shoulder_norm_med) <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM:
+        if wrists_up:
             squat_score += 0.6
-        if (
-            np.isfinite(elbow_bottom_med)
-            and SQUAT_ELBOW_BOTTOM_MIN_DEG <= elbow_bottom_med <= SQUAT_ELBOW_BOTTOM_MAX_DEG
-        ):
+        if elbows_flexed:
             squat_score += 0.5
         if np.isfinite(abs_knee_forward) and abs_knee_forward >= SQUAT_KNEE_FORWARD_MIN_NORM:
             squat_score += 0.6
@@ -279,8 +296,20 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
             squat_score += 0.6
         if np.isfinite(tibia_angle_med) and tibia_angle_med <= SQUAT_TIBIA_MAX_DEG:
             squat_score += 0.4
+        if lower_body_score > 0 and abs(squat_score - lower_body_score) < 1e-6:
+            squat_penalties += lower_body_score
+            squat_score = 0.0
+        elif squat_score > 0.0 and not arms_up_cue:
+            capped = squat_score * SQUAT_ARMS_UP_CAP_RATIO
+            squat_penalties += squat_score - capped
+            squat_score = capped
 
     deadlift_score = 0.0
+    deadlift_penalties = 0.0
+    deadlift_movement = (
+        (np.isfinite(hip_rom_med) and hip_rom_med >= DEADLIFT_HIP_ROM_MIN_DEG)
+        or (np.isfinite(bar_range_norm_med) and bar_range_norm_med >= DEADLIFT_BAR_RANGE_MIN_NORM)
+    )
     deadlift_posture = (
         (np.isfinite(torso_bottom_med) and torso_bottom_med >= DEADLIFT_TORSO_TILT_MIN_DEG)
         or (np.isfinite(wrist_hip_norm_med) and wrist_hip_norm_med >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
@@ -303,18 +332,95 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         if np.isfinite(bar_horizontal_std_norm) and bar_horizontal_std_norm <= BENCH_BAR_HORIZONTAL_STD_MAX:
             deadlift_score += 0.4
 
+    if np.isfinite(elbow_bottom_med) and elbow_bottom_med >= DEADLIFT_ELBOW_MIN_DEG:
+        penalty = SQUAT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, squat_score))
+        squat_penalties += reduction
+        squat_score = max(0.0, squat_score - penalty)
+    if np.isfinite(wrist_hip_norm_med) and wrist_hip_norm_med >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
+        penalty = SQUAT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, squat_score))
+        squat_penalties += reduction
+        squat_score = max(0.0, squat_score - penalty)
+    if np.isfinite(torso_bottom_med) and torso_bottom_med >= DEADLIFT_TORSO_TILT_MIN_DEG:
+        penalty = SQUAT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, squat_score))
+        squat_penalties += reduction
+        squat_score = max(0.0, squat_score - penalty)
+    if np.isfinite(abs_knee_forward) and abs_knee_forward <= DEADLIFT_KNEE_FORWARD_MAX_NORM:
+        penalty = SQUAT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, squat_score))
+        squat_penalties += reduction
+        squat_score = max(0.0, squat_score - penalty)
+
+    if wrists_up:
+        penalty = DEADLIFT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, deadlift_score))
+        deadlift_penalties += reduction
+        deadlift_score = max(0.0, deadlift_score - penalty)
+    if elbows_flexed:
+        penalty = DEADLIFT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, deadlift_score))
+        deadlift_penalties += reduction
+        deadlift_score = max(0.0, deadlift_score - penalty)
+    if np.isfinite(torso_bottom_med) and torso_bottom_med <= SQUAT_TORSO_TILT_MAX_DEG:
+        penalty = DEADLIFT_CONFLICT_PENALTY
+        reduction = min(penalty, max(0.0, deadlift_score))
+        deadlift_penalties += reduction
+        deadlift_score = max(0.0, deadlift_score - penalty)
+
+    if not deadlift_movement and deadlift_score > 0.0:
+        capped_deadlift = DEADLIFT_NO_MOVEMENT_SCORE_CAP
+        if deadlift_score > capped_deadlift:
+            reduction = deadlift_score - capped_deadlift
+            deadlift_penalties += reduction
+            deadlift_score = capped_deadlift
+
+    deadlift_veto = _deadlift_veto(rep_stats)
+    if deadlift_veto:
+        clamped_squat = min(squat_score, DEADLIFT_VETO_SQUAT_CLAMP)
+        if squat_score > clamped_squat:
+            squat_penalties += squat_score - clamped_squat
+        squat_score = clamped_squat
+
+    if abs(squat_score - deadlift_score) < CLASSIFICATION_MARGIN:
+        preferred = _deadlift_squat_tiebreak(
+            wrist_hip_norm_med=wrist_hip_norm_med,
+            wrist_shoulder_norm_med=wrist_shoulder_norm_med,
+            elbow_bottom_med=elbow_bottom_med,
+            torso_bottom_med=torso_bottom_med,
+            knee_forward_norm_med=knee_forward_norm_med,
+        )
+        if preferred == "deadlift":
+            deadlift_score += CLASSIFICATION_MARGIN * 1.1
+        elif preferred == "squat":
+            squat_score += CLASSIFICATION_MARGIN * 1.1
+
     scores = {
-        "squat": float(squat_score),
-        "bench_press": float(bench_score),
-        "deadlift": float(deadlift_score),
+        "squat": float(max(0.0, squat_score)),
+        "bench_press": float(max(0.0, bench_score)),
+        "deadlift": float(max(0.0, deadlift_score)),
     }
+
+    if (
+        deadlift_veto
+        and scores["deadlift"] >= MIN_CONFIDENCE_SCORE
+        and not bench_posture
+        and deadlift_movement
+    ):
+        max_other = max(scores["squat"], scores["bench_press"])
+        scores["deadlift"] = max(
+            scores["deadlift"],
+            max_other + CLASSIFICATION_MARGIN + 0.05,
+        )
 
     label, confidence = _pick_label(scores)
 
     logger.info(
         "DET señales — side=%s view=%s kneeMin=%.1f hipMin=%.1f elbowBottom=%.1f torsoBottom=%.1f "
         "wristShoulder=%.3f wristHip=%.3f kneeROM=%.1f hipROM=%.1f elbowROM=%.1f kneeForward=%.3f "
-        "tibia=%.1f barRange=%.3f barAnkle=%.3f hipRange=%.3f barStd=%.3f dur=%.2f scores=%s",
+        "tibia=%.1f barRange=%.3f barAnkle=%.3f hipRange=%.3f barStd=%.3f dur=%.2f scores=%s "
+        "deadliftVeto=%s squatPen=%.2f deadliftPen=%.2f",
         side,
         view,
         knee_bottom_med,
@@ -334,6 +440,9 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         bar_horizontal_std_norm,
         duration_med,
         scores,
+        deadlift_veto,
+        squat_penalties,
+        deadlift_penalties,
     )
 
     if label == "unknown":
@@ -356,6 +465,92 @@ class RepMetrics:
     elbow_rom: float
     bar_range_norm: float
     duration_s: float
+
+
+def _deadlift_veto(rep_stats: list["RepMetrics"]) -> bool:
+    if not rep_stats:
+        logger.debug("Deadlift veto per-rep: []")
+        return False
+
+    tilt_threshold = DEADLIFT_TORSO_TILT_MIN_DEG - 5.0
+    elbow_threshold = DEADLIFT_ELBOW_MIN_DEG - 5.0
+    knee_threshold = DEADLIFT_KNEE_BOTTOM_MIN_DEG - 5.0
+    wrist_threshold = DEADLIFT_WRIST_HIP_DIFF_MIN_NORM * 0.9
+
+    def _median(values: Iterable[float]) -> float:
+        arr = np.asarray(list(values), dtype=float)
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return float("nan")
+        return float(np.median(finite))
+
+    tilt_med = _median(rep.torso_tilt_bottom for rep in rep_stats)
+    elbow_med = _median(rep.elbow_bottom for rep in rep_stats)
+    knee_med = _median(rep.knee_min for rep in rep_stats)
+    wrist_med = _median(rep.wrist_hip_diff_norm for rep in rep_stats)
+    hip_rom_med = _median(rep.hip_rom for rep in rep_stats)
+    bar_range_med = _median(rep.bar_range_norm for rep in rep_stats)
+
+    checks = [
+        np.isfinite(tilt_med) and tilt_med >= tilt_threshold,
+        np.isfinite(elbow_med) and elbow_med >= elbow_threshold,
+        np.isfinite(knee_med) and knee_med >= knee_threshold,
+        np.isfinite(wrist_med) and wrist_med >= wrist_threshold,
+    ]
+
+    movement_cue = (
+        (np.isfinite(hip_rom_med) and hip_rom_med >= DEADLIFT_HIP_ROM_MIN_DEG)
+        or (np.isfinite(bar_range_med) and bar_range_med >= DEADLIFT_BAR_RANGE_MIN_NORM)
+    )
+
+    per_rep = []
+    for rep in rep_stats:
+        rep_checks = [
+            np.isfinite(rep.torso_tilt_bottom) and rep.torso_tilt_bottom >= tilt_threshold,
+            np.isfinite(rep.elbow_bottom) and rep.elbow_bottom >= elbow_threshold,
+            np.isfinite(rep.knee_min) and rep.knee_min >= knee_threshold,
+            np.isfinite(rep.wrist_hip_diff_norm) and rep.wrist_hip_diff_norm >= wrist_threshold,
+        ]
+        per_rep.append(sum(rep_checks) >= 3)
+
+    logger.debug("Deadlift veto per-rep: %s movement=%s", per_rep, movement_cue)
+    return movement_cue and sum(checks) >= 3
+
+
+def _deadlift_squat_tiebreak(
+    *,
+    wrist_hip_norm_med: float,
+    wrist_shoulder_norm_med: float,
+    elbow_bottom_med: float,
+    torso_bottom_med: float,
+    knee_forward_norm_med: float,
+) -> str | None:
+    if np.isfinite(wrist_hip_norm_med) and wrist_hip_norm_med >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM * 0.9:
+        return "deadlift"
+
+    if np.isfinite(wrist_shoulder_norm_med) and abs(wrist_shoulder_norm_med) <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM * 1.1:
+        return "squat"
+
+    if np.isfinite(elbow_bottom_med):
+        if elbow_bottom_med >= DEADLIFT_ELBOW_MIN_DEG - 5.0:
+            return "deadlift"
+        if elbow_bottom_med <= SQUAT_ELBOW_BOTTOM_MAX_DEG + 5.0:
+            return "squat"
+
+    if np.isfinite(torso_bottom_med):
+        if torso_bottom_med >= DEADLIFT_TORSO_TILT_MIN_DEG - 5.0:
+            return "deadlift"
+        if torso_bottom_med <= SQUAT_TORSO_TILT_MAX_DEG + 5.0:
+            return "squat"
+
+    if np.isfinite(knee_forward_norm_med):
+        magnitude = abs(knee_forward_norm_med)
+        if magnitude >= SQUAT_KNEE_FORWARD_MIN_NORM * 1.1:
+            return "squat"
+        if magnitude <= DEADLIFT_KNEE_FORWARD_MAX_NORM * 0.9:
+            return "deadlift"
+
+    return None
 
 
 def _mean_series(series_list: Iterable[np.ndarray | None]) -> np.ndarray:
@@ -572,6 +767,20 @@ def _compute_rep_metrics(
         finite_knee = knee_seg[np.isfinite(knee_seg)]
         threshold = finite_knee.min() + 10.0 if finite_knee.size else float("inf")
         mask = np.isfinite(knee_seg) & (knee_seg <= threshold)
+        if mask.size and not mask.any():
+            if finite_knee.size:
+                bottom_idx = int(np.argmin(finite_knee))
+                finite_indices = np.where(np.isfinite(knee_seg))[0]
+                if finite_indices.size:
+                    pivot = finite_indices[min(bottom_idx, finite_indices.size - 1)]
+                    window = max(1, int(round(sr * 0.15)))
+                    window = max(window, 5)
+                    start_idx = max(0, pivot - window)
+                    stop_idx = min(knee_seg.size, pivot + window + 1)
+                    mask = np.zeros_like(knee_seg, dtype=bool)
+                    mask[start_idx:stop_idx] = True
+            else:
+                mask = np.zeros_like(knee_seg, dtype=bool)
     else:
         mask = np.array([], dtype=bool)
 
@@ -583,8 +792,8 @@ def _compute_rep_metrics(
             return float(default)
         return float(np.median(masked))
 
-    wrist_shoulder = wrist_seg - shoulder_seg
-    wrist_hip = wrist_seg - hip_y_seg
+    wrist_shoulder = np.abs(wrist_seg - shoulder_seg)
+    wrist_hip = np.abs(wrist_seg - hip_y_seg)
     knee_forward = knee_x_seg - ankle_x_seg
     tibia_angles = np.degrees(
         np.arctan2(np.abs(knee_x_seg - ankle_x_seg), np.abs(knee_y_seg - ankle_y_seg) + 1e-6)
