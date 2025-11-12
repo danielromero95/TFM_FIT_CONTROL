@@ -1,4 +1,4 @@
-"""Core dataclasses and helpers for frame extraction processing."""
+"""Dataclasses centrales y utilidades para procesar fotogramas extraídos."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 
 @dataclass(slots=True)
 class FrameInfo:
-    """Metadata for an extracted frame."""
+    """Metadatos asociados a un fotograma extraído del vídeo."""
 
     index: int
     timestamp_sec: float
@@ -29,7 +29,7 @@ _ROTATE_MAP = {
 
 
 def _apply_rotation(frame: np.ndarray, rotation_deg: Optional[int]) -> np.ndarray:
-    """Rotate ``frame`` when ``rotation_deg`` matches a known mapping."""
+    """Rota el fotograma cuando el ángulo solicitado está soportado."""
 
     rot = _ROTATE_MAP.get(int(rotation_deg or 0))
     return cv2.rotate(frame, rot) if rot is not None else frame
@@ -37,7 +37,7 @@ def _apply_rotation(frame: np.ndarray, rotation_deg: Optional[int]) -> np.ndarra
 
 @dataclass(slots=True)
 class _FrameProcessor:
-    """Transform frames with rotation, resizing and optional gray conversion."""
+    """Transforma fotogramas aplicando rotación, escalado y conversión a gris."""
 
     rotate_deg: int
     resize_to: Optional[tuple[int, int]]
@@ -63,7 +63,7 @@ class _FrameProcessor:
 
 @dataclass(slots=True)
 class _ProgressHandler:
-    """Track and report progress updates safely."""
+    """Controla y notifica avances sin repetir porcentajes."""
 
     callback: Callable[[int], None] | None
     frame_count: int
@@ -84,7 +84,7 @@ class _ProgressHandler:
 
 @dataclass(slots=True)
 class _IteratorContext:
-    """Mutable state shared by iterator implementations."""
+    """Estado mutable compartido entre las implementaciones de iteradores."""
 
     cap: cv2.VideoCapture
     fps_base: float

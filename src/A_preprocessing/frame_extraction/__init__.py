@@ -1,4 +1,4 @@
-"""Frame extraction package exposing the public streaming APIs."""
+"""Paquete de extracción de fotogramas que expone las APIs públicas de streaming."""
 
 from .core import extract_frames_stream, extract_processed_frames_stream
 from .preprocess import extract_and_preprocess_frames

@@ -1,4 +1,4 @@
-"""Utility functions for working with video files."""
+"""Funciones auxiliares para trabajar con archivos de vídeo."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ __all__ = ["validate_video"]
 
 
 def validate_video(path: str) -> Dict[str, float]:
-    """Validate that a video file can be opened and extract basic metadata."""
+    """Verifica que el vídeo sea legible y devuelve metadatos esenciales."""
 
     if not os.path.exists(path):
         raise IOError(f"Video path does not exist: {path}")

@@ -1,4 +1,4 @@
-"""Utilities for rendering uniformly sized videos in Streamlit."""
+"""Utilidades para renderizar vídeos con dimensiones controladas en Streamlit."""
 
 from __future__ import annotations
 
@@ -15,13 +15,15 @@ import streamlit as st
 from streamlit.components.v1 import html
 
 VideoData = Union[str, bytes, BinaryIO]
+# Altura por defecto del reproductor incrustado en píxeles.
 VIDEO_VIEWPORT_HEIGHT_PX: Final[int] = 400
+# Margen inferior aplicado al iframe que contiene el vídeo.
 DEFAULT_VIDEO_BOTTOM_REM: Final[float] = 1.25
 
 
 @st.cache_data(show_spinner=False)
 def _data_uri(path: str, *, mtime: float, mime: str) -> str:
-    """Return a base64 data URI for a local video file."""
+    """Genera un data URI en base64 a partir de un archivo de vídeo local."""
 
     data = Path(path).read_bytes()
     encoded = b64encode(data).decode("ascii")
@@ -29,6 +31,7 @@ def _data_uri(path: str, *, mtime: float, mime: str) -> str:
 
 
 def _normalize_mime(value: str | None) -> str | None:
+    """Normaliza etiquetas MIME flexibles ("mp4", "video/mp4", etc.)."""
     if value is None:
         return None
     mime = value.strip()
@@ -40,6 +43,7 @@ def _normalize_mime(value: str | None) -> str | None:
 
 
 def _detect_mime(path: Path, fallback: str | None) -> str:
+    """Determina el tipo MIME del archivo, usando pistas o heurísticas."""
     mime_hint = _normalize_mime(fallback)
     if mime_hint:
         return mime_hint
@@ -50,6 +54,7 @@ def _detect_mime(path: Path, fallback: str | None) -> str:
 
 
 def _as_bytes(data: BinaryIO) -> bytes:
+    """Lee un buffer binario sin alterar permanentemente su posición."""
     position = getattr(data, "tell", None)
     if position is not None:
         try:
@@ -73,7 +78,7 @@ def _video_source(
     *,
     format: str | None,
 ) -> tuple[str, str]:
-    """Return ``(source_uri, mime_type)`` for ``data``."""
+    """Devuelve ``(data_uri, mime_type)`` para la fuente de vídeo proporcionada."""
 
     if isinstance(data, (bytes, bytearray)):
         mime = _normalize_mime(format) or "video/mp4"
@@ -100,7 +105,7 @@ def get_video_source(
     *,
     format: str | None = None,
 ) -> tuple[str, str]:
-    """Public wrapper around _video_source for reuse in other modules."""
+    """Interfaz pública reutilizable para obtener la fuente de vídeo normalizada."""
 
     return _video_source(data, format=format)
 
@@ -116,7 +121,7 @@ def render_uniform_video(
     portrait_height_px: int = 560,
     sync_channel: str | None = None,
 ) -> None:
-    """Render ``data`` inside a viewport with fixed height and full width."""
+    """Muestra el vídeo en un contenedor de altura controlada y ancho completo."""
 
     source, mime = _video_source(data, format=format)
     component_key = key or f"uniform_video_{uuid4().hex}"

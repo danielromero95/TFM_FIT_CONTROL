@@ -1,4 +1,4 @@
-"""Time-based frame sampling iterator."""
+"""Iteradores basados en tiempo para muestrear fotogramas uniformemente."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from .index_sampling import _index_mode_iterator
 logger = logging.getLogger(__name__)
 
 
-SEEK_SLACK_MS = 40.0
-_SEEK_RETRY_INTERVAL = 3
-_MAX_GRABS_PER_LOOP = 12
+SEEK_SLACK_MS = 40.0  # Tolerancia en ms antes de considerar que vamos retrasados.
+_SEEK_RETRY_INTERVAL = 3  # Cada cuántos intentos se reintenta un ``seek`` duro.
+_MAX_GRABS_PER_LOOP = 12  # Límite de ``grab`` consecutivos antes de forzar revisión.
 
 
 def _time_mode_iterator(
@@ -24,6 +24,7 @@ def _time_mode_iterator(
     *,
     target_fps: float,
 ) -> Iterator[FrameInfo]:
+    """Produce fotogramas espaciados por tiempo objetivo usando heurísticas de seek."""
     cap = context.cap
     interval_ms = 1000.0 / float(target_fps)
     next_target_ms = context.start_time * 1000.0 if context.start_time else 0.0
