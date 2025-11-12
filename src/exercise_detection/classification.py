@@ -755,8 +755,14 @@ def _classify_view(
     front_votes = 0
     side_votes = 0
 
+    yaw_frontish = np.isfinite(yaw_med) and yaw_med <= YAW_FRONT_MAX_DEG * 1.05
+    yaw_strong_front = np.isfinite(yaw_med) and yaw_med <= YAW_FRONT_MAX_DEG * 0.85
+    yaw_strong_side = np.isfinite(yaw_p75) and yaw_p75 >= YAW_SIDE_MIN_DEG * 1.05
+    z_frontish = np.isfinite(z_med) and z_med <= Z_DELTA_FRONT_MAX * 1.2
+
     if np.isfinite(yaw_med):
-        front_score += _score_inverse(yaw_med, YAW_FRONT_MAX_DEG, scale=2.0)
+        yaw_weight = 1.4 if yaw_strong_front else 1.0
+        front_score += yaw_weight * _score_inverse(yaw_med, YAW_FRONT_MAX_DEG, scale=2.0)
         if yaw_med <= YAW_FRONT_MAX_DEG * 1.05:
             front_votes += 1
         if yaw_med >= YAW_SIDE_MIN_DEG * 0.9:
@@ -778,7 +784,8 @@ def _classify_view(
 
     if np.isfinite(width_mean):
         front_score += _score(width_mean, VIEW_FRONT_WIDTH_THRESHOLD, scale=2.0)
-        side_score += _score_inverse(width_mean, SIDE_WIDTH_MAX, scale=2.0)
+        side_weight = 0.4 if yaw_frontish and z_frontish else 1.0
+        side_score += side_weight * _score_inverse(width_mean, SIDE_WIDTH_MAX, scale=2.0)
         if width_mean >= VIEW_FRONT_WIDTH_THRESHOLD * 0.96:
             front_votes += 1
         if width_mean <= SIDE_WIDTH_MAX * 1.04:
@@ -787,7 +794,8 @@ def _classify_view(
 
     if np.isfinite(width_std):
         front_score += _score_inverse(width_std, VIEW_WIDTH_STD_THRESHOLD, scale=2.0)
-        side_score += _score(width_std, VIEW_WIDTH_STD_THRESHOLD * 0.9, scale=2.0)
+        side_weight = 0.45 if yaw_frontish and z_frontish else 1.0
+        side_score += side_weight * _score(width_std, VIEW_WIDTH_STD_THRESHOLD * 0.9, scale=2.0)
         if width_std <= VIEW_WIDTH_STD_THRESHOLD * 0.9:
             front_votes += 1
         if width_std >= VIEW_WIDTH_STD_THRESHOLD * 1.05:
@@ -796,7 +804,8 @@ def _classify_view(
 
     if np.isfinite(width_p10):
         front_score += _score(width_p10, VIEW_FRONT_WIDTH_THRESHOLD * 0.9, scale=1.8)
-        side_score += _score_inverse(width_p10, SIDE_WIDTH_MAX * 1.1, scale=1.8)
+        side_weight = 0.45 if yaw_frontish and z_frontish else 1.0
+        side_score += side_weight * _score_inverse(width_p10, SIDE_WIDTH_MAX * 1.1, scale=1.8)
         if width_p10 >= VIEW_FRONT_WIDTH_THRESHOLD * 0.85:
             front_votes += 1
         if width_p10 <= SIDE_WIDTH_MAX * 1.1:
@@ -804,7 +813,10 @@ def _classify_view(
 
     if np.isfinite(ankle_mean):
         front_score += 0.8 * _score(ankle_mean, ANKLE_FRONT_WIDTH_THRESHOLD * 0.95, scale=2.0)
-        side_score += 0.8 * _score_inverse(ankle_mean, ANKLE_SIDE_WIDTH_MAX * 1.05, scale=2.0)
+        side_weight = 0.5 if yaw_frontish else 1.0
+        side_score += 0.8 * side_weight * _score_inverse(
+            ankle_mean, ANKLE_SIDE_WIDTH_MAX * 1.05, scale=2.0
+        )
         if ankle_mean >= ANKLE_FRONT_WIDTH_THRESHOLD * 0.9:
             front_votes += 1
         if ankle_mean <= ANKLE_SIDE_WIDTH_MAX * 1.05:
@@ -813,7 +825,8 @@ def _classify_view(
 
     if np.isfinite(ankle_std):
         front_score += 0.6 * _score_inverse(ankle_std, ANKLE_WIDTH_STD_THRESHOLD * 1.1, scale=2.0)
-        side_score += 0.6 * _score(ankle_std, ANKLE_WIDTH_STD_THRESHOLD, scale=2.0)
+        side_weight = 0.5 if yaw_frontish else 1.0
+        side_score += 0.6 * side_weight * _score(ankle_std, ANKLE_WIDTH_STD_THRESHOLD, scale=2.0)
         if ankle_std <= ANKLE_WIDTH_STD_THRESHOLD:
             front_votes += 1
         if ankle_std >= ANKLE_WIDTH_STD_THRESHOLD * 1.05:
@@ -822,7 +835,10 @@ def _classify_view(
 
     if np.isfinite(ankle_p10):
         front_score += 0.6 * _score(ankle_p10, ANKLE_FRONT_WIDTH_THRESHOLD * 0.85, scale=1.8)
-        side_score += 0.6 * _score_inverse(ankle_p10, ANKLE_SIDE_WIDTH_MAX * 1.15, scale=1.8)
+        side_weight = 0.5 if yaw_frontish else 1.0
+        side_score += 0.6 * side_weight * _score_inverse(
+            ankle_p10, ANKLE_SIDE_WIDTH_MAX * 1.15, scale=1.8
+        )
         if ankle_p10 >= ANKLE_FRONT_WIDTH_THRESHOLD * 0.82:
             front_votes += 1
         if ankle_p10 <= ANKLE_SIDE_WIDTH_MAX * 1.1:
@@ -849,6 +865,11 @@ def _classify_view(
         front_votes,
         side_votes,
     )
+
+    if view == "side" and yaw_frontish and (front_votes >= side_votes or z_frontish):
+        return "front"
+    if view == "front" and yaw_strong_side and side_votes > front_votes:
+        return "side"
 
     if view == "unknown":
         if np.isfinite(yaw_med):

@@ -15,6 +15,7 @@ from ..geometry import (
     bounding_box_from_landmarks,
     expand_and_clip_box,
     landmarks_from_proto,
+    smooth_bounding_box,
 )
 from ..types import Landmark, PoseResult
 from .base import PoseEstimatorBase
@@ -79,6 +80,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         self.pose_crop = None
         self._key_full: Optional[Tuple[bool, int, float]] = None
         self._key_crop: Optional[Tuple[bool, int, float]] = None
+        self.smooth_factor = 0.65
+        self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
@@ -102,17 +105,28 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         height, width = image_bgr.shape[:2]
         results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
         if not results_full.pose_landmarks:
+            self._smoothed_bbox = None
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
         landmarks_full = landmarks_from_proto(results_full.pose_landmarks.landmark)
         bbox = bounding_box_from_landmarks(landmarks_full, width, height)
         if bbox is None:
+            self._smoothed_bbox = None
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
-        crop_box = expand_and_clip_box(bbox, width, height, self.crop_margin)
+        smoothed_bbox = smooth_bounding_box(
+            self._smoothed_bbox,
+            bbox,
+            factor=self.smooth_factor,
+            width=width,
+            height=height,
+        )
+        self._smoothed_bbox = smoothed_bbox
+        crop_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
         x1, y1, x2, y2 = crop_box
         crop = image_bgr[y1:y2, x1:x2]
         if crop.size == 0:
+            self._smoothed_bbox = None
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
         crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
@@ -132,6 +146,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         if self.pose_crop is not None and self._key_crop is not None:
             PoseGraphPool.release(self.pose_crop, self._key_crop)
             self.pose_crop, self._key_crop = None, None
+        self._smoothed_bbox = None
 
 
 class RoiPoseEstimator(PoseEstimatorBase):
@@ -155,6 +170,8 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.static_image_mode = static_image_mode
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
+        self.smooth_factor = 0.65
+        self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
 
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
@@ -200,6 +217,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
             if not results_full.pose_landmarks:
                 self.misses += 1
                 self.last_box = None
+                self._smoothed_bbox = None
                 output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
             else:
                 landmarks = landmarks_from_proto(results_full.pose_landmarks.landmark)
@@ -208,8 +226,17 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 bbox = bounding_box_from_landmarks(landmarks, width, height)
                 if bbox is None:
                     self.last_box = None
+                    self._smoothed_bbox = None
                 else:
-                    self.last_box = expand_and_clip_box(bbox, width, height, self.crop_margin)
+                    smoothed_bbox = smooth_bounding_box(
+                        self._smoothed_bbox,
+                        bbox,
+                        factor=self.smooth_factor,
+                        width=width,
+                        height=height,
+                    )
+                    self._smoothed_bbox = smoothed_bbox
+                    self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
                 self.misses = 0
                 output = PoseResult(landmarks=landmarks, annotated_image=annotated_image, crop_box=self.last_box)
         else:
@@ -218,6 +245,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
             if crop.size == 0:
                 self.misses += 1
                 self.last_box = None
+                self._smoothed_bbox = None
                 output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
             else:
                 crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
@@ -226,6 +254,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     self.misses += 1
                     if self.misses >= self.max_misses:
                         self.last_box = None
+                        self._smoothed_bbox = None
                     output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
                 else:
                     scale_x = x2 - x1
@@ -265,8 +294,17 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     bbox = bounding_box_from_landmarks(landmarks_full, width, height)
                     if bbox is None:
                         self.last_box = None
+                        self._smoothed_bbox = None
                     else:
-                        self.last_box = expand_and_clip_box(bbox, width, height, self.crop_margin)
+                        smoothed_bbox = smooth_bounding_box(
+                            self._smoothed_bbox,
+                            bbox,
+                            factor=self.smooth_factor,
+                            width=width,
+                            height=height,
+                        )
+                        self._smoothed_bbox = smoothed_bbox
+                        self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
                     self.misses = 0
                     output = PoseResult(landmarks=landmarks_full, annotated_image=annotated_image, crop_box=self.last_box)
 
@@ -280,6 +318,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
         if self.pose_crop is not None and self._key_crop is not None:
             PoseGraphPool.release(self.pose_crop, self._key_crop)
             self.pose_crop, self._key_crop = None, None
+        self._smoothed_bbox = None
 
 
 __all__ = ["PoseEstimator", "CroppedPoseEstimator", "RoiPoseEstimator"]
