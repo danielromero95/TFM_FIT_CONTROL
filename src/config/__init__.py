@@ -1,9 +1,9 @@
-"""Compatibility re-exports for ``from src import config`` usages."""
+"""Reexportaciones para mantener compatibilidad con ``from src import config``."""
 
 from __future__ import annotations
 
-# Core configuration dataclasses -------------------------------------------------
-try:  # pragma: no cover - defensive fallback for optional packages
+# Dataclasses principales de configuración --------------------------------------
+try:  # pragma: no cover - salvaguarda por dependencias opcionales
     from .models import (
         Config,
         PoseConfig,
@@ -22,17 +22,17 @@ except Exception:  # pragma: no cover
     DebugConfig = None  # type: ignore
     OutputConfig = None  # type: ignore
 
-# Loading helpers ----------------------------------------------------------------
-try:  # pragma: no cover - defensive fallback
+# Funciones auxiliares de carga --------------------------------------------------
+try:  # pragma: no cover - salvaguarda defensiva
     from .utils import load_default, from_yaml
 except Exception:  # pragma: no cover
     def load_default(*_args, **_kwargs):  # type: ignore
-        raise RuntimeError("config.utils.load_default is not available")
+        raise RuntimeError("config.utils.load_default no está disponible")
 
     def from_yaml(*_args, **_kwargs):  # type: ignore
-        raise RuntimeError("config.utils.from_yaml is not available")
+        raise RuntimeError("config.utils.from_yaml no está disponible")
 
-# Shared constants ---------------------------------------------------------------
+# Constantes compartidas ---------------------------------------------------------
 try:
     from .constants import (
         APP_NAME,
@@ -46,8 +46,8 @@ except Exception:  # pragma: no cover
     VIDEO_EXTENSIONS = None  # type: ignore
     MIN_DETECTION_CONFIDENCE = None  # type: ignore
 
-# Visualization helpers ---------------------------------------------------------
-try:  # pragma: no cover - visualization may be optional in some deployments
+# Utilidades de visualización ----------------------------------------------------
+try:  # pragma: no cover - la visualización puede ser opcional en algunas instalaciones
     from .video_landmarks_visualization import (
         POSE_CONNECTIONS,
         LANDMARK_COLOR,

@@ -1,24 +1,22 @@
-"""
-Utilities for loading configuration from defaults or files (e.g., YAML).
-"""
+"""Herramientas para cargar configuración por defecto o desde archivos YAML."""
 from pathlib import Path
 from .models import Config, _update_dataclass
 
-try:  # Optional dependency – only needed when loading from YAML files.
+try:  # Dependencia opcional: solo necesaria al leer archivos YAML.
     import yaml  # type: ignore
-except Exception:  # pragma: no cover - PyYAML is optional at runtime
+except Exception:  # pragma: no cover - PyYAML es opcional en tiempo de ejecución
     yaml = None  # type: ignore
 
 
 def load_default() -> Config:
-    """Return the default configuration used by the Streamlit application."""
+    """Devuelve la configuración predeterminada usada por la aplicación Streamlit."""
     return Config()
 
 
 def from_yaml(path: str | Path) -> Config:
-    """Load a configuration from a YAML file and merge it with defaults."""
-    if yaml is None:  # pragma: no cover - optional dependency guard
-        raise RuntimeError("PyYAML is not available. Install it to load YAML files.")
+    """Carga una configuración desde YAML y la fusiona con los valores por defecto."""
+    if yaml is None:  # pragma: no cover - protección para dependencia opcional
+        raise RuntimeError("PyYAML no está disponible. Instálalo para leer archivos YAML.")
 
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     cfg = load_default()

@@ -30,6 +30,7 @@ configure_environment()
 st.set_page_config(layout="wide", page_title=APP_NAME)
 
 ENABLE_JS_ENHANCEMENTS = os.getenv("ENABLE_JS_ENHANCEMENTS", "1") == "1"
+# Bandera que activa integraciones de JavaScript opcionales en la UI.
 
 class AppAction(Enum):
     """Acciones posibles emitidas por el panel de resultados."""
@@ -83,11 +84,15 @@ def handle_results_action(action: AppAction) -> None:
 
 
 def _reset_app() -> None:
+    """Limpia el estado global y fuerza un refresco completo de la app."""
+
     reset_state()
     safe_rerun()
 
 
 def main() -> None:
+    """Punto de entrada principal para ejecutar la aplicación en Streamlit."""
+
     if threading.current_thread() is threading.main_thread():
         inject_css()
         inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)

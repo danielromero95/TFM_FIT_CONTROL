@@ -1,4 +1,4 @@
-"""Data structures shared across the analysis pipeline."""
+"""Estructuras de datos compartidas por todo el pipeline de análisis."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from src.core.types import ExerciseType, ViewType
 
 @dataclass
 class OutputPaths:
-    """Resolved output directories for a run."""
+    """Rutas de salida calculadas para una ejecución del pipeline."""
 
     base_dir: Path
     counts_dir: Path
@@ -26,7 +26,7 @@ class OutputPaths:
 
 @dataclass
 class RunStats:
-    """Execution statistics shared with the UIs."""
+    """Estadísticas de ejecución que se comparten con las interfaces de usuario."""
 
     config_sha1: str
     fps_original: float
@@ -55,7 +55,7 @@ class RunStats:
 
 @dataclass
 class Report:
-    """Pipeline outcome."""
+    """Resultado completo de una ejecución del pipeline."""
 
     repetitions: int
     metrics: Optional["pd.DataFrame"]
@@ -66,7 +66,7 @@ class Report:
     effective_config_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
-        """Preserve the dictionary-based API used by the existing front-ends."""
+        """Convierte el reporte en el diccionario esperado por los clientes heredados."""
         stats_dict = asdict(self.stats)
         for key in ("exercise_selected", "exercise_detected", "view_detected"):
             val = stats_dict.get(key)
@@ -88,4 +88,5 @@ class Report:
             if self.effective_config_path
             else None,
         }
+        # Se devuelve un ``dict`` explícito para mantener compatibilidad con UIs antiguas.
         return legacy

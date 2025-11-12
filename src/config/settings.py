@@ -1,6 +1,4 @@
-"""
-Default tunable parameters and settings for the analysis pipeline and GUI.
-"""
+"""Parámetros por defecto y utilidades de configuración para el pipeline y la GUI."""
 
 from __future__ import annotations
 
@@ -10,7 +8,7 @@ from pathlib import Path
 
 
 def configure_environment() -> None:
-    """Configure logging verbosity and Windows DLL lookup paths."""
+    """Ajusta variables de entorno y rutas necesarias antes de lanzar la aplicación."""
 
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
     os.environ["GLOG_minloglevel"] = "2"
@@ -20,6 +18,7 @@ def configure_environment() -> None:
     except Exception:
         pass
     else:
+        # Forzamos a ``absl`` a emitir solo errores para no saturar la consola.
         absl_logging.set_verbosity(absl_logging.ERROR)
 
     if sys.platform.startswith("win"):
@@ -27,10 +26,11 @@ def configure_environment() -> None:
         if conda_prefix:
             dll_dir = Path(conda_prefix) / "Library" / "bin"
             if dll_dir.exists():
+                # Añadimos las DLL de Conda al ``PATH`` para evitar errores de carga.
                 os.environ["PATH"] = str(dll_dir) + os.pathsep + os.environ.get("PATH", "")
 
 
-# --- PIPELINE PARAMETERS ---
+# --- PARÁMETROS DEL PIPELINE ---
 MODEL_COMPLEXITY = 1
 DEFAULT_TARGET_WIDTH = 256
 DEFAULT_TARGET_HEIGHT = 256
@@ -38,18 +38,18 @@ DETECTION_SAMPLE_FPS = 4.0
 DEFAULT_PREVIEW_FPS = 10.0
 DEFAULT_LANDMARK_MIN_VISIBILITY = 0.5
 
-# --- COUNTING PARAMETERS (legacy) ---
+# --- PARÁMETROS DE CONTEO (LEGADO) ---
 SQUAT_HIGH_THRESH = 160.0
 SQUAT_LOW_THRESH = 100.0
-PEAK_PROMINENCE = 10  # Prominence used by the peak detector
-PEAK_DISTANCE = 15    # Minimum distance in frames between repetitions
+PEAK_PROMINENCE = 10  # Prominencia usada por el detector de picos
+PEAK_DISTANCE = 15    # Distancia mínima en fotogramas entre repeticiones
 
-# --- DEFAULT GUI / APP VALUES ---
+# --- VALORES PREDETERMINADOS PARA LA UI ---
 DEFAULT_USE_CROP = True
 DEFAULT_GENERATE_VIDEO = True
 DEFAULT_DEBUG_MODE = True
 
-# --- HEAVY MEDIA GUARDS ---
+# --- PROTECCIONES PARA MEDIOS PESADOS ---
 OVERLAY_MAX_LONG_SIDE = 1280          # píxeles (p.ej. 720p/1080p-lite)
 OVERLAY_DISABLE_OVER_BYTES = 40 * 1024 * 1024  # 40 MB
 PREVIEW_DISABLE_OVER_MP = 2.5         # desactiva preview si megapíxeles > 2.5

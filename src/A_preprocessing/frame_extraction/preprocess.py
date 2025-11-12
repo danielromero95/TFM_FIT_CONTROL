@@ -1,4 +1,4 @@
-"""High level helpers that load and preprocess full video frames."""
+"""Tareas de extracción de fotogramas a resolución completa para el pipeline."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def extract_and_preprocess_frames(
     cap: Optional[cv2.VideoCapture] = None,
     prefetched_info: Optional["VideoInfo"] = None,
 ) -> Tuple[List, float]:
-    """Extract frames, apply rotation automatically and return full-resolution images."""
+    """Extrae fotogramas, aplica rotación automática y devuelve imágenes completas."""
 
     logger.info("Starting extraction for: %s", video_path)
 

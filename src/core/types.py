@@ -1,3 +1,5 @@
+"""Definiciones de tipos centrales utilizados en todo el proyecto."""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -5,6 +7,7 @@ from typing import Union
 
 
 class ExerciseType(str, Enum):
+    """Catálogo de ejercicios soportados por el sistema."""
     UNKNOWN = "unknown"
     SQUAT = "squat"
     BENCH_PRESS = "bench_press"
@@ -12,6 +15,7 @@ class ExerciseType(str, Enum):
 
 
 class ViewType(str, Enum):
+    """Perspectivas de cámara esperadas al analizar un levantamiento."""
     UNKNOWN = "unknown"
     FRONT = "front"
     SIDE = "side"
@@ -22,8 +26,11 @@ _EXERCISE_ALIAS_MAP = {
     "benchpress": ExerciseType.BENCH_PRESS.value,
 }
 
+# Diccionario para traducir alias comunes a la etiqueta oficial del ejercicio.
+
 
 def _normalize_label(value: str) -> str:
+    """Limpia y homogeneiza una etiqueta para facilitar su comparación."""
     normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
     while "__" in normalized:
         normalized = normalized.replace("__", "_")
@@ -31,6 +38,7 @@ def _normalize_label(value: str) -> str:
 
 
 def as_exercise(value: Union[str, "ExerciseType", None]) -> "ExerciseType":
+    """Convierte valores variados en una instancia válida de ``ExerciseType``."""
     if isinstance(value, ExerciseType):
         return value
     if not value:
@@ -50,8 +58,11 @@ EXERCISE_HUMAN_LABEL = {
     ExerciseType.DEADLIFT: "Deadlift",
 }
 
+# Etiquetas legibles por humanos utilizadas en la interfaz de usuario.
+
 
 def as_view(value: Union[str, "ViewType", None]) -> "ViewType":
+    """Normaliza un valor arbitrario a la enumeración ``ViewType``."""
     if isinstance(value, ViewType):
         return value
     if not value:
