@@ -1,4 +1,4 @@
-"""Thread-safe pool of Mediapipe pose graph instances."""
+"""Pool de grafos de pose de Mediapipe seguro para múltiples hilos."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 
 class PoseGraphPool:
-    """Pool of Mediapipe ``Pose`` graphs keyed by configuration."""
+    """Agrupa instancias de ``Pose`` de Mediapipe indexadas por configuración."""
 
     _lock = threading.Lock()
     _free: Dict[Tuple[bool, int, float, float], List[object]] = {}

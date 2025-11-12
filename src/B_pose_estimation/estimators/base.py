@@ -1,4 +1,4 @@
-"""Base interfaces for pose estimators."""
+"""Interfaces base para los estimadores de pose."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from ..types import PoseResult
 
 
 class PoseEstimatorBase(ABC):
-    """Abstract base class for pose estimators."""
+    """Clase base abstracta para implementar estimadores de pose."""
 
     @abstractmethod
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
-        """Estimate pose landmarks for ``image_bgr``."""
+        """Estima los marcadores corporales presentes en ``image_bgr``."""
 
     def close(self) -> None:
-        """Release resources (optional override)."""
+        """Libera recursos asociados (puede sobrescribirse según la implementación)."""
 
     def __enter__(self):
         return self

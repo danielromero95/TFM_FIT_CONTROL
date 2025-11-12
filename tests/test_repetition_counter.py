@@ -1,4 +1,4 @@
-"""Unit tests for the valley-based repetition counter."""
+"""Pruebas unitarias para el contador de repeticiones basado en valles."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _make_cfg(**overrides):
 
 
 def test_count_repetitions_detects_two_valleys() -> None:
-    """Two well-separated valleys should yield two repetitions."""
+    """Dos valles bien separados deberían producir dos repeticiones."""
     angles = [
         170,
         150,
@@ -48,7 +48,7 @@ def test_count_repetitions_detects_two_valleys() -> None:
 
 
 def test_count_repetitions_handles_missing_column() -> None:
-    """Missing primary column should return zero repetitions and empty debug info."""
+    """Si falta la columna principal se debe devolver cero repeticiones y depuración vacía."""
     df = pd.DataFrame({"right_knee": [170, 160, 150]})
     cfg = _make_cfg(primary_angle="left_knee")
 
@@ -60,7 +60,7 @@ def test_count_repetitions_handles_missing_column() -> None:
 
 
 def test_refractory_filter_keeps_most_prominent_valley() -> None:
-    """Valleys within the refractory window should be consolidated to the deepest dip."""
+    """Los valles dentro de la ventana refractaria deben consolidarse en el más profundo."""
     angles = [
         170,
         155,

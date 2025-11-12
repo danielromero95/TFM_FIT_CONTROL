@@ -62,7 +62,7 @@ def extract_frames_stream(
 
         try:
             cap_obj.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        except Exception:  # pragma: no cover - backend dependent fallbacks
+        except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
             pass
 
         start_time_value = float(start_time or 0.0)

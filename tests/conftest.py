@@ -1,5 +1,5 @@
 # tests/conftest.py
-"""Test configuration helpers."""
+"""Utilidades de configuración comunes para la batería de pruebas."""
 from __future__ import annotations
 
 import types
@@ -9,14 +9,14 @@ from typing import Any
 
 
 def _install_cv2_stub() -> None:
-    """Provide a lightweight cv2 stub so the suite does not require OpenCV."""
+    """Proporciona un *stub* ligero de cv2 para evitar depender de OpenCV en las pruebas."""
 
     if "cv2" in sys.modules:
         return
 
     try:
         import numpy as _np
-    except Exception:  # pragma: no cover - numpy is available in CI
+    except Exception:  # pragma: no cover - NumPy está disponible en la CI
         _np = None
 
     class _StubVideoCapture:
@@ -24,10 +24,10 @@ def _install_cv2_stub() -> None:
             self._opened = True
             self._props: dict[int, float] = {}
 
-        def isOpened(self) -> bool:  # pragma: no cover - smoke fallback
+        def isOpened(self) -> bool:  # pragma: no cover - respaldo para pruebas de humo
             return self._opened
 
-        def read(self) -> tuple[bool, Any]:  # pragma: no cover - smoke fallback
+        def read(self) -> tuple[bool, Any]:  # pragma: no cover - respaldo para pruebas de humo
             if _np is not None:
                 frame = _np.zeros((1, 1, 3), dtype=_np.uint8)
             else:
@@ -37,7 +37,7 @@ def _install_cv2_stub() -> None:
         def get(self, prop: int) -> float:
             return self._props.get(prop, 0.0)
 
-        def set(self, prop: int, value: float) -> bool:  # pragma: no cover - smoke fallback
+        def set(self, prop: int, value: float) -> bool:  # pragma: no cover - respaldo para pruebas de humo
             self._props[prop] = float(value)
             return True
 
@@ -52,7 +52,7 @@ def _install_cv2_stub() -> None:
         def isOpened(self) -> bool:
             return self._opened
 
-        def write(self, frame: Any) -> None:  # pragma: no cover - smoke fallback
+        def write(self, frame: Any) -> None:  # pragma: no cover - respaldo para pruebas de humo
             self._frames.append(frame)
 
         def release(self) -> None:
@@ -61,7 +61,7 @@ def _install_cv2_stub() -> None:
     def _identity(frame: Any, *_args: Any, **_kwargs: Any) -> Any:
         return frame
 
-    def _video_writer_fourcc(*_codes: str) -> int:  # pragma: no cover - smoke fallback
+    def _video_writer_fourcc(*_codes: str) -> int:  # pragma: no cover - respaldo para pruebas de humo
         return 0
 
     cv2_stub = types.SimpleNamespace(

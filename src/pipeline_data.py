@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-if TYPE_CHECKING:  # pragma: no cover - imported for typing only
+if TYPE_CHECKING:  # pragma: no cover - importado únicamente para tipado
     import pandas as pd
 
 from src import config
@@ -44,7 +44,7 @@ class RunStats:
     warnings: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
     config_path: Optional[Path] = None
-    # Stage timings (milliseconds). Optional for backward compatibility.
+    # Tiempos por etapa (milisegundos). Opcional por compatibilidad retroactiva.
     t_extract_ms: Optional[float] = None
     t_pose_ms: Optional[float] = None
     t_filter_ms: Optional[float] = None

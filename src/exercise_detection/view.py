@@ -1,4 +1,4 @@
-"""Camera view classification independent from the exercise label."""
+"""Clasificación de la vista de cámara independiente de la etiqueta de ejercicio."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def classify_view(
     shoulder_width: np.ndarray | None,
     ankle_width: np.ndarray | None,
 ) -> ViewResult:
-    """Return a stable front/side view label and associated scores."""
+    """Devuelve una etiqueta estable (frontal/lateral) junto con las puntuaciones asociadas."""
 
     yaw = _to_array(shoulder_yaw)
     z = _to_array(shoulder_z_delta)

@@ -10,7 +10,7 @@ def _install_cv2_stub() -> None:
     if "cv2" in sys.modules:
         return
 
-    def _unsupported(*args, **kwargs):  # pragma: no cover - defensive
+    def _unsupported(*args, **kwargs):  # pragma: no cover - guardia defensiva
         raise RuntimeError("OpenCV operations are not available in synthetic tests")
 
     cv2_stub = types.SimpleNamespace(

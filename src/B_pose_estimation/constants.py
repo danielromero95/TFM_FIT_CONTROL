@@ -1,4 +1,4 @@
-"""Shared pose landmark constants for the pose estimation package."""
+"""Constantes compartidas de marcadores corporales para el paquete de estimación de pose."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Dict, Tuple
 
 LANDMARK_COUNT: int = 33
 
-# Index shortcuts that mirror Mediapipe's holistic/pose landmark ordering.
+# Atajos de índice que replican el orden de marcadores de Mediapipe (holistic/pose).
 NOSE = 0
 LEFT_EYE_INNER = 1
 LEFT_EYE = 2

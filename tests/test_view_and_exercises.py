@@ -1,4 +1,4 @@
-"""Synthetic tests for the refactored exercise classifier."""
+"""Pruebas sintéticas para el clasificador de ejercicios refactorizado."""
 
 from __future__ import annotations
 

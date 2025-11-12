@@ -1,4 +1,4 @@
-"""Public metrics API."""
+"""API pública para calcular métricas derivadas de las poses."""
 
 from .angles import calculate_angle, extract_joint_angles
 from .distances import calculate_distances

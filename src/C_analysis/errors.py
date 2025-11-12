@@ -1,13 +1,13 @@
-"""Domain-specific exceptions for the analysis services."""
+"""Excepciones específicas del dominio utilizadas en los servicios de análisis."""
 
 
 class PipelineError(Exception):
-    """Base exception for fatal pipeline failures."""
+    """Excepción base para fallos fatales en la *pipeline*."""
 
 
 class VideoOpenError(PipelineError):
-    """Raised when a video file cannot be opened for reading."""
+    """Se lanza cuando no es posible abrir un archivo de vídeo para lectura."""
 
 
 class NoFramesExtracted(PipelineError):
-    """Raised when frame extraction yields no frames."""
+    """Se lanza cuando la extracción de fotogramas no produce ningún cuadro."""

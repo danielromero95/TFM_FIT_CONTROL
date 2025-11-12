@@ -1,4 +1,4 @@
-"""Unit tests for incremental exercise feature extraction visibility handling."""
+"""Pruebas unitarias para la gestión de visibilidad en la extracción incremental."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ def _mk_landmark(x: float, y: float, z: float, vis: float) -> dict[str, float]:
 
 
 def test_add_landmarks_respects_min_visibility() -> None:
-    """Landmarks below the configured visibility threshold should be ignored."""
+    """Los *landmarks* por debajo del umbral configurado de visibilidad deben ignorarse."""
 
     lm_low_vis = [_mk_landmark(0.5, 0.5, 0.0, 0.6) for _ in range(33)]
     extractor = IncrementalExerciseFeatureExtractor(
@@ -44,7 +44,7 @@ def _squat_like_series(frame_count: int) -> list[list[dict[str, float]]]:
 
 
 def test_sampling_and_valid_frames_incremental() -> None:
-    """The incremental extractor should subsample and count valid frames."""
+    """El extractor incremental debe submuestrear y contabilizar los fotogramas válidos."""
 
     frames = _squat_like_series(60)
     extractor = IncrementalExerciseFeatureExtractor(

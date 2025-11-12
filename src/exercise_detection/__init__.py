@@ -1,4 +1,4 @@
-"""Detection utilities for identifying exercises and camera views."""
+"""Utilidades de detección para identificar ejercicios y vistas de cámara."""
 
 from .exercise_detector import (
     DetectionResult,

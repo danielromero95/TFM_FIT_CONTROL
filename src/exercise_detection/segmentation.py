@@ -1,4 +1,4 @@
-"""Repetition segmentation with hysteresis and bar drop validation."""
+"""Segmentación de repeticiones con histéresis y validación por caída de la barra."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .types import RepSlice
 
 @dataclass(frozen=True)
 class SegmentationDebug:
-    """Information describing how repetition boundaries were decided."""
+    """Información que describe cómo se decidieron los límites de cada repetición."""
 
     slices: Sequence[RepSlice]
     knee_events: Sequence[int]
@@ -31,7 +31,7 @@ def segment_reps(
     torso_scale: float,
     sampling_rate: float,
 ) -> List[RepSlice]:
-    """Segment the clip into repetitions using knee hysteresis and bar drop."""
+    """Segmenta el clip en repeticiones usando histéresis de rodilla y detección de caída de barra."""
 
     n = int(max(knee_angle.size, bar_y.size))
     if n == 0:

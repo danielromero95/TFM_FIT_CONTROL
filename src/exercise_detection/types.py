@@ -1,4 +1,4 @@
-"""Shared dataclasses for the exercise recognition pipeline."""
+"""Dataclasses compartidas por la *pipeline* de reconocimiento de ejercicios."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 
 @dataclass(frozen=True)
 class DetectionResult:
-    """Normalized output returned by the detection pipeline."""
+    """Resultado normalizado que devuelve la pipeline de detección."""
 
     label: ExerciseType
     view: ViewType
@@ -20,14 +20,14 @@ class DetectionResult:
 
 
 def make_detection_result(label: str, view: str, confidence: float) -> "DetectionResult":
-    """Convert legacy text identifiers into ``DetectionResult`` with enums."""
+    """Convierte identificadores de texto legados en ``DetectionResult`` usando enumeraciones."""
 
     return DetectionResult(as_exercise(label), as_view(view), float(confidence))
 
 
 @dataclass
 class FeatureSeries:
-    """Container for Pose-derived time series and basic metadata."""
+    """Contenedor de series temporales derivadas de la pose y metadatos básicos."""
 
     data: Dict[str, np.ndarray]
     sampling_rate: float
@@ -37,13 +37,13 @@ class FeatureSeries:
 
 @dataclass(frozen=True)
 class RepSlice:
-    """Inclusive-exclusive slice describing the frame span of a repetition."""
+    """Segmento inclusivo-exclusivo que describe el rango de fotogramas de una repetición."""
 
     start: int
     end: int
 
     def clamp(self, total: int) -> "RepSlice":
-        """Clamp the slice to ``total`` frames to avoid overflow issues."""
+        """Ajusta el segmento al rango ``total`` de fotogramas para evitar desbordes."""
 
         start = max(0, min(self.start, total))
         end = max(start + 1, min(self.end, total))
@@ -52,7 +52,7 @@ class RepSlice:
 
 @dataclass(frozen=True)
 class RepMetrics:
-    """Summary statistics describing a single repetition."""
+    """Estadísticas resumidas que describen una repetición individual."""
 
     slice: RepSlice
     knee_min: float
@@ -74,7 +74,7 @@ class RepMetrics:
 
 @dataclass(frozen=True)
 class AggregateMetrics:
-    """Robust aggregation across repetitions and clip-wide measurements."""
+    """Agregación robusta entre repeticiones y métricas a nivel de clip."""
 
     per_rep: Sequence[RepMetrics] = field(default_factory=tuple)
     knee_min: float = np.nan
@@ -99,7 +99,7 @@ class AggregateMetrics:
 
 @dataclass(frozen=True)
 class ClassificationScores:
-    """Intermediate classification artefacts useful for debugging/tests."""
+    """Artefactos intermedios de clasificación útiles para depurar o probar."""
 
     raw: Mapping[str, float]
     adjusted: Mapping[str, float]
@@ -109,7 +109,7 @@ class ClassificationScores:
 
 @dataclass(frozen=True)
 class ViewResult:
-    """Scores and votes gathered while classifying the camera view."""
+    """Puntuaciones y votos recopilados durante la clasificación de la vista de cámara."""
 
     label: str
     scores: Mapping[str, float]

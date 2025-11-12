@@ -1,4 +1,4 @@
-"""UI helper utilities for the Streamlit app."""
+"""Utilidades de apoyo para la interfaz de la aplicación Streamlit."""
 
 from .video import render_uniform_video
 

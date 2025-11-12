@@ -1,4 +1,4 @@
-"""Pipeline stages for pose estimation."""
+"""Etapas principales de la *pipeline* de estimación de pose."""
 
 from .compute import calculate_metrics_from_sequence
 from .extract import extract_landmarks_from_frames

@@ -1,5 +1,5 @@
 # tests/test_exercise_detector.py
-"""Unit tests for the heuristic exercise classifier."""
+"""Pruebas unitarias para el clasificador heurístico de ejercicios."""
 
 from __future__ import annotations
 

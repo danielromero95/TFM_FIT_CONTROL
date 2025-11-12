@@ -1,4 +1,4 @@
-"""Ensure the classification pipeline executes without RuntimeWarnings."""
+"""Comprueba que la pipeline de clasificación se ejecute sin *RuntimeWarnings*."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class _NoWarningsContext:
 
 try:
     pytest.warns(None)
-except TypeError:  # pragma: no cover - pytest>=8 removed the None shortcut
+except TypeError:  # pragma: no cover - pytest>=8 eliminó el atajo con None
     _orig_warns = pytest.warns
 
     def _warns(expected_warning=Warning, *args, **kwargs):  # type: ignore[override]

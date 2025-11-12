@@ -1,4 +1,4 @@
-"""Common typing helpers and lightweight data containers."""
+"""Ayudantes tipados y contenedores ligeros usados en la estimación de pose."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ LandmarkLike = Mapping[str, float]
 
 @dataclass(frozen=True)
 class Landmark(Mapping[str, float]):
-    """Mapping-compatible pose landmark representation."""
+    """Representación de marcador de pose compatible con interfaces tipo mapeo."""
 
     x: float
     y: float
@@ -62,7 +62,7 @@ PoseSequence = Sequence[PoseFrame]
 
 @dataclass
 class PoseResult:
-    """Container returned by pose estimators."""
+    """Contenedor devuelto por los estimadores de pose."""
 
     landmarks: PoseFrame
     annotated_image: Optional[np.ndarray]
@@ -76,7 +76,7 @@ T = TypeVar("T")
 
 
 def ensure_sequence(sequence: Iterable[T]) -> List[T]:
-    """Materialise ``sequence`` preserving order."""
+    """Materializa ``sequence`` manteniendo el orden original."""
 
     return list(sequence)
 

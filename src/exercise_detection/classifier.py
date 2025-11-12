@@ -1,4 +1,4 @@
-"""Exercise scoring, veto logic and confidence computation."""
+"""Cálculo de puntuaciones por ejercicio, lógica de vetos y confianza final."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ LABELS = ("squat", "deadlift", "bench_press")
 
 
 def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, ClassificationScores, Mapping[str, float]]:
-    """Compute exercise label, confidence and intermediate scores."""
+    """Calcula la etiqueta, la confianza y las puntuaciones intermedias del ejercicio."""
 
     raw_scores: Dict[str, float] = {label: 0.0 for label in LABELS}
     penalties: Dict[str, float] = {label: 0.0 for label in LABELS}

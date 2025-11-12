@@ -1,4 +1,4 @@
-"""Concrete Mediapipe-based pose estimators."""
+"""Estimadores de pose basados en Mediapipe listos para usar."""
 
 from __future__ import annotations
 
