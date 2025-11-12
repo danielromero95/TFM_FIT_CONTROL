@@ -8,7 +8,13 @@ from concurrent.futures import Future
 
 import streamlit as st
 
-from src.config.settings import DEFAULT_PREVIEW_FPS
+from src.config.settings import (
+    DEFAULT_GENERATE_VIDEO,
+    DEFAULT_PREVIEW_FPS,
+    DEFAULT_USE_CROP,
+    SQUAT_HIGH_THRESH,
+    SQUAT_LOW_THRESH,
+)
 
 
 class Step(str, Enum):
@@ -21,11 +27,11 @@ class Step(str, Enum):
 
 DEFAULT_EXERCISE_LABEL = "Auto-Detect"
 CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
-    "low": 80,
-    "high": 150,
+    "low": float(SQUAT_LOW_THRESH),
+    "high": float(SQUAT_HIGH_THRESH),
     "primary_angle": "auto",
-    "debug_video": True,
-    "use_crop": True,
+    "debug_video": bool(DEFAULT_GENERATE_VIDEO),
+    "use_crop": bool(DEFAULT_USE_CROP),
 }
 
 

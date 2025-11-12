@@ -45,12 +45,9 @@ PEAK_PROMINENCE = 10  # Prominence used by the peak detector
 PEAK_DISTANCE = 15    # Minimum distance in frames between repetitions
 
 # --- DEFAULT GUI / APP VALUES ---
-DEFAULT_SAMPLE_RATE = 3
-DEFAULT_ROTATION = "0"
 DEFAULT_USE_CROP = True
 DEFAULT_GENERATE_VIDEO = True
 DEFAULT_DEBUG_MODE = True
-DEFAULT_DARK_MODE = False
 
 # --- HEAVY MEDIA GUARDS ---
 OVERLAY_MAX_LONG_SIDE = 1280          # píxeles (p.ej. 720p/1080p-lite)
