@@ -39,12 +39,14 @@ try:
         PROJECT_ROOT,
         VIDEO_EXTENSIONS,
         MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
     )
 except Exception:  # pragma: no cover
     APP_NAME = None  # type: ignore
     PROJECT_ROOT = None  # type: ignore
     VIDEO_EXTENSIONS = None  # type: ignore
     MIN_DETECTION_CONFIDENCE = None  # type: ignore
+    MIN_TRACKING_CONFIDENCE = None  # type: ignore
 
 # Utilidades de visualización ----------------------------------------------------
 try:  # pragma: no cover - la visualización puede ser opcional en algunas instalaciones
@@ -84,6 +86,7 @@ __all__ = [
     "PROJECT_ROOT",
     "VIDEO_EXTENSIONS",
     "MIN_DETECTION_CONFIDENCE",
+    "MIN_TRACKING_CONFIDENCE",
 
     # Visualization
     "POSE_CONNECTIONS",

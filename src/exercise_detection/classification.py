@@ -126,7 +126,12 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     label, confidence, scores, _ = classify_exercise(metrics)
     view_label = view_result.label
 
-    if label == "squat" and view_label == "side" and both_sides_visible:
+    if (
+        label == "squat"
+        and view_label == "side"
+        and both_sides_visible
+        and view_result.votes.get("front", 0) > view_result.votes.get("side", 0)
+    ):
         view_label = "front"
 
     if label == "unknown":

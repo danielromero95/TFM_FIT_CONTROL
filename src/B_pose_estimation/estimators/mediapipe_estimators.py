@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from src.config import POSE_CONNECTIONS
-from src.config.constants import MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import MODEL_COMPLEXITY
 
 from ..geometry import (
@@ -28,12 +28,14 @@ class PoseEstimator(PoseEstimatorBase):
         static_image_mode: bool = True,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
+        min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
     ) -> None:
         self.static_image_mode = static_image_mode
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
+        self.min_tracking_confidence = min_tracking_confidence
         self.pose = None
-        self._key: Optional[Tuple[bool, int, float]] = None
+        self._key: Optional[Tuple[bool, int, float, float]] = None
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
@@ -44,6 +46,7 @@ class PoseEstimator(PoseEstimatorBase):
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
@@ -68,6 +71,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         static_image_mode: bool = True,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
+        min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
         crop_margin: float = 0.15,
         target_size: Tuple[int, int] = (256, 256),
     ) -> None:
@@ -76,10 +80,11 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         self.static_image_mode = static_image_mode
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
+        self.min_tracking_confidence = min_tracking_confidence
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float]] = None
-        self._key_crop: Optional[Tuple[bool, int, float]] = None
+        self._key_full: Optional[Tuple[bool, int, float, float]] = None
+        self._key_crop: Optional[Tuple[bool, int, float, float]] = None
         self.smooth_factor = 0.65
         self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
         PoseGraphPool._ensure_imports()
@@ -92,12 +97,14 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
@@ -155,6 +162,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
         static_image_mode: bool = True,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
+        min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
         crop_margin: float = 0.15,
         target_size: Tuple[int, int] = (256, 256),
         refresh_period: int = 10,
@@ -170,6 +178,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.static_image_mode = static_image_mode
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
+        self.min_tracking_confidence = min_tracking_confidence
         self.smooth_factor = 0.65
         self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
 
@@ -181,8 +190,8 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.landmark_pb2 = landmark_pb2
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float]] = None
-        self._key_crop: Optional[Tuple[bool, int, float]] = None
+        self._key_full: Optional[Tuple[bool, int, float, float]] = None
+        self._key_crop: Optional[Tuple[bool, int, float, float]] = None
 
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
@@ -190,12 +199,14 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:

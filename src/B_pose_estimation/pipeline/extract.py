@@ -8,7 +8,7 @@ from typing import Iterable, Sequence, Type
 import numpy as np
 import pandas as pd
 
-from src.config.constants import MIN_DETECTION_CONFIDENCE
+from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 
 from ..constants import LANDMARK_COUNT
 from ..estimators import CroppedPoseEstimator, PoseEstimator, PoseEstimatorBase, RoiPoseEstimator
@@ -23,6 +23,7 @@ def extract_landmarks_from_frames(
     *,
     use_roi_tracking: bool = False,
     min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
+    min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
     min_visibility: float = 0.5,
 ) -> pd.DataFrame:
     """Extract pose landmarks frame by frame and return a raw DataFrame."""
@@ -37,7 +38,10 @@ def extract_landmarks_from_frames(
         estimator_cls = PoseEstimator
 
     rows: list[dict[str, float]] = []
-    with estimator_cls(min_detection_confidence=min_detection_confidence) as estimator:
+    with estimator_cls(
+        min_detection_confidence=min_detection_confidence,
+        min_tracking_confidence=min_tracking_confidence,
+    ) as estimator:
         for index, image in enumerate(frames):
             height, width = image.shape[:2]
             result: PoseResult = estimator.estimate(image)
