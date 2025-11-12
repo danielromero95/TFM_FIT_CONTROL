@@ -59,6 +59,46 @@ def _base_template(length: int, value: float) -> np.ndarray:
     return np.full(length, value, dtype=float)
 
 
+def _add_coordinate_defaults(
+    data: dict[str, np.ndarray],
+    *,
+    knee_forward: float = 0.06,
+    ankle_center: float = 0.46,
+    hip_height: float = 0.65,
+) -> dict[str, np.ndarray]:
+    length = len(next(iter(data.values())))
+
+    def ensure(key: str, value: float) -> None:
+        if key not in data:
+            data[key] = np.full(length, value, dtype=float)
+
+    ensure("torso_length", 0.52)
+    ensure("torso_length_world", 0.52)
+    ensure("shoulder_left_x", 0.40)
+    ensure("shoulder_left_y", 0.45)
+    ensure("shoulder_right_x", 0.60)
+    ensure("shoulder_right_y", 0.45)
+    ensure("hip_left_x", ankle_center - 0.04)
+    ensure("hip_right_x", 1.0 - (ankle_center - 0.04))
+    ensure("hip_left_y", hip_height)
+    ensure("hip_right_y", hip_height)
+    ensure("knee_left_y", 0.80)
+    ensure("knee_right_y", 0.80)
+    ensure("ankle_left_y", 0.92)
+    ensure("ankle_right_y", 0.92)
+    ensure("elbow_left_x", 0.38)
+    ensure("elbow_right_x", 0.62)
+    ensure("elbow_left_y", 0.52)
+    ensure("elbow_right_y", 0.52)
+
+    ensure("ankle_left_x", ankle_center)
+    ensure("ankle_right_x", 1.0 - ankle_center)
+    ensure("knee_left_x", ankle_center + knee_forward)
+    ensure("knee_right_x", 1.0 - ankle_center - knee_forward)
+
+    return data
+
+
 def _timebase(sampling_rate: float, duration_s: float) -> tuple[np.ndarray, int]:
     count = int(sampling_rate * duration_s)
     t = np.arange(count, dtype=float) / sampling_rate
@@ -69,8 +109,8 @@ def _ambiguous_series() -> FeatureSeries:
     sr = 30.0
     t, n = _timebase(sr, 12.0)
     phase = np.linspace(0.0, 6.0, n, dtype=float)
-    knee_primary = 140 + 25 * np.sin(phase)
-    hip_primary = 150 + 20 * np.sin(phase)
+    knee_primary = 150 + 10 * np.sin(phase)
+    hip_primary = 155 + 8 * np.sin(phase)
     elbow_primary = 150 + 20 * np.sin(1.2 * phase)
     pelvis_y = 0.50 + 0.05 * (1 - np.cos(phase))
     torso_tilt = 15 + 8 * np.sin(phase)
@@ -96,7 +136,7 @@ def _ambiguous_series() -> FeatureSeries:
         "shoulder_z_delta_abs": _base_template(n, 0.04),
         "torso_tilt_deg": torso_tilt,
     }
-    return _make_feature_series(data, sr)
+    return _make_feature_series(_add_coordinate_defaults(data, knee_forward=0.01), sr)
 
 
 def _squat_series() -> FeatureSeries:
@@ -134,7 +174,10 @@ def _squat_series() -> FeatureSeries:
         "shoulder_z_delta_abs": _base_template(n, 0.03),
         "torso_tilt_deg": torso_tilt,
     }
-    return _make_feature_series(data, sr)
+    enriched = _add_coordinate_defaults(data, knee_forward=0.08)
+    enriched["knee_left_x"] = np.linspace(0.55, 0.60, n)
+    enriched["knee_right_x"] = np.linspace(0.45, 0.50, n)
+    return _make_feature_series(enriched, sr)
 
 
 def _bench_series() -> FeatureSeries:
@@ -170,7 +213,12 @@ def _bench_series() -> FeatureSeries:
         "shoulder_z_delta_abs": _base_template(n, 0.02),
         "torso_tilt_deg": torso_tilt,
     }
-    return _make_feature_series(data, sr)
+    enriched = _add_coordinate_defaults(data, knee_forward=0.02)
+    enriched["hip_left_y"] = _base_template(n, 0.66)
+    enriched["hip_right_y"] = _base_template(n, 0.66)
+    enriched["ankle_left_x"] = _base_template(n, 0.47)
+    enriched["knee_left_x"] = _base_template(n, 0.49)
+    return _make_feature_series(enriched, sr)
 
 
 def _front_squat_series() -> FeatureSeries:
@@ -207,7 +255,10 @@ def _front_squat_series() -> FeatureSeries:
         "shoulder_z_delta_abs": _base_template(n, 0.02),
         "torso_tilt_deg": torso_tilt,
     }
-    return _make_feature_series(data, sr)
+    enriched = _add_coordinate_defaults(data, knee_forward=0.09)
+    enriched["knee_left_x"] = np.full(n, 0.57)
+    enriched["knee_right_x"] = np.full(n, 0.43)
+    return _make_feature_series(enriched, sr)
 
 
 def _deadlift_series() -> FeatureSeries:
@@ -222,8 +273,8 @@ def _deadlift_series() -> FeatureSeries:
     elbow_right = _base_template(n, 159.0)
     torso_tilt = 32 + 8 * np.sin(2 * np.pi * freq * t)
     pelvis_y = 0.5 + 0.018 * (1 - np.cos(2 * np.pi * freq * t))
-    wrist_y_left = 0.5 + 0.09 * np.sin(2 * np.pi * freq * t)
-    wrist_y_right = 0.5 + 0.09 * np.sin(2 * np.pi * freq * t + 0.04)
+    wrist_y_left = 0.75 + 0.08 * np.sin(2 * np.pi * freq * t)
+    wrist_y_right = 0.78 + 0.08 * np.sin(2 * np.pi * freq * t + 0.04)
 
     data = {
         "knee_angle_left": knee_left,
@@ -246,7 +297,12 @@ def _deadlift_series() -> FeatureSeries:
         "shoulder_z_delta_abs": _base_template(n, 0.07),
         "torso_tilt_deg": torso_tilt,
     }
-    return _make_feature_series(data, sr)
+    enriched = _add_coordinate_defaults(data, knee_forward=0.02)
+    enriched["knee_left_x"] = np.full(n, 0.48)
+    enriched["ankle_left_x"] = np.full(n, 0.46)
+    enriched["knee_left_y"] = _base_template(n, 0.79)
+    enriched["ankle_left_y"] = _base_template(n, 0.93)
+    return _make_feature_series(enriched, sr)
 
 
 def test_synthetic_squat_detection():
@@ -309,10 +365,12 @@ def test_invalid_torso_length_prevents_false_squat():
         "wrist_right_y": _base_template(n, 0.4),
         "ankle_width_norm": _base_template(n, 0.55),
     }
+    base_data = _add_coordinate_defaults(base_data, knee_forward=0.0)
 
     for torso_values in (np.zeros(n, dtype=float), np.full(n, np.nan)):
         data = dict(base_data)
         data["torso_length"] = torso_values
+        data["torso_length_world"] = torso_values
         features = _make_feature_series(data, sr)
         label, _, confidence = classify_features(features)
         assert label == "unknown"

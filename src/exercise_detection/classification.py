@@ -13,32 +13,43 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Tuple
 
 import numpy as np
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import savgol_filter
 
 from .constants import (
     ANKLE_FRONT_WIDTH_THRESHOLD,
     ANKLE_SIDE_WIDTH_MAX,
     ANKLE_WIDTH_STD_THRESHOLD,
-    BENCH_ELBOW_ROM_THRESHOLD_DEG,
-    BENCH_LOWER_ROM_MAX_DEG,
-    BENCH_PELVIS_DROP_NORM_MAX,
-    BENCH_TORSO_MIN_DEG,
-    BENCH_TORSO_TILT_THRESHOLD_DEG,
-    BENCH_WRIST_HORIZONTAL_THRESHOLD,
+    BAR_DROP_MIN_NORM,
+    BENCH_BAR_HORIZONTAL_STD_MAX,
+    BENCH_BAR_RANGE_MIN_NORM,
+    BENCH_ELBOW_ROM_MIN_DEG,
+    BENCH_HIP_RANGE_MAX_NORM,
+    BENCH_HIP_ROM_MAX_DEG,
+    BENCH_KNEE_ROM_MAX_DEG,
+    BENCH_TORSO_HORIZONTAL_DEG,
     CLASSIFICATION_MARGIN,
-    DEADLIFT_HIP_ROM_THRESHOLD_DEG,
-    DEADLIFT_TORSO_UPRIGHT_TARGET_DEG,
-    DEADLIFT_WRIST_VERTICAL_THRESHOLD,
+    DEADLIFT_BAR_ANKLE_MAX_NORM,
+    DEADLIFT_BAR_RANGE_MIN_NORM,
+    DEADLIFT_ELBOW_MIN_DEG,
+    DEADLIFT_HIP_ROM_MIN_DEG,
+    DEADLIFT_KNEE_BOTTOM_MIN_DEG,
+    DEADLIFT_KNEE_FORWARD_MAX_NORM,
+    DEADLIFT_TORSO_TILT_MIN_DEG,
+    DEADLIFT_WRIST_HIP_DIFF_MIN_NORM,
     DEFAULT_SAMPLING_RATE,
+    EVENT_MIN_GAP_SECONDS,
     MIN_CONFIDENCE_SCORE,
     MIN_VALID_FRAMES,
     SIDE_WIDTH_MAX,
-    SQUAT_HIP_MIN_ANGLE_DEG,
-    SQUAT_HIP_ROM_THRESHOLD_DEG,
-    SQUAT_KNEE_MIN_ANGLE_DEG,
-    SQUAT_KNEE_ROM_THRESHOLD_DEG,
-    SQUAT_PELVIS_DISPLACEMENT_THRESHOLD,
-    SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG,
+    SQUAT_ELBOW_BOTTOM_MAX_DEG,
+    SQUAT_ELBOW_BOTTOM_MIN_DEG,
+    SQUAT_HIP_BOTTOM_MAX_DEG,
+    SQUAT_KNEE_BOTTOM_MAX_DEG,
+    SQUAT_KNEE_FORWARD_MIN_NORM,
+    SQUAT_MIN_ROM_DEG,
+    SQUAT_TIBIA_MAX_DEG,
+    SQUAT_TORSO_TILT_MAX_DEG,
+    SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM,
     VIEW_FRONT_FALLBACK_YAW_DEG,
     VIEW_FRONT_WIDTH_THRESHOLD,
     VIEW_MARGIN_PER_EVIDENCE_THRESHOLD,
@@ -48,6 +59,8 @@ from .constants import (
     YAW_FRONT_MAX_DEG,
     YAW_SIDE_MIN_DEG,
     Z_DELTA_FRONT_MAX,
+    KNEE_DOWN_THRESHOLD_DEG,
+    KNEE_UP_THRESHOLD_DEG,
 )
 from .types import FeatureSeries
 
@@ -55,19 +68,12 @@ logger = logging.getLogger(__name__)
 
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
-    """Clasificar el ejercicio a partir de las series de características.
-
-    El algoritmo suaviza señales ruidosas, identifica ventanas que parecen
-    repeticiones y puntúa cada hipótesis con reglas físicas (ROM, simetrías,
-    desplazamientos).  Finalmente aplica un margen para descartar salidas de
-    baja confianza y mantener la interpretación conservadora.
-    """
+    """Clasificar ejercicio y vista con las heurísticas de la vista lateral."""
 
     if features.valid_frames < MIN_VALID_FRAMES:
         return "unknown", "unknown", 0.0
 
     data = features.data
-
     sr = max(1.0, float(features.sampling_rate or DEFAULT_SAMPLING_RATE))
 
     smooth_keys = {
@@ -77,238 +83,225 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         "hip_angle_right",
         "elbow_angle_left",
         "elbow_angle_right",
+        "torso_tilt_deg",
+        "wrist_left_y",
+        "wrist_right_y",
+        "wrist_left_x",
+        "wrist_right_x",
+        "hip_left_y",
+        "hip_right_y",
         "shoulder_width_norm",
         "shoulder_yaw_deg",
         "shoulder_z_delta_abs",
-        "pelvis_y",
-        "torso_tilt_deg",
         "ankle_width_norm",
         "torso_length",
     }
 
     smoothed: Dict[str, np.ndarray] = {}
     for key in smooth_keys:
-        series = data.get(key)
-        if series is None:
-            smoothed[key] = np.array([])
-        else:
-            smoothed[key] = _smooth(np.asarray(series), sr=sr)
+        raw_series = data.get(key)
+        if raw_series is None:
+            continue
+        arr = np.asarray(raw_series, dtype=float)
+        if arr.size == 0:
+            continue
+        smoothed_arr = _smooth(arr, sr=sr)
+        if smoothed_arr.size:
+            smoothed[key] = smoothed_arr
 
     def _series(name: str) -> np.ndarray:
-        series = smoothed.get(name)
-        if series is not None and series.size:
-            return series
+        """Recuperar una serie privilegiando la versión suavizada."""
+
+        candidate = smoothed.get(name)
+        if candidate is not None and candidate.size:
+            return candidate
         raw = data.get(name)
         if raw is None:
             return np.array([])
-        return np.asarray(raw)
+        return np.asarray(raw, dtype=float)
 
-    knee_left = _series("knee_angle_left")
-    knee_right = _series("knee_angle_right")
-    hip_left = _series("hip_angle_left")
-    hip_right = _series("hip_angle_right")
+    torso_length_series = _series("torso_length")
+    torso_length_world_series = _series("torso_length_world")
+    torso_scale = _resolve_torso_scale(torso_length_series, torso_length_world_series)
 
-    elbow_left = _series("elbow_angle_left")
-    elbow_right = _series("elbow_angle_right")
-    pelvis_series = _series("pelvis_y")
-    torso_tilt_series = _series("torso_tilt_deg")
     shoulder_width_series = _series("shoulder_width_norm")
     shoulder_yaw_series = _series("shoulder_yaw_deg")
-    shoulder_z_delta_series = _series("shoulder_z_delta_abs")
+    shoulder_z_series = _series("shoulder_z_delta_abs")
     ankle_width_series = _series("ankle_width_norm")
-    torso_length_series = _series("torso_length")
-    rep_slices = _segment_reps(features)
-
-    if not rep_slices:
-        total_len = int(
-            max((np.asarray(arr).size for arr in data.values() if isinstance(arr, np.ndarray)), default=0)
-        )
-        if total_len > 0:
-            rep_slices = [slice(0, total_len)]
-
-    rep_data = {
-        "knee_angle_left": knee_left,
-        "knee_angle_right": knee_right,
-        "hip_angle_left": hip_left,
-        "hip_angle_right": hip_right,
-        "elbow_angle_left": elbow_left,
-        "elbow_angle_right": elbow_right,
-        "pelvis_y": pelvis_series,
-        "torso_tilt_deg": torso_tilt_series,
-    }
-
-    rep_stats = [_rep_features(rep_data, rep, sr) for rep in rep_slices]
-
-    def _metric(values: Iterable[float], reducer) -> float:
-        finite_values = _finite(np.asarray(list(values), dtype=float))
-        if finite_values.size == 0:
-            return 0.0
-        return float(reducer(finite_values))
-
-    duration_med = _metric((rep.duration_s for rep in rep_stats), np.median)
-    cadence_hz = (1.0 / duration_med) if duration_med > 0 else 0.0
-
-    if cadence_hz > 0:
-        updated = False
-        for key in smooth_keys:
-            raw = data.get(key)
-            if raw is None:
-                continue
-            refined = _smooth(np.asarray(raw), sr=sr, cadence_hz=cadence_hz)
-            if refined.size:
-                smoothed[key] = refined
-                updated = True
-        if updated:
-            knee_left = _series("knee_angle_left")
-            knee_right = _series("knee_angle_right")
-            hip_left = _series("hip_angle_left")
-            hip_right = _series("hip_angle_right")
-            elbow_left = _series("elbow_angle_left")
-            elbow_right = _series("elbow_angle_right")
-            pelvis_series = _series("pelvis_y")
-            torso_tilt_series = _series("torso_tilt_deg")
-            shoulder_width_series = _series("shoulder_width_norm")
-            shoulder_yaw_series = _series("shoulder_yaw_deg")
-            shoulder_z_delta_series = _series("shoulder_z_delta_abs")
-            ankle_width_series = _series("ankle_width_norm")
-            torso_length_series = _series("torso_length")
-            rep_data = {
-                "knee_angle_left": knee_left,
-                "knee_angle_right": knee_right,
-                "hip_angle_left": hip_left,
-                "hip_angle_right": hip_right,
-                "elbow_angle_left": elbow_left,
-                "elbow_angle_right": elbow_right,
-                "pelvis_y": pelvis_series,
-                "torso_tilt_deg": torso_tilt_series,
-            }
-            rep_stats = [_rep_features(rep_data, rep, sr) for rep in rep_slices]
-
-    knee_rom_med = _metric((rep.knee_rom for rep in rep_stats), np.median)
-    hip_rom_med = _metric((rep.hip_rom for rep in rep_stats), np.median)
-    elbow_rom_med = _metric((rep.elbow_rom for rep in rep_stats), np.median)
-    pelvis_drop_med = _metric((rep.pelvis_drop for rep in rep_stats), np.median)
-    tilt_med = _metric((rep.torso_tilt_mean for rep in rep_stats), np.median)
-
-    knee_rom = knee_rom_med
-    hip_rom = hip_rom_med
-    elbow_rom = elbow_rom_med
-    torso_tilt_mean = tilt_med
-
-    torso_med = _finite_stat(torso_length_series, np.median)
-    if not np.isfinite(torso_med) or torso_med < 1e-3:
-        pelvis_drop_norm = 0.0
-    else:
-        pelvis_drop_norm = float(pelvis_drop_med / (torso_med + 1e-6))
-
-    shoulder_rom = _max_range(
-        data.get("shoulder_angle_left"), data.get("shoulder_angle_right")
-    )
-    wrist_vertical = _max_range(data.get("wrist_left_y"), data.get("wrist_right_y"))
-    wrist_horizontal = _max_range(data.get("wrist_left_x"), data.get("wrist_right_x"))
 
     view = _classify_view(
         shoulder_width_series=shoulder_width_series,
         shoulder_yaw_series=shoulder_yaw_series,
-        shoulder_z_delta_series=shoulder_z_delta_series,
+        shoulder_z_delta_series=shoulder_z_series,
         ankle_width_series=ankle_width_series,
     )
 
-    width_mean = _finite_stat(shoulder_width_series, np.mean)
-    width_std = _finite_stat(shoulder_width_series, np.std)
-    yaw_med = _finite_stat(shoulder_yaw_series, np.median)
-    z_med = _finite_stat(shoulder_z_delta_series, np.median)
-    ankle_width_mean = _finite_stat(ankle_width_series, np.mean)
-    ankle_width_std = _finite_stat(ankle_width_series, np.std)
-    torso_med_value = float(torso_med) if np.isfinite(torso_med) else 0.0
-    rep_count = len(rep_stats)
+    side = _select_visible_side(data)
 
-    details = {
-        "rep_count": rep_count,
-        "cadence_hz": float(cadence_hz),
-        "knee_rom_med": float(knee_rom_med),
-        "hip_rom_med": float(hip_rom_med),
-        "elbow_rom_med": float(elbow_rom_med),
-        "pelvis_drop_med": float(pelvis_drop_med),
-        "pelvis_drop_norm": float(pelvis_drop_norm),
-        "tilt_med": float(tilt_med),
-        "torso_med": torso_med_value,
-    }
-    logger.info(
-        "DET DEBUG — knee=%.1f hip=%.1f elbow=%.1f pelvisDrop=%.3f "
-        "wV=%.3f wH=%.3f tilt=%.1f widthMean=%.2f widthStd=%.2f yawMed=%.1f zMed=%.3f "
-        "ankleMean=%.2f ankleStd=%.2f repCount=%d cadence=%.2f details=%s",
-        knee_rom,
-        hip_rom,
-        elbow_rom,
-        pelvis_drop_med,
-        wrist_vertical,
-        wrist_horizontal,
-        torso_tilt_mean,
-        width_mean,
-        width_std,
-        yaw_med,
-        z_med,
-        ankle_width_mean,
-        ankle_width_std,
-        rep_count,
-        cadence_hz,
-        details,
+    knee_series = _series(f"knee_angle_{side}")
+    hip_series = _series(f"hip_angle_{side}")
+    elbow_series = _series(f"elbow_angle_{side}")
+
+    if knee_series.size == 0 or hip_series.size == 0 or elbow_series.size == 0:
+        return "unknown", view, 0.0
+
+    torso_tilt_series = _series("torso_tilt_deg")
+    wrist_left_y = _series("wrist_left_y")
+    wrist_right_y = _series("wrist_right_y")
+    wrist_left_x = _series("wrist_left_x")
+    wrist_right_x = _series("wrist_right_x")
+    shoulder_side_y = _series(f"shoulder_{side}_y")
+    hip_side_y = _series(f"hip_{side}_y")
+    hip_left_y = _series("hip_left_y")
+    hip_right_y = _series("hip_right_y")
+    knee_side_x = _series(f"knee_{side}_x")
+    knee_side_y = _series(f"knee_{side}_y")
+    ankle_side_x = _series(f"ankle_{side}_x")
+    ankle_side_y = _series(f"ankle_{side}_y")
+
+    bar_y_series = _mean_series([wrist_left_y, wrist_right_y])
+    bar_x_series = _mean_series([wrist_left_x, wrist_right_x])
+    hip_y_avg_series = _mean_series([hip_left_y, hip_right_y])
+
+    seg_scale = torso_scale if np.isfinite(torso_scale) and torso_scale > 1e-6 else 1.0
+
+    rep_slices = _segment_reps_state(
+        knee_series=knee_series,
+        bar_series=bar_y_series,
+        sr=sr,
+        torso_scale=seg_scale,
+    )
+    if not rep_slices:
+        total_len = int(
+            max(
+                knee_series.size,
+                hip_series.size,
+                elbow_series.size,
+                torso_tilt_series.size,
+                bar_y_series.size if bar_y_series.size else 0,
+            )
+        )
+        if total_len <= 0:
+            return "unknown", view, 0.0
+        rep_slices = [slice(0, total_len)]
+
+    rep_stats = [
+        _compute_rep_metrics(
+            rep,
+            sr=sr,
+            torso_scale=torso_scale,
+            knee=knee_series,
+            hip=hip_series,
+            elbow=elbow_series,
+            torso_tilt=torso_tilt_series,
+            wrist_y=bar_y_series,
+            shoulder_y=shoulder_side_y,
+            hip_y=hip_side_y,
+            knee_x=knee_side_x,
+            knee_y=knee_side_y,
+            ankle_x=ankle_side_x,
+            ankle_y=ankle_side_y,
+            bar_x=bar_x_series,
+        )
+        for rep in rep_slices
+    ]
+
+    def _aggregate(values: Iterable[float], reducer=np.median, default=float("nan")) -> float:
+        arr = _finite(np.asarray(list(values), dtype=float))
+        if arr.size == 0:
+            return float(default)
+        return float(reducer(arr))
+
+    knee_rom_med = _aggregate((rep.knee_rom for rep in rep_stats))
+    hip_rom_med = _aggregate((rep.hip_rom for rep in rep_stats))
+    elbow_rom_med = _aggregate((rep.elbow_rom for rep in rep_stats))
+    knee_bottom_med = _aggregate((rep.knee_min for rep in rep_stats))
+    hip_bottom_med = _aggregate((rep.hip_min for rep in rep_stats))
+    elbow_bottom_med = _aggregate((rep.elbow_bottom for rep in rep_stats))
+    torso_bottom_med = _aggregate((rep.torso_tilt_bottom for rep in rep_stats))
+    wrist_shoulder_norm_med = _aggregate((rep.wrist_shoulder_diff_norm for rep in rep_stats))
+    wrist_hip_norm_med = _aggregate((rep.wrist_hip_diff_norm for rep in rep_stats))
+    knee_forward_norm_med = _aggregate((rep.knee_forward_norm for rep in rep_stats))
+    tibia_angle_med = _aggregate((rep.tibia_angle_deg for rep in rep_stats))
+    bar_ankle_norm_med = _aggregate((rep.bar_ankle_diff_norm for rep in rep_stats))
+    bar_range_norm_med = _aggregate((rep.bar_range_norm for rep in rep_stats))
+    duration_med = _aggregate((rep.duration_s for rep in rep_stats))
+
+    hip_range_norm = _normalized_range(hip_y_avg_series, torso_scale)
+    bar_vertical_range_norm = _normalized_range(bar_y_series, torso_scale)
+    bar_horizontal_std_norm = _normalized_std(bar_x_series, torso_scale)
+
+    abs_knee_forward = (
+        abs(knee_forward_norm_med) if np.isfinite(knee_forward_norm_med) else float("nan")
     )
 
-    knee_min = _min_finite_percentile(knee_left, knee_right, 15)
-    hip_min = _min_finite_percentile(hip_left, hip_right, 15)
-    symmetry = _symmetry_score(knee_left, knee_right, SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG)
+    bench_score = 0.0
+    bench_posture = np.isfinite(torso_bottom_med) and torso_bottom_med >= BENCH_TORSO_HORIZONTAL_DEG
+    if bench_posture:
+        bench_score += 1.4
+        if np.isfinite(elbow_rom_med) and elbow_rom_med >= BENCH_ELBOW_ROM_MIN_DEG:
+            bench_score += 1.0
+        if np.isfinite(knee_rom_med) and knee_rom_med <= BENCH_KNEE_ROM_MAX_DEG:
+            bench_score += 0.7
+        if np.isfinite(hip_rom_med) and hip_rom_med <= BENCH_HIP_ROM_MAX_DEG:
+            bench_score += 0.7
+        if np.isfinite(bar_range_norm_med) and bar_range_norm_med >= BENCH_BAR_RANGE_MIN_NORM:
+            bench_score += 1.0
+        if np.isfinite(hip_range_norm) and hip_range_norm <= BENCH_HIP_RANGE_MAX_NORM:
+            bench_score += 0.6
+        if np.isfinite(bar_horizontal_std_norm) and bar_horizontal_std_norm <= BENCH_BAR_HORIZONTAL_STD_MAX:
+            bench_score += 0.6
+        if np.isfinite(bar_vertical_range_norm) and bar_vertical_range_norm >= BENCH_BAR_RANGE_MIN_NORM:
+            bench_score += 0.4
 
-    def cadence_adjust(cadence: float, bonus_range: tuple[float, float], penalty_threshold: float) -> float:
-        if cadence <= 0:
-            return 0.0
-        bonus = 0.0
-        low, high = bonus_range
-        if low <= cadence <= high:
-            bonus += 0.35
-        if cadence > penalty_threshold:
-            bonus -= 0.35 * min(2.0, (cadence - penalty_threshold) / penalty_threshold + 1.0)
-        return bonus
-
-    squat_score = (
-        _score(knee_rom, SQUAT_KNEE_ROM_THRESHOLD_DEG)
-        + 0.9 * _score(pelvis_drop_norm, SQUAT_PELVIS_DISPLACEMENT_THRESHOLD)
-        + 0.4 * _score(hip_rom, SQUAT_HIP_ROM_THRESHOLD_DEG)
-        + 0.6 * _score_inverse(knee_min, SQUAT_KNEE_MIN_ANGLE_DEG, scale=1.8)
-        + 0.4 * _score_inverse(hip_min, SQUAT_HIP_MIN_ANGLE_DEG, scale=1.6)
-        + 0.5 * symmetry
-        + cadence_adjust(cadence_hz, (0.2, 0.8), 1.2)
+    squat_score = 0.0
+    squat_posture = (
+        (np.isfinite(knee_bottom_med) and knee_bottom_med <= SQUAT_KNEE_BOTTOM_MAX_DEG)
+        or (np.isfinite(hip_bottom_med) and hip_bottom_med <= SQUAT_HIP_BOTTOM_MAX_DEG)
     )
+    if squat_posture:
+        if np.isfinite(knee_bottom_med) and knee_bottom_med <= SQUAT_KNEE_BOTTOM_MAX_DEG:
+            squat_score += 1.0
+        if np.isfinite(hip_bottom_med) and hip_bottom_med <= SQUAT_HIP_BOTTOM_MAX_DEG:
+            squat_score += 0.6
+        if np.isfinite(torso_bottom_med) and torso_bottom_med <= SQUAT_TORSO_TILT_MAX_DEG:
+            squat_score += 0.6
+        if np.isfinite(wrist_shoulder_norm_med) and abs(wrist_shoulder_norm_med) <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM:
+            squat_score += 0.6
+        if (
+            np.isfinite(elbow_bottom_med)
+            and SQUAT_ELBOW_BOTTOM_MIN_DEG <= elbow_bottom_med <= SQUAT_ELBOW_BOTTOM_MAX_DEG
+        ):
+            squat_score += 0.5
+        if np.isfinite(abs_knee_forward) and abs_knee_forward >= SQUAT_KNEE_FORWARD_MIN_NORM:
+            squat_score += 0.6
+        if np.isfinite(knee_rom_med) and knee_rom_med >= SQUAT_MIN_ROM_DEG:
+            squat_score += 0.6
+        if np.isfinite(tibia_angle_med) and tibia_angle_med <= SQUAT_TIBIA_MAX_DEG:
+            squat_score += 0.4
 
-    bench_score = (
-        _score(elbow_rom, BENCH_ELBOW_ROM_THRESHOLD_DEG)
-        + 0.7 * _score(wrist_horizontal, BENCH_WRIST_HORIZONTAL_THRESHOLD)
-        + 0.6 * _score(torso_tilt_mean, BENCH_TORSO_TILT_THRESHOLD_DEG, scale=1.0)
-        + 0.25 * cadence_adjust(cadence_hz, (0.4, 1.2), 1.5)
+    deadlift_score = 0.0
+    deadlift_posture = (
+        (np.isfinite(torso_bottom_med) and torso_bottom_med >= DEADLIFT_TORSO_TILT_MIN_DEG)
+        or (np.isfinite(wrist_hip_norm_med) and wrist_hip_norm_med >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
     )
-
-    bench_gate = min(
-        _score(torso_tilt_mean, BENCH_TORSO_MIN_DEG, scale=1.0),
-        _score_inverse(max(pelvis_drop_norm, 1e-6), BENCH_PELVIS_DROP_NORM_MAX, scale=1.0),
-        _score_inverse(max(knee_rom, 1e-6), BENCH_LOWER_ROM_MAX_DEG, scale=1.0),
-        _score_inverse(max(hip_rom, 1e-6), BENCH_LOWER_ROM_MAX_DEG, scale=1.0),
-    )
-    bench_gate = max(0.0, min(1.0, bench_gate))
-
-    bench_score = max(0.0, bench_score * (0.25 + 0.75 * bench_gate))
-    bench_score -= 0.3 * _score(knee_rom, BENCH_LOWER_ROM_MAX_DEG * 1.5)
-    bench_score -= 0.3 * _score(hip_rom, BENCH_LOWER_ROM_MAX_DEG * 1.5)
-    bench_score = max(0.0, bench_score)
-
-    deadlift_upright_bonus = max(0.0, DEADLIFT_TORSO_UPRIGHT_TARGET_DEG - torso_tilt_mean)
-    deadlift_score = (
-        _score(hip_rom, DEADLIFT_HIP_ROM_THRESHOLD_DEG)
-        + 0.7 * _score(wrist_vertical, DEADLIFT_WRIST_VERTICAL_THRESHOLD)
-        + 0.5 * _score(deadlift_upright_bonus, DEADLIFT_TORSO_UPRIGHT_TARGET_DEG, scale=1.0)
-        + 0.2 * _score(shoulder_rom, SQUAT_HIP_ROM_THRESHOLD_DEG)
-        + cadence_adjust(cadence_hz, (0.2, 0.8), 1.2)
-    )
+    if deadlift_posture:
+        if np.isfinite(knee_bottom_med) and knee_bottom_med >= DEADLIFT_KNEE_BOTTOM_MIN_DEG:
+            deadlift_score += 1.0
+        if np.isfinite(wrist_hip_norm_med) and wrist_hip_norm_med >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
+            deadlift_score += 0.8
+        if np.isfinite(elbow_bottom_med) and elbow_bottom_med >= DEADLIFT_ELBOW_MIN_DEG:
+            deadlift_score += 0.6
+        if np.isfinite(abs_knee_forward) and abs_knee_forward <= DEADLIFT_KNEE_FORWARD_MAX_NORM:
+            deadlift_score += 0.6
+        if np.isfinite(hip_rom_med) and hip_rom_med >= DEADLIFT_HIP_ROM_MIN_DEG:
+            deadlift_score += 0.6
+        if np.isfinite(bar_ankle_norm_med) and bar_ankle_norm_med <= DEADLIFT_BAR_ANKLE_MAX_NORM:
+            deadlift_score += 0.6
+        if np.isfinite(bar_range_norm_med) and bar_range_norm_med >= DEADLIFT_BAR_RANGE_MIN_NORM:
+            deadlift_score += 0.5
+        if np.isfinite(bar_horizontal_std_norm) and bar_horizontal_std_norm <= BENCH_BAR_HORIZONTAL_STD_MAX:
+            deadlift_score += 0.4
 
     scores = {
         "squat": float(squat_score),
@@ -317,140 +310,317 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     }
 
     label, confidence = _pick_label(scores)
+
+    logger.info(
+        "DET señales — side=%s view=%s kneeMin=%.1f hipMin=%.1f elbowBottom=%.1f torsoBottom=%.1f "
+        "wristShoulder=%.3f wristHip=%.3f kneeROM=%.1f hipROM=%.1f elbowROM=%.1f kneeForward=%.3f "
+        "tibia=%.1f barRange=%.3f barAnkle=%.3f hipRange=%.3f barStd=%.3f dur=%.2f scores=%s",
+        side,
+        view,
+        knee_bottom_med,
+        hip_bottom_med,
+        elbow_bottom_med,
+        torso_bottom_med,
+        wrist_shoulder_norm_med,
+        wrist_hip_norm_med,
+        knee_rom_med,
+        hip_rom_med,
+        elbow_rom_med,
+        abs_knee_forward,
+        tibia_angle_med,
+        bar_range_norm_med,
+        bar_ankle_norm_med,
+        hip_range_norm,
+        bar_horizontal_std_norm,
+        duration_med,
+        scores,
+    )
+
     if label == "unknown":
-        return "unknown", view, confidence
+        view = "unknown"
 
     return label, view, confidence
-
-
 @dataclass
-class RepStats:
+class RepMetrics:
+    knee_min: float
+    hip_min: float
+    elbow_bottom: float
+    torso_tilt_bottom: float
+    wrist_shoulder_diff_norm: float
+    wrist_hip_diff_norm: float
+    knee_forward_norm: float
+    tibia_angle_deg: float
+    bar_ankle_diff_norm: float
     knee_rom: float
     hip_rom: float
     elbow_rom: float
-    torso_tilt_mean: float
-    pelvis_drop: float
+    bar_range_norm: float
     duration_s: float
 
 
-def _segment_reps(features: FeatureSeries) -> list[slice]:
-    sr = max(1.0, float(features.sampling_rate or DEFAULT_SAMPLING_RATE))
-    activity_series = []
-    derivative_length = None
+def _mean_series(series_list: Iterable[np.ndarray | None]) -> np.ndarray:
+    """Promediar series homólogas ignorando huecos con ``NaN``."""
 
-    for name in (
-        "knee_angle_left",
-        "knee_angle_right",
-        "hip_angle_left",
-        "hip_angle_right",
-        "elbow_angle_left",
-        "elbow_angle_right",
-    ):
-        series = features.data.get(name)
-        if series is None or np.asarray(series).size == 0:
+    arrays: list[np.ndarray] = []
+    max_len = 0
+    for series in series_list:
+        if series is None:
             continue
-        smoothed = _smooth(np.asarray(series), sr=sr)
-        if smoothed.size < 3:
+        arr = np.asarray(series, dtype=float)
+        if arr.size == 0:
             continue
-        z = _zscore(smoothed)
-        dz = np.diff(z)
-        if dz.size == 0:
-            continue
-        activity_series.append(np.abs(dz))
-        derivative_length = dz.size if derivative_length is None else min(derivative_length, dz.size)
+        arrays.append(arr)
+        if arr.size > max_len:
+            max_len = arr.size
+    if not arrays or max_len == 0:
+        return np.array([])
+    stacked = np.full((len(arrays), max_len), np.nan, dtype=float)
+    for idx, arr in enumerate(arrays):
+        length = min(arr.size, max_len)
+        stacked[idx, :length] = arr[:length]
+    return np.nanmean(stacked, axis=0)
 
-    if not activity_series or derivative_length is None or derivative_length <= 0:
+
+def _normalized_range(series: np.ndarray | None, scale: float) -> float:
+    if series is None:
+        return float("nan")
+    arr = np.asarray(series, dtype=float)
+    if arr.size == 0 or not np.isfinite(scale) or scale <= 1e-6:
+        return float("nan")
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return float("nan")
+    return float((finite.max() - finite.min()) / scale)
+
+
+def _normalized_std(series: np.ndarray | None, scale: float) -> float:
+    if series is None:
+        return float("nan")
+    arr = np.asarray(series, dtype=float)
+    if arr.size == 0 or not np.isfinite(scale) or scale <= 1e-6:
+        return float("nan")
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return float("nan")
+    return float(np.std(finite) / scale)
+
+
+def _resolve_torso_scale(torso_length: np.ndarray | None, torso_world: np.ndarray | None) -> float:
+    """Seleccionar una longitud de torso robusta para normalizar distancias."""
+
+    candidate = _finite_stat(torso_length, np.median)
+    if np.isfinite(candidate) and candidate > 1e-6:
+        return float(candidate)
+    candidate = _finite_stat(torso_world, np.median)
+    if np.isfinite(candidate) and candidate > 1e-6:
+        return float(candidate)
+    return float("nan")
+
+
+def _select_visible_side(data: Dict[str, np.ndarray]) -> str:
+    """Escoger el lado con más articulaciones visibles según la consigna."""
+
+    def _score(side: str) -> int:
+        total = 0
+        for joint in ("hip", "knee", "ankle"):
+            for axis in ("x", "y"):
+                key = f"{joint}_{side}_{axis}"
+                series = data.get(key)
+                if series is None:
+                    continue
+                arr = np.asarray(series, dtype=float)
+                if arr.size == 0:
+                    continue
+                total += int(np.isfinite(arr).sum())
+        return total
+
+    left_score = _score("left")
+    right_score = _score("right")
+    return "left" if left_score >= right_score else "right"
+
+
+def _segment_reps_state(
+    *,
+    knee_series: np.ndarray,
+    bar_series: np.ndarray | None,
+    sr: float,
+    torso_scale: float,
+) -> list[slice]:
+    """Detectar repeticiones con histéresis en el ángulo de rodilla."""
+
+    if knee_series is None:
+        return []
+    knee = np.asarray(knee_series, dtype=float)
+    if knee.size == 0:
         return []
 
-    trimmed = [series[:derivative_length] for series in activity_series]
-    activity = np.nan_to_num(np.vstack(trimmed), nan=0.0).mean(axis=0)
-    if activity.size == 0:
-        return []
+    bar: np.ndarray | None = None
+    if bar_series is not None:
+        bar_arr = np.asarray(bar_series, dtype=float)
+        if bar_arr.size:
+            bar = bar_arr
 
-    activity = np.where(np.isfinite(activity), activity, 0.0)
-    percentile_65 = float(np.percentile(activity, 65)) if activity.size else 0.0
-    mean_val = float(np.mean(activity)) if activity.size else 0.0
-    std_val = float(np.std(activity)) if activity.size else 0.0
-    adaptive_height = mean_val + std_val * 0.25
-    height = max(percentile_65, adaptive_height)
-    if not np.isfinite(height) or height <= 0.0:
-        return []
+    min_gap_frames = max(1, int(round(max(1.0, sr * EVENT_MIN_GAP_SECONDS))))
+    knee_down_threshold = KNEE_DOWN_THRESHOLD_DEG
+    knee_up_threshold = KNEE_UP_THRESHOLD_DEG
+    scale_value = float(torso_scale) if np.isfinite(torso_scale) and torso_scale > 1e-6 else 1e-3
+    bar_threshold = BAR_DROP_MIN_NORM * scale_value
 
-    distance_frames = max(1, int(round(max(0.35 * sr, 0.25 * sr))))
+    state = "up"
+    down_idx: int | None = None
+    last_transition = -min_gap_frames * 2
+    bar_high = None
+    bar_low = None
+    reps: list[slice] = []
+    total = knee.size
 
-    peaks, _ = find_peaks(activity, height=height, distance=distance_frames)
-    if peaks.size == 0:
-        return []
-
-    activity_len = activity.size
-    series_len = derivative_length + 1
-
-    midpoints = (((peaks[:-1] + peaks[1:]) // 2) + 1).astype(int) if peaks.size > 1 else np.array([], dtype=int)
-    boundaries = np.concatenate(([0], midpoints, [activity_len]))
-
-    rep_slices: list[slice] = []
-    for idx, peak in enumerate(peaks):
-        start_frame = int(boundaries[idx])
-        end_frame = int(boundaries[idx + 1])
-        start_frame = max(0, min(start_frame, activity_len - 1))
-        end_frame = max(start_frame + 1, min(end_frame, activity_len))
-
-        start_idx = max(0, min(start_frame, series_len - 2))
-        end_idx = max(start_idx + 2, min(end_frame + 1, series_len))
-        if end_idx - start_idx <= 1:
+    for idx in range(total):
+        angle = knee[idx]
+        if not np.isfinite(angle):
             continue
-        duration_s = (end_idx - start_idx) / sr if sr > 0 else 0.0
-        if duration_s < 0.25 or duration_s > 4.0:
-            continue
-        rep_slices.append(slice(start_idx, end_idx))
 
-    return rep_slices
+        bar_value = None
+        if bar is not None and idx < bar.size:
+            bar_value = bar[idx]
+
+        if state == "up":
+            if bar_value is not None and (bar_high is None or bar_value > bar_high):
+                bar_high = bar_value
+            cond = angle < knee_down_threshold
+            if not cond and bar_value is not None and bar_high is not None:
+                cond = (bar_high - bar_value) > bar_threshold
+            if cond and (idx - last_transition) > min_gap_frames:
+                state = "down"
+                down_idx = idx
+                last_transition = idx
+                bar_low = bar_value if bar_value is not None else bar_low
+        else:
+            if bar_value is not None and (bar_low is None or bar_value < bar_low):
+                bar_low = bar_value
+            cond = angle > knee_up_threshold
+            if not cond and bar_value is not None and bar_low is not None:
+                cond = (bar_value - bar_low) > bar_threshold
+            if cond and (idx - last_transition) > min_gap_frames:
+                state = "up"
+                last_transition = idx
+                start = down_idx if down_idx is not None else max(0, idx - int(sr * 0.5))
+                stop = idx + int(sr * 0.25)
+                start = max(0, start - int(sr * 0.1))
+                stop = min(total, max(start + 3, stop))
+                reps.append(slice(start, stop))
+                down_idx = None
+                bar_high = bar_value if bar_value is not None else bar_high
+
+    return reps
 
 
-def _rep_features(data: Dict[str, np.ndarray], rep: slice, sr: float) -> RepStats:
-    start = int(rep.start or 0)
-    stop = int(rep.stop or start)
-    if stop <= start:
-        return RepStats(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+def _compute_rep_metrics(
+    rep: slice,
+    *,
+    sr: float,
+    torso_scale: float,
+    knee: np.ndarray,
+    hip: np.ndarray,
+    elbow: np.ndarray,
+    torso_tilt: np.ndarray,
+    wrist_y: np.ndarray,
+    shoulder_y: np.ndarray,
+    hip_y: np.ndarray,
+    knee_x: np.ndarray,
+    knee_y: np.ndarray,
+    ankle_x: np.ndarray,
+    ankle_y: np.ndarray,
+    bar_x: np.ndarray,
+) -> RepMetrics:
+    """Calcular métricas cinemáticas para una repetición individual."""
 
-    def _slice(name: str) -> np.ndarray:
-        series = data.get(name)
-        if series is None or np.asarray(series).size == 0:
+    start = max(0, int(rep.start or 0))
+    stop = max(start, int(rep.stop or start))
+    if stop - start < 2:
+        return RepMetrics(*(float("nan") for _ in range(13)))
+
+    def _segment(series: np.ndarray | None) -> np.ndarray:
+        if series is None:
             return np.array([])
-        arr = np.asarray(series)
+        arr = np.asarray(series, dtype=float)
+        if arr.size == 0:
+            return np.array([])
         start_idx = max(0, min(start, arr.size))
         stop_idx = max(start_idx, min(stop, arr.size))
         return arr[start_idx:stop_idx]
 
-    knee_left = _slice("knee_angle_left")
-    knee_right = _slice("knee_angle_right")
-    hip_left = _slice("hip_angle_left")
-    hip_right = _slice("hip_angle_right")
-    elbow_left = _slice("elbow_angle_left")
-    elbow_right = _slice("elbow_angle_right")
-    pelvis = _slice("pelvis_y")
-    tilt = _slice("torso_tilt_deg")
+    knee_seg = _segment(knee)
+    hip_seg = _segment(hip)
+    elbow_seg = _segment(elbow)
+    torso_seg = _segment(torso_tilt)
+    wrist_seg = _segment(wrist_y)
+    shoulder_seg = _segment(shoulder_y)
+    hip_y_seg = _segment(hip_y)
+    knee_x_seg = _segment(knee_x)
+    knee_y_seg = _segment(knee_y)
+    ankle_x_seg = _segment(ankle_x)
+    ankle_y_seg = _segment(ankle_y)
+    bar_x_seg = _segment(bar_x)
 
-    knee_rom = _max_range(knee_left, knee_right)
-    hip_rom = _max_range(hip_left, hip_right)
-    elbow_rom = _max_range(elbow_left, elbow_right)
-    pelvis_drop = _range_of(pelvis)
-    torso_tilt_mean = float(np.nanmean(tilt)) if tilt.size else 0.0
+    torso_norm = float(torso_scale) if np.isfinite(torso_scale) and torso_scale > 1e-6 else float("nan")
+
+    knee_min = _finite_stat(knee_seg, np.min)
+    hip_min = _finite_stat(hip_seg, np.min)
+    elbow_min = _finite_stat(elbow_seg, np.min)
+
+    if knee_seg.size:
+        finite_knee = knee_seg[np.isfinite(knee_seg)]
+        threshold = finite_knee.min() + 10.0 if finite_knee.size else float("inf")
+        mask = np.isfinite(knee_seg) & (knee_seg <= threshold)
+    else:
+        mask = np.array([], dtype=bool)
+
+    def _masked_stat(values: np.ndarray, default: float = float("nan")) -> float:
+        if values.size == 0 or mask.size == 0:
+            return float(default)
+        masked = values[mask & np.isfinite(values)]
+        if masked.size == 0:
+            return float(default)
+        return float(np.median(masked))
+
+    wrist_shoulder = wrist_seg - shoulder_seg
+    wrist_hip = wrist_seg - hip_y_seg
+    knee_forward = knee_x_seg - ankle_x_seg
+    tibia_angles = np.degrees(
+        np.arctan2(np.abs(knee_x_seg - ankle_x_seg), np.abs(knee_y_seg - ankle_y_seg) + 1e-6)
+    )
+    bar_ankle = np.abs(bar_x_seg - ankle_x_seg)
+
+    wrist_shoulder_norm = _masked_stat(wrist_shoulder / torso_norm)
+    wrist_hip_norm = _masked_stat(wrist_hip / torso_norm)
+    knee_forward_norm = _masked_stat(knee_forward / torso_norm)
+    tibia_angle = _masked_stat(tibia_angles)
+    bar_ankle_norm = _masked_stat(bar_ankle / torso_norm)
+
+    knee_rom = _range_of(knee_seg)
+    hip_rom = _range_of(hip_seg)
+    elbow_rom = _range_of(elbow_seg)
+    bar_range_norm = _normalized_range(wrist_seg, torso_norm)
+    torso_bottom = _masked_stat(torso_seg)
+
     duration_s = (stop - start) / sr if sr > 0 else 0.0
 
-    return RepStats(
-        knee_rom=knee_rom,
-        hip_rom=hip_rom,
-        elbow_rom=elbow_rom,
-        torso_tilt_mean=torso_tilt_mean,
-        pelvis_drop=pelvis_drop,
-        duration_s=duration_s,
+    return RepMetrics(
+        knee_min=float(knee_min),
+        hip_min=float(hip_min),
+        elbow_bottom=float(elbow_min),
+        torso_tilt_bottom=float(torso_bottom),
+        wrist_shoulder_diff_norm=float(wrist_shoulder_norm),
+        wrist_hip_diff_norm=float(wrist_hip_norm),
+        knee_forward_norm=float(knee_forward_norm),
+        tibia_angle_deg=float(tibia_angle),
+        bar_ankle_diff_norm=float(bar_ankle_norm),
+        knee_rom=float(knee_rom),
+        hip_rom=float(hip_rom),
+        elbow_rom=float(elbow_rom),
+        bar_range_norm=float(bar_range_norm),
+        duration_s=float(duration_s),
     )
-
-
-def _max_range(*series: np.ndarray | None) -> float:
-    ranges = [_range_of(s) for s in series if s is not None]
-    return max(ranges) if ranges else 0.0
 
 
 def _range_of(series: np.ndarray | None) -> float:
@@ -460,22 +630,6 @@ def _range_of(series: np.ndarray | None) -> float:
     if valid.size == 0:
         return 0.0
     return float(valid.max() - valid.min())
-
-
-def _min_finite_percentile(
-    series_a: np.ndarray | None,
-    series_b: np.ndarray | None,
-    percentile: float,
-) -> float:
-    values = []
-    if series_a is not None:
-        values.append(_finite_percentile(series_a, percentile))
-    if series_b is not None:
-        values.append(_finite_percentile(series_b, percentile))
-    finite = [v for v in values if np.isfinite(v)]
-    if not finite:
-        return float("nan")
-    return float(min(finite))
 
 
 def _finite_stat(series: np.ndarray | None, reducer) -> float:
@@ -522,23 +676,6 @@ def _score_inverse(value: float, threshold: float, scale: float = 1.5) -> float:
     ratio = headroom / threshold
     ratio = max(0.0, min(ratio, scale * 2.0))
     return ratio
-
-
-def _symmetry_score(
-    series_a: np.ndarray | None,
-    series_b: np.ndarray | None,
-    tolerance: float,
-) -> float:
-    if tolerance <= 0:
-        return 0.0
-    if series_a is None or series_b is None:
-        return 0.0
-    a_med = _finite_percentile(series_a, 15)
-    b_med = _finite_percentile(series_b, 15)
-    if not np.isfinite(a_med) or not np.isfinite(b_med):
-        return 0.0
-    diff = abs(a_med - b_med)
-    return _score_inverse(diff, tolerance, scale=2.0)
 
 
 def _pick_label(scores: Dict[str, float]) -> Tuple[str, float]:

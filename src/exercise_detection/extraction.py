@@ -194,6 +194,13 @@ def _process_frame(
 
     mp_landmarks = results.pose_landmarks.landmark
     landmark_dicts: list[dict[str, float]] = []
+    world_landmark_dicts: list[dict[str, float]] | None = None
+
+    if getattr(results, "pose_world_landmarks", None):
+        mp_world_landmarks = results.pose_world_landmarks.landmark
+        world_landmark_dicts = []
+    else:
+        mp_world_landmarks = None
 
     def _coerce(value: Any) -> float:
         try:
@@ -214,7 +221,19 @@ def _process_frame(
 
         landmark_dicts.append({"x": x_val, "y": y_val, "z": z_val, "visibility": visibility})
 
-    feature_values = build_features_from_landmarks(landmark_dicts)
+    if world_landmark_dicts is not None and mp_world_landmarks is not None:
+        for idx, landmark in enumerate(mp_world_landmarks):
+            x_val = _coerce(getattr(landmark, "x", float("nan")))
+            y_val = _coerce(getattr(landmark, "y", float("nan")))
+            z_val = _coerce(getattr(landmark, "z", float("nan")))
+            visibility = landmark_dicts[idx]["visibility"] if idx < len(landmark_dicts) else float("nan")
+            if not np.isfinite(visibility) or visibility < min_visibility:
+                x_val = float("nan")
+                y_val = float("nan")
+                z_val = float("nan")
+            world_landmark_dicts.append({"x": x_val, "y": y_val, "z": z_val})
+
+    feature_values = build_features_from_landmarks(landmark_dicts, world_landmarks=world_landmark_dicts)
 
     has_finite = False
     for name in FEATURE_NAMES:
