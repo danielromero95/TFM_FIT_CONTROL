@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -39,6 +39,17 @@ SMOOTH_KEYS = {
     "torso_length_world",
 }
 
+_SIDE_VISIBILITY_KEYS = (
+    "hip_{side}_x",
+    "hip_{side}_y",
+    "knee_{side}_x",
+    "knee_{side}_y",
+    "ankle_{side}_x",
+    "ankle_{side}_y",
+)
+
+_BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
+
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     """Classify exercise and camera view for a clip of pose features."""
@@ -65,7 +76,9 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         ankle_width=get_series("ankle_width_norm"),
     )
 
-    side = _select_visible_side(series)
+    visibility = _compute_side_visibility(series)
+    side = _select_visible_side(series, visibility=visibility)
+    both_sides_visible = _both_sides_visible(visibility)
 
     knee_angle = get_series(f"knee_angle_{side}")
     hip_angle = get_series(f"hip_angle_{side}")
@@ -113,6 +126,9 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     label, confidence, scores, _ = classify_exercise(metrics)
     view_label = view_result.label
 
+    if label == "squat" and view_label == "side" and both_sides_visible:
+        view_label = "front"
+
     if label == "unknown":
         view_label = "unknown"
         confidence = 0.0
@@ -150,21 +166,48 @@ def _resolve_torso_scale(torso_length: np.ndarray, torso_world: np.ndarray) -> f
     return median if np.isfinite(median) and median > 1e-6 else float("nan")
 
 
-def _select_visible_side(series: Dict[str, np.ndarray]) -> str:
-    def evidence(side: str) -> int:
-        keys = [
-            f"hip_{side}_x",
-            f"hip_{side}_y",
-            f"knee_{side}_x",
-            f"knee_{side}_y",
-            f"ankle_{side}_x",
-            f"ankle_{side}_y",
-        ]
-        return sum(int(np.isfinite(series.get(key, np.array([]))).sum()) for key in keys)
+def _select_visible_side(
+    series: Dict[str, np.ndarray], *, visibility: Mapping[str, Tuple[int, float]] | None = None
+) -> str:
+    if visibility is None:
+        visibility = _compute_side_visibility(series)
 
-    left_count = evidence("left")
-    right_count = evidence("right")
+    left_count = visibility.get("left", (0, 0.0))[0]
+    right_count = visibility.get("right", (0, 0.0))[0]
     return "left" if left_count >= right_count else "right"
+
+
+def _compute_side_visibility(series: Dict[str, np.ndarray]) -> Dict[str, Tuple[int, float]]:
+    frame_count = int(series.get("_length", 0) or 0)
+    per_side: Dict[str, Tuple[int, float]] = {}
+    total_possible = frame_count * len(_SIDE_VISIBILITY_KEYS)
+
+    for side in ("left", "right"):
+        count = 0
+        for key_template in _SIDE_VISIBILITY_KEYS:
+            key = key_template.format(side=side)
+            values = series.get(key)
+            if values is None:
+                continue
+            arr = np.asarray(values, dtype=float)
+            count += int(np.isfinite(arr).sum())
+
+        ratio = (count / total_possible) if total_possible > 0 else 0.0
+        per_side[side] = (count, ratio)
+
+    return per_side
+
+
+def _both_sides_visible(
+    visibility: Mapping[str, Tuple[int, float]],
+    *,
+    min_ratio: float = _BOTH_SIDES_VISIBLE_MIN_RATIO,
+) -> bool:
+    left_ratio = visibility.get("left", (0, 0.0))[1]
+    right_ratio = visibility.get("right", (0, 0.0))[1]
+    if left_ratio <= 0.0 or right_ratio <= 0.0:
+        return False
+    return min(left_ratio, right_ratio) >= min_ratio
 
 
 def _is_invalid(series: np.ndarray) -> bool:
