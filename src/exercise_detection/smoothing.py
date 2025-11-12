@@ -1,4 +1,4 @@
-"""Signal smoothing utilities used across the exercise classifier."""
+"""Rutinas de suavizado temporal aplicadas a las métricas del detector."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .constants import (
 
 
 def linear_fill_nan(series: np.ndarray) -> np.ndarray:
-    """Fill NaNs using linear interpolation, preserving NaNs at the ends."""
+    """Rellena NaN con interpolación lineal sin modificar los extremos vacíos."""
 
     if series.size == 0:
         return series.copy()
@@ -34,7 +34,7 @@ def linear_fill_nan(series: np.ndarray) -> np.ndarray:
 
 
 def smooth(series: np.ndarray, sr: Optional[float] = None) -> np.ndarray:
-    """Apply Savitzky–Golay smoothing with adaptive window sizing."""
+    """Aplica Savitzky–Golay con ventana adaptativa según el muestreo."""
 
     arr = np.asarray(series, dtype=float)
     if arr.size < 3:

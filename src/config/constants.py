@@ -1,6 +1,8 @@
-"""
-Global application constants, video extensions, and filesystem paths.
-"""
+"""Constantes globales de la aplicación relacionadas con rutas y formatos.
+
+Se documentan en español para dejar claro qué valores se reutilizan en las
+distintas capas (interfaz, pipeline y utilidades) y por qué se fijan en este
+archivo independiente."""
 from pathlib import Path
 
 # --- GENERAL CONFIGURATION ---

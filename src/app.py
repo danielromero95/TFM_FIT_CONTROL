@@ -11,7 +11,7 @@ from pathlib import Path
 
 import streamlit as st
 
-# Ensure the project root is available on the import path when Streamlit executes the app
+# Garantizar que la raíz del proyecto esté en ``sys.path`` cuando Streamlit ejecute la app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -83,11 +83,15 @@ def handle_results_action(action: AppAction) -> None:
 
 
 def _reset_app() -> None:
+    """Restablece el estado global y fuerza un rerun limpio de la interfaz."""
+
     reset_state()
     safe_rerun()
 
 
 def main() -> None:
+    """Punto de entrada principal de Streamlit que dibuja las tres columnas."""
+
     if threading.current_thread() is threading.main_thread():
         inject_css()
         inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)

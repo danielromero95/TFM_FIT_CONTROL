@@ -1,4 +1,4 @@
-"""Utilities for rendering uniformly sized videos in Streamlit."""
+"""Utilidades para renderizar vídeos con altura uniforme en Streamlit."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ DEFAULT_VIDEO_BOTTOM_REM: Final[float] = 1.25
 
 @st.cache_data(show_spinner=False)
 def _data_uri(path: str, *, mtime: float, mime: str) -> str:
-    """Return a base64 data URI for a local video file."""
+    """Devuelve un data URI en base64 para un vídeo almacenado en disco."""
 
     data = Path(path).read_bytes()
     encoded = b64encode(data).decode("ascii")
@@ -29,6 +29,8 @@ def _data_uri(path: str, *, mtime: float, mime: str) -> str:
 
 
 def _normalize_mime(value: str | None) -> str | None:
+    """Normaliza un identificador MIME incompleto hacia el formato ``tipo/subtipo``."""
+
     if value is None:
         return None
     mime = value.strip()
@@ -40,6 +42,8 @@ def _normalize_mime(value: str | None) -> str | None:
 
 
 def _detect_mime(path: Path, fallback: str | None) -> str:
+    """Intenta inferir el tipo MIME del archivo, usando ``fallback`` si hace falta."""
+
     mime_hint = _normalize_mime(fallback)
     if mime_hint:
         return mime_hint
@@ -50,6 +54,8 @@ def _detect_mime(path: Path, fallback: str | None) -> str:
 
 
 def _as_bytes(data: BinaryIO) -> bytes:
+    """Lee un buffer binario preservando la posición original del puntero."""
+
     position = getattr(data, "tell", None)
     if position is not None:
         try:
@@ -73,7 +79,7 @@ def _video_source(
     *,
     format: str | None,
 ) -> tuple[str, str]:
-    """Return ``(source_uri, mime_type)`` for ``data``."""
+    """Devuelve ``(source_uri, mime_type)`` a partir de los datos de vídeo recibidos."""
 
     if isinstance(data, (bytes, bytearray)):
         mime = _normalize_mime(format) or "video/mp4"
@@ -100,7 +106,7 @@ def get_video_source(
     *,
     format: str | None = None,
 ) -> tuple[str, str]:
-    """Public wrapper around _video_source for reuse in other modules."""
+    """Envoltura pública de ``_video_source`` para reutilizar en otros módulos."""
 
     return _video_source(data, format=format)
 
@@ -116,7 +122,7 @@ def render_uniform_video(
     portrait_height_px: int = 560,
     sync_channel: str | None = None,
 ) -> None:
-    """Render ``data`` inside a viewport with fixed height and full width."""
+    """Renderiza el vídeo dentro de un contenedor ancho con altura controlada."""
 
     source, mime = _video_source(data, format=format)
     component_key = key or f"uniform_video_{uuid4().hex}"

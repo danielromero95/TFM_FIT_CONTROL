@@ -1,4 +1,4 @@
-"""Feature calculations per repetition and aggregated statistics."""
+"""Cálculo de métricas por repetición y agregadas para el detector de ejercicios."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def compute_metrics(
     torso_scale: float,
     sampling_rate: float,
 ) -> AggregateMetrics:
-    """Compute per-repetition metrics and aggregate robust statistics."""
+    """Calcula métricas por repetición y devuelve agregados robustos."""
 
     per_rep: List[RepMetrics] = []
     scale = torso_scale if np.isfinite(torso_scale) and torso_scale > 1e-6 else np.nan
@@ -44,6 +44,7 @@ def _compute_single_rep(
     torso_scale: float,
     sampling_rate: float,
 ) -> RepMetrics | None:
+    """Deriva las métricas de una repetición concreta a partir de las series crudas."""
     start, end = rep_slice.start, rep_slice.end
     if end - start < 2:
         return None
@@ -133,6 +134,7 @@ def _compute_single_rep(
 
 
 def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], torso_scale: float) -> AggregateMetrics:
+    """Agrega métricas individuales en un resumen global del clip."""
     def med(name: str) -> float:
         values = [getattr(rep, name) for rep in per_rep]
         return safe_nanmedian(values)
@@ -169,6 +171,7 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
 
 
 def _safe_slice(series: np.ndarray | None, start: int, end: int) -> np.ndarray:
+    """Extrae un segmento de la serie rellenando con ``NaN`` si faltan datos."""
     if series is None or series.size == 0:
         return np.full(end - start, np.nan)
     if end > series.size:
@@ -180,10 +183,12 @@ def _safe_slice(series: np.ndarray | None, start: int, end: int) -> np.ndarray:
 
 
 def _has_enough_finite(series: np.ndarray) -> bool:
+    """Comprueba si la serie contiene suficientes valores válidos para analizar."""
     return np.isfinite(series).sum() >= max(BOTTOM_MIN_FRAMES, 3)
 
 
 def _normed_difference(a: float, b: float, scale: float, *, absolute: bool = False) -> float:
+    """Calcula diferencias normalizadas por la escala corporal del sujeto."""
     if not np.isfinite(scale) or scale <= 1e-6:
         return float("nan")
     if not np.isfinite(a) or not np.isfinite(b):
@@ -195,6 +200,7 @@ def _normed_difference(a: float, b: float, scale: float, *, absolute: bool = Fal
 
 
 def _series_range_norm(series: np.ndarray, torso_scale: float) -> float:
+    """Obtiene el rango de la serie escalado por la referencia de torso."""
     array = np.asarray(series, dtype=float)
     if array.size == 0 or not np.isfinite(array).any():
         return float("nan")
@@ -205,6 +211,7 @@ def _series_range_norm(series: np.ndarray, torso_scale: float) -> float:
 
 
 def _series_std_norm(series: np.ndarray, torso_scale: float) -> float:
+    """Calcula la desviación típica normalizada respecto al tamaño del torso."""
     array = np.asarray(series, dtype=float)
     if array.size == 0 or not np.isfinite(array).any():
         return float("nan")

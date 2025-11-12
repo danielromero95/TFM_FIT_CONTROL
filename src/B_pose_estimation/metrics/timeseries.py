@@ -1,4 +1,4 @@
-"""Time-series helpers for pose metrics."""
+"""Herramientas de series temporales para métricas de pose."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pandas as pd
 
 
 def angular_velocity(series: Iterable[float], fps: float, method: str = "forward") -> List[float]:
-    """Return angular velocity with same length as the input series."""
+    """Calcular la velocidad angular preservando la longitud de la serie original."""
 
     values = list(series)
     n = len(values)
@@ -47,7 +47,7 @@ def angular_velocity(series: Iterable[float], fps: float, method: str = "forward
 
 
 def calculate_angular_velocity(angle_sequence: Iterable[float], fps: float) -> List[float]:
-    """Backward compatibility wrapper for legacy forward-difference velocity."""
+    """Envoltura retrocompatible que usa diferencias adelantadas para la velocidad."""
 
     return angular_velocity(angle_sequence, fps, method="forward")
 

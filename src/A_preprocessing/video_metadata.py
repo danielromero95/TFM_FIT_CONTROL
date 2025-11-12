@@ -1,4 +1,4 @@
-"""Unified video metadata reader with optional ffprobe support."""
+"""Lector unificado de metadatos de vídeo con soporte opcional para ffprobe."""
 
 from __future__ import annotations
 
@@ -19,27 +19,27 @@ __all__ = ["VideoInfo", "read_video_file_info"]
 
 @dataclass(slots=True)
 class VideoInfo:
-    """Structured video metadata."""
+    """Metadatos estructurados de un archivo de vídeo."""
     path: Path
     width: int | None
     height: int | None
-    fps: float | None              # None if invalid/unavailable
-    frame_count: int | None        # None if unavailable
-    duration_sec: float | None     # None if unavailable
-    rotation: int | None           # 0/90/180/270 or None
-    codec: str | None              # best-effort from FOURCC
+    fps: float | None              # None si es inválido o no está disponible
+    frame_count: int | None        # None si no se puede determinar
+    duration_sec: float | None     # None si no se puede determinar
+    rotation: int | None           # 0/90/180/270 o None
+    codec: str | None              # mejor esfuerzo a partir del FOURCC
     fps_source: str | None         # "metadata" | "estimated" | "reader" | None
 
 
 def _normalize_rotation(value: int) -> int:
-    """Return the closest value among 0/90/180/270 for ``value``."""
+    """Obtener el valor más cercano a 0/90/180/270 para ``value``."""
     value = int(value) % 360
     candidates = [0, 90, 180, 270]
     return min(candidates, key=lambda c: abs(c - value))
 
 
 def _read_rotation_ffprobe(path: Path) -> Optional[int]:
-    """Read rotation from ffprobe tags if available; return None if not found/available."""
+    """Leer la rotación desde las etiquetas de ffprobe si existen; ``None`` si no hay datos."""
     if shutil.which("ffprobe") is None:
         return None
     try:
@@ -61,7 +61,7 @@ def _read_rotation_ffprobe(path: Path) -> Optional[int]:
 
 
 def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float:
-    """Best-effort duration inference from the last frame timestamp."""
+    """Calcular la duración aproximada a partir del *timestamp* del último fotograma."""
     if frame_count <= 1:
         return 0.0
 
@@ -84,18 +84,19 @@ def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float
 
 
 def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) -> VideoInfo:
-    """
-    Read robust video metadata using OpenCV and (optionally) ffprobe.
+    """Obtener metadatos robustos usando OpenCV y, si es posible, ffprobe.
 
-    Rules:
-    - If OpenCV-reported FPS is invalid (<=1 or non-finite), try to estimate using (frame_count / duration).
-    - If estimation is impossible, leave fps=None and mark fps_source="reader".
-    - Rotation is read via ffprobe if available, else defaults to 0 (common convention for pipelines).
+    Reglas clave:
+    - Si los FPS reportados por OpenCV son inválidos (<=1 o no finitos), se intenta
+      estimarlos mediante ``frame_count / duration``.
+    - Si la estimación es imposible, ``fps`` permanece en ``None`` y ``fps_source``
+      se marca como ``"reader"``.
+    - La rotación se lee mediante ffprobe cuando está disponible; en caso contrario
+      se asume 0 siguiendo la convención del pipeline.
 
-    When ``cap`` is provided, reuse that ``VideoCapture`` without taking ownership.
-    The caller remains responsible for managing its lifecycle; this function only
-    resets the frame position to the beginning before returning.
-    """
+    Cuando se facilita un ``cap`` se reutiliza ese ``VideoCapture`` sin asumir su
+    gestión. La función únicamente restablece la posición al inicio antes de
+    devolver el resultado."""
     p = Path(path)
     if not p.exists():
         raise IOError(f"Video path does not exist: {p}")
@@ -109,13 +110,13 @@ def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) 
         raise IOError(f"Could not open the video: {p}")
 
     try:
-        # Dimensions
+        # Dimensiones
         width_val = int(cap_local.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         height_val = int(cap_local.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         width = width_val if width_val > 0 else None
         height = height_val if height_val > 0 else None
 
-        # FPS + frame count
+        # FPS y número de fotogramas
         fps_raw = float(cap_local.get(cv2.CAP_PROP_FPS) or 0.0)
         frame_count_raw = int(cap_local.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         frame_count = frame_count_raw if frame_count_raw > 0 else None
@@ -131,7 +132,7 @@ def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) 
             fps_source = "metadata"
             duration = (frame_count_raw / fps_raw) if frame_count_raw > 0 else None
         else:
-            # Try estimating duration from last frame timestamp, then FPS = frames/duration
+            # Se intenta estimar la duración con el último *timestamp*: luego FPS = frames/duration
             duration_est = _estimate_duration_seconds(cap_local, frame_count_raw)
             if duration_est > 0.0 and frame_count_raw > 0:
                 fps = frame_count_raw / duration_est
@@ -148,15 +149,15 @@ def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) 
                     "Invalid metadata FPS and unreliable duration. Falling back to reader."
                 )
 
-        # Rotation (best-effort)
+        # Rotación (mejor esfuerzo)
         rotation = _read_rotation_ffprobe(p)
         if rotation is None:
             rotation = 0
 
-        # Codec (best-effort from FOURCC)
+        # Códec (mejor esfuerzo a partir del FOURCC)
         fourcc_int = int(cap_local.get(cv2.CAP_PROP_FOURCC) or 0)
         if fourcc_int:
-            # Convert int FOURCC to 4-char code
+            # Convertir el entero FOURCC en un código de 4 caracteres
             codec_chars = [
                 chr((fourcc_int & 0xFF)),
                 chr((fourcc_int >> 8) & 0xFF),

@@ -1,4 +1,4 @@
-"""Time-based frame sampling iterator."""
+"""Iteradores para muestrear vídeo a intervalos de tiempo regulares."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def _time_mode_iterator(
     *,
     target_fps: float,
 ) -> Iterator[FrameInfo]:
+    """Seguir el vídeo por tiempo objetivo y producir fotogramas a FPS constante."""
     cap = context.cap
     interval_ms = 1000.0 / float(target_fps)
     next_target_ms = context.start_time * 1000.0 if context.start_time else 0.0

@@ -1,4 +1,4 @@
-"""Repetition counting via valley detection with refractory-window consolidation."""
+"""Conteo de repeticiones mediante detección de valles y ventana refractaria."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CountingDebugInfo:
-    """Debug payload returned by the repetition counter."""
+    """Datos auxiliares devueltos por el contador para depuración."""
     valley_indices: List[int]
     prominences: List[float]
 
@@ -28,7 +28,7 @@ def _count_reps_by_valleys(
     prominence: float,
     distance: int,
 ) -> Tuple[int, CountingDebugInfo]:
-    """Detect valleys in the angle sequence by finding peaks on the inverted signal."""
+    """Detecta valles en la serie angular invirtiendo la señal y buscando picos."""
     if not angle_sequence:
         return 0, CountingDebugInfo([], [])
 
@@ -53,7 +53,7 @@ def _apply_refractory_filter(
     prominences: List[float],
     refractory_frames: int,
 ) -> Tuple[List[int], List[float]]:
-    """Cluster valleys closer than ``refractory_frames`` and keep the most prominent in each cluster."""
+    """Agrupa valles separados por menos de ``refractory_frames`` y conserva el más prominente."""
     if refractory_frames <= 0 or len(indices) <= 1:
         return indices, prominences
 
@@ -86,21 +86,19 @@ def count_repetitions_with_config(
     *,
     overrides: dict[str, float] | None = None,
 ) -> Tuple[int, CountingDebugInfo]:
-    """
-    Count repetitions using configuration-driven parameters.
+    """Cuenta repeticiones usando los parámetros definidos en la configuración.
 
     Args:
-        df_metrics: DataFrame with biomechanical metrics; must contain ``counting_cfg.primary_angle``.
-        counting_cfg: instance of ``src.config.models.CountingConfig``.
-        fps: effective frames-per-second of the metric sequence.
+        df_metrics: ``DataFrame`` con las métricas biomecánicas que incluyen el ángulo primario.
+        counting_cfg: instancia de ``src.config.models.CountingConfig``.
+        fps: frecuencia efectiva en fotogramas por segundo de la secuencia analizada.
 
     Returns:
-        (repetition_count, CountingDebugInfo)
+        Pareja con el número de repeticiones y los datos de depuración asociados.
 
     Keyword Args:
-        overrides: optional dictionary with keys ``min_prominence``, ``min_distance_sec`` and
-            ``refractory_sec`` to temporarily adjust the thresholds without mutating the
-            provided configuration object.
+        overrides: diccionario opcional con ``min_prominence``, ``min_distance_sec`` y ``refractory_sec``
+            para ajustar temporalmente los umbrales sin mutar la configuración original.
     """
     angle_column = counting_cfg.primary_angle
 
@@ -111,7 +109,7 @@ def count_repetitions_with_config(
         )
         return 0, CountingDebugInfo([], [])
 
-    # Forward/back-fill to mitigate short NaN spans, then drop any remaining NaNs
+    # Rellenar hacia delante/atrás para mitigar huecos cortos de NaN antes de filtrar
     angles = df_metrics[angle_column].ffill().bfill().dropna().tolist()
     if not angles:
         return 0, CountingDebugInfo([], [])

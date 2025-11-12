@@ -1,26 +1,26 @@
-"""Centralised numeric thresholds for the exercise classifier.
+"""Umbrales numéricos centralizados para el clasificador de ejercicios.
 
-The values defined here are intentionally easy to tweak when calibrating the
-detector with new footage.  Every module should import thresholds from this
-file rather than hard-coding literals, which keeps experiments reproducible and
-auditable.
+Los valores definidos aquí se ajustan con facilidad al calibrar el detector
+con nuevas grabaciones. El resto de módulos debe importar estos parámetros en
+lugar de duplicar literales, lo que mantiene los experimentos reproducibles y
+auditables.
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Sampling and validity
+# Muestreo y validez
 # ---------------------------------------------------------------------------
 
-DEFAULT_SAMPLING_RATE = 30.0  # frames per second expected from MediaPipe
-MIN_VALID_FRAMES = 20         # tunable: shortest clip that we attempt to score
+DEFAULT_SAMPLING_RATE = 30.0  # fotogramas por segundo esperados de MediaPipe
+MIN_VALID_FRAMES = 20         # parámetro ajustable: clip mínimo que intentamos puntuar
 
-# Savitzky–Golay smoothing (seconds rather than frames for easier tuning)
-SMOOTHING_WINDOW_SECONDS = 0.35  # tunable window that adapts to the FPS
+# Suavizado Savitzky–Golay (segundos en lugar de frames para facilitar el ajuste)
+SMOOTHING_WINDOW_SECONDS = 0.35  # ventana ajustable que se adapta al FPS
 SMOOTHING_POLY_ORDER = 2
 
 # ---------------------------------------------------------------------------
-# Segmentation thresholds
+# Umbrales de segmentación
 # ---------------------------------------------------------------------------
 
 KNEE_DOWN_THRESHOLD_DEG = 115.0
@@ -29,7 +29,7 @@ BAR_DROP_MIN_NORM = 0.06
 EVENT_MIN_GAP_SECONDS = 0.30
 
 # ---------------------------------------------------------------------------
-# Bench press heuristics
+# Heurísticas para press de banca
 # ---------------------------------------------------------------------------
 
 BENCH_TORSO_HORIZONTAL_DEG = 60.0
@@ -49,7 +49,7 @@ BENCH_ROM_PENALTY_WEIGHT = 0.4
 BENCH_BAR_HORIZONTAL_PENALTY_WEIGHT = 0.7
 
 # ---------------------------------------------------------------------------
-# Squat heuristics
+# Heurísticas para sentadilla
 # ---------------------------------------------------------------------------
 
 SQUAT_KNEE_BOTTOM_MAX_DEG = 110.0
@@ -72,7 +72,7 @@ SQUAT_ARM_PENALTY_FACTOR = 0.65
 SQUAT_HINGE_PENALTY_WEIGHT = 0.5
 
 # ---------------------------------------------------------------------------
-# Deadlift heuristics
+# Heurísticas para peso muerto
 # ---------------------------------------------------------------------------
 
 DEADLIFT_TORSO_TILT_MIN_DEG = 35.0

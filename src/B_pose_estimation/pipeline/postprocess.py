@@ -1,4 +1,4 @@
-"""Filtering and interpolation of pose landmarks."""
+"""Filtrado e interpolación de landmarks de pose tras la inferencia."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def filter_and_interpolate_landmarks(
     vis_hysteresis_high: float = 0.55,
     vis_hang: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray | None]:
-    """Filter landmarks below ``min_confidence`` and interpolate gaps."""
+    """Filtra landmarks con baja confianza e interpola huecos para suavizar."""
 
     logger.info("Filtering and interpolating %d landmark frames.", len(df_raw))
     n_frames = len(df_raw)
@@ -48,6 +48,8 @@ def filter_and_interpolate_landmarks(
     finite_xy = np.isfinite(xs) & np.isfinite(ys)
 
     def _apply_visibility_hysteresis(column: np.ndarray) -> np.ndarray:
+        """Aplica histéresis para decidir si un landmark es visible en cada frame."""
+
         n = column.shape[0]
         visible = np.zeros(n, dtype=bool)
         state = False
@@ -90,6 +92,8 @@ def filter_and_interpolate_landmarks(
     zs[~visibility_mask] = np.nan
 
     def _interp_columns(arr: np.ndarray) -> np.ndarray:
+        """Rellena huecos por columnas usando interpolación lineal temporal."""
+
         out = arr.copy()
         if out.size == 0:
             return out
@@ -112,6 +116,8 @@ def filter_and_interpolate_landmarks(
     )
 
     def _build_landmark(x: float, y: float, z: float, v: float) -> Landmark:
+        """Construye un ``Landmark`` tipado a partir de valores numéricos."""
+
         return Landmark(x=float(x), y=float(y), z=float(z), visibility=float(v))
 
     vectorized_builder = np.vectorize(_build_landmark, otypes=[object])

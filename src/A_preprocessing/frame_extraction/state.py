@@ -1,4 +1,4 @@
-"""Core dataclasses and helpers for frame extraction processing."""
+"""Dataclasses y utilidades base para la extracción de fotogramas."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 
 @dataclass(slots=True)
 class FrameInfo:
-    """Metadata for an extracted frame."""
+    """Metadatos básicos asociados a cada fotograma extraído del vídeo."""
 
     index: int
     timestamp_sec: float
@@ -29,7 +29,7 @@ _ROTATE_MAP = {
 
 
 def _apply_rotation(frame: np.ndarray, rotation_deg: Optional[int]) -> np.ndarray:
-    """Rotate ``frame`` when ``rotation_deg`` matches a known mapping."""
+    """Gira ``frame`` si la rotación solicitada coincide con un giro conocido."""
 
     rot = _ROTATE_MAP.get(int(rotation_deg or 0))
     return cv2.rotate(frame, rot) if rot is not None else frame
@@ -37,13 +37,15 @@ def _apply_rotation(frame: np.ndarray, rotation_deg: Optional[int]) -> np.ndarra
 
 @dataclass(slots=True)
 class _FrameProcessor:
-    """Transform frames with rotation, resizing and optional gray conversion."""
+    """Transforma fotogramas aplicando rotación, *resize* y paso a escala de grises."""
 
     rotate_deg: int
     resize_to: Optional[tuple[int, int]]
     to_gray: bool
 
     def __call__(self, frame: np.ndarray) -> np.ndarray:
+        """Aplica las transformaciones configuradas al fotograma recibido."""
+
         if self.rotate_deg:
             frame = _apply_rotation(frame, self.rotate_deg)
         if self.resize_to:
@@ -63,13 +65,15 @@ class _FrameProcessor:
 
 @dataclass(slots=True)
 class _ProgressHandler:
-    """Track and report progress updates safely."""
+    """Gestiona las notificaciones de progreso sin repetir porcentajes."""
 
     callback: Callable[[int], None] | None
     frame_count: int
     last_progress: int = -1
 
     def report(self, index: int) -> None:
+        """Publica el avance aproximado usando el índice de fotograma actual."""
+
         if not self.callback or self.frame_count <= 0:
             return
         percent = int((index / self.frame_count) * 100)
@@ -78,13 +82,15 @@ class _ProgressHandler:
             self.last_progress = percent
 
     def finalize(self) -> None:
+        """Envía el 100 % si el proceso termina sin alcanzar el umbral final."""
+
         if self.callback and self.frame_count > 0 and self.last_progress < 100:
             self.callback(100)
 
 
 @dataclass(slots=True)
 class _IteratorContext:
-    """Mutable state shared by iterator implementations."""
+    """Estado mutable compartido por los iteradores de extracción de fotogramas."""
 
     cap: cv2.VideoCapture
     fps_base: float
@@ -98,6 +104,8 @@ class _IteratorContext:
     produced: int = 0
 
     def effective_timestamp(self, ts_ms: float, idx: int) -> float:
+        """Devuelve el instante en segundos usando ``ts_ms`` o el índice + FPS base."""
+
         if ts_ms > 0:
             return ts_ms / 1000.0
         if self.fps_base > 0:
@@ -105,16 +113,26 @@ class _IteratorContext:
         return 0.0
 
     def limit_reached(self) -> bool:
+        """Indica si se alcanzó el máximo de fotogramas a producir."""
+
         return bool(self.max_frames and self.produced >= self.max_frames)
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Aplica el procesador configurado al fotograma recibido."""
+
         return self.processor(frame)
 
     def report_progress(self, index: int) -> None:
+        """Actualiza el progreso notificando el índice de lectura actual."""
+
         self.progress.report(index)
 
     def increment_produced(self) -> None:
+        """Incrementa el contador interno de fotogramas entregados."""
+
         self.produced += 1
 
     def reset_read_idx(self, value: int) -> None:
+        """Reinicia el índice de lectura para reintentos o saltos explícitos."""
+
         self.read_idx = value

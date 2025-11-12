@@ -1,4 +1,4 @@
-"""Index-based frame sampling iterator."""
+"""Iterador de muestreo basado en índices para extraer fotogramas."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ def _index_mode_iterator(
     start_threshold: Optional[float],
     start_idx_override: Optional[int] = None,
 ) -> Iterator[FrameInfo]:
+    """Avanzar por el vídeo saltando cada ``stride`` fotogramas y produciendo frames."""
     cap = context.cap
     stride = max(1, stride)
     idx_local = 0

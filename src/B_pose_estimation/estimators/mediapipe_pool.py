@@ -1,4 +1,4 @@
-"""Thread-safe pool of Mediapipe pose graph instances."""
+"""Pool thread-safe de instancias ``Pose`` de Mediapipe reutilizables."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 
 class PoseGraphPool:
-    """Pool of Mediapipe ``Pose`` graphs keyed by configuration."""
+    """Mantiene grafos ``Pose`` cacheados según su configuración de ejecución."""
 
     _lock = threading.Lock()
     _free: Dict[Tuple[bool, int, float], List[object]] = {}
@@ -19,6 +19,8 @@ class PoseGraphPool:
 
     @classmethod
     def _ensure_imports(cls) -> None:
+        """Carga lazily los módulos de Mediapipe necesarios para crear grafos."""
+
         if not cls._imported:
             from mediapipe.python.solutions import drawing_utils as mp_drawing
             from mediapipe.python.solutions import pose as mp_pose
@@ -35,6 +37,8 @@ class PoseGraphPool:
         model_complexity: int,
         min_detection_confidence: float,
     ) -> tuple[object, Tuple[bool, int, float]]:
+        """Obtiene una instancia ``Pose`` y devuelve la clave usada en el pool."""
+
         cls._ensure_imports()
         key = (
             bool(static_image_mode),
@@ -59,11 +63,15 @@ class PoseGraphPool:
 
     @classmethod
     def release(cls, inst: object, key: Tuple[bool, int, float]) -> None:
+        """Devuelve la instancia al *pool* para poder reutilizarla."""
+
         with cls._lock:
             cls._free.setdefault(key, []).append(inst)
 
     @classmethod
     def close_all(cls) -> None:
+        """Cierra todas las instancias creadas y limpia las estructuras internas."""
+
         with cls._lock:
             for inst in cls._all:
                 try:

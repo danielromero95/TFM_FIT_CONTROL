@@ -1,4 +1,4 @@
-"""Angle computations for pose landmarks."""
+"""Cálculo de ángulos articulares a partir de *landmarks* de pose."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import numpy as np
 from ..constants import JOINT_INDEX_MAP
 
 def _points_finite(landmarks: Sequence[Mapping[str, float]], indices: Iterable[int]) -> bool:
+    """Comprobar si los puntos referenciados contienen coordenadas finitas."""
     try:
         return all(
             np.isfinite(landmarks[i]["x"]) and np.isfinite(landmarks[i]["y"])
@@ -20,7 +21,7 @@ def _points_finite(landmarks: Sequence[Mapping[str, float]], indices: Iterable[i
 
 
 def calculate_angle(p1: Mapping[str, float], p2: Mapping[str, float], p3: Mapping[str, float]) -> float:
-    """Compute the angle in degrees formed by three points."""
+    """Calcular el ángulo en grados formado por tres puntos ordenados."""
 
     v1 = (p1["x"] - p2["x"], p1["y"] - p2["y"])
     v2 = (p3["x"] - p2["x"], p3["y"] - p2["y"])
@@ -33,7 +34,7 @@ def calculate_angle(p1: Mapping[str, float], p2: Mapping[str, float], p3: Mappin
 
 
 def extract_joint_angles(landmarks: Sequence[Mapping[str, float]]) -> Dict[str, float]:
-    """Return a dictionary with key joint angles."""
+    """Devolver un diccionario con los ángulos relevantes de las articulaciones."""
 
     angles: Dict[str, float] = {}
     for name, indices in JOINT_INDEX_MAP.items():

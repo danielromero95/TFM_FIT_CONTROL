@@ -1,4 +1,4 @@
-"""Landmark normalisation helpers."""
+"""Utilidades para normalizar *landmarks* alrededor de las caderas."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ..types import Landmark
 
 
 def normalize_landmarks(landmarks: Sequence[Landmark]) -> List[Landmark]:
-    """Return landmarks centred around the midpoint of the hips."""
+    """Centrar los *landmarks* alrededor del punto medio de las caderas."""
 
     if len(landmarks) <= max(HIP_CENTER):
         return [Landmark.from_mapping(lm) for lm in landmarks]

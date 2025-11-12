@@ -1,4 +1,4 @@
-"""Distance-based metrics."""
+"""Métricas basadas en distancias entre puntos clave."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from ..constants import DISTANCE_PAIRS
 
 
 def calculate_distances(landmarks: Sequence[Mapping[str, float]]) -> Dict[str, float]:
-    """Return distance measurements derived from landmark pairs."""
+    """Obtener las distancias horizontales definidas por los pares de *landmarks*."""
 
     metrics: Dict[str, float] = {}
     for name, (a_idx, b_idx) in DISTANCE_PAIRS.items():

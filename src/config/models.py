@@ -1,6 +1,7 @@
-"""
-Dataclass models for pipeline configuration.
-"""
+"""Modelos de configuración (``dataclasses``) utilizados por la *pipeline*.
+
+Centralizar las definiciones permite documentar claramente qué parámetros se
+exponen, cómo se agrupan y por qué se inicializan con determinados valores."""
 from __future__ import annotations
 from dataclasses import dataclass, field, is_dataclass
 from pathlib import Path
@@ -36,7 +37,7 @@ from .settings import (
 
 @dataclass
 class PoseConfig:
-    """Pose estimation and preprocessing toggles."""
+    """Opciones relacionadas con la estimación de pose y el preprocesado."""
     rotate: Optional[int] = None
     use_crop: bool = DEFAULT_USE_CROP
     target_width: int = DEFAULT_TARGET_WIDTH
@@ -45,7 +46,7 @@ class PoseConfig:
 
 @dataclass
 class VideoConfig:
-    """Video decoding and sampling configuration."""
+    """Parámetros de decodificación y muestreo de video."""
     target_fps: Optional[float] = 10.0
     min_frames: int = 15
     min_fps: float = 5.0
@@ -55,7 +56,7 @@ class VideoConfig:
 
 @dataclass
 class CountingConfig:
-    """Parameters used for repetition counting."""
+    """Parámetros empleados para el conteo de repeticiones."""
     exercise: str = "squat"
     primary_angle: str = "left_knee"
     min_prominence: float = float(PEAK_PROMINENCE)
@@ -66,14 +67,14 @@ class CountingConfig:
 
 @dataclass
 class FaultConfig:
-    """Thresholds for fault detection / squat depth evaluation."""
+    """Umbrales usados para detectar fallos y evaluar la profundidad de sentadillas."""
     low_thresh: float = SQUAT_LOW_THRESH
     high_thresh: float = SQUAT_HIGH_THRESH
 
 
 @dataclass
 class DebugConfig:
-    """Debug and diagnostics toggles."""
+    """Conmutadores y límites pensados para depuración y diagnósticos."""
     generate_debug_video: bool = DEFAULT_GENERATE_VIDEO
     debug_mode: bool = DEFAULT_DEBUG_MODE
     preview_fps: float = DEFAULT_PREVIEW_FPS
@@ -87,7 +88,7 @@ class DebugConfig:
 
 @dataclass
 class OutputConfig:
-    """Filesystem layout used to persist artefacts."""
+    """Distribución de carpetas utilizada para guardar artefactos."""
     base_dir: Path = DEFAULT_OUTPUT_DIR
     counts_dir: Path = DEFAULT_COUNTS_DIR
     poses_dir: Path = DEFAULT_POSES_DIR
@@ -95,7 +96,7 @@ class OutputConfig:
 
 @dataclass
 class Config:
-    """High level configuration object consumed by the pipeline."""
+    """Objeto de configuración de alto nivel consumido por la pipeline."""
     pose: PoseConfig = field(default_factory=PoseConfig)
     video: VideoConfig = field(default_factory=VideoConfig)
     counting: CountingConfig = field(default_factory=CountingConfig)
@@ -104,7 +105,7 @@ class Config:
     output: OutputConfig = field(default_factory=OutputConfig)
 
     def copy(self) -> "Config":
-        """Return a deep copy of the configuration object."""
+        """Generar una copia profunda de la configuración."""
         return copy.deepcopy(self)
 
     # --- Serialisation helpers -------------------------------------------------
@@ -112,16 +113,16 @@ class Config:
         return _dataclass_to_dict(self, convert_paths=convert_paths)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return the configuration as a Python dictionary."""
+        """Representar la configuración como un diccionario de Python."""
         return self._to_dict(convert_paths=False)
 
     def to_serializable_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dictionary representation."""
+        """Obtener un diccionario apto para serializar a JSON."""
         return self._to_dict(convert_paths=True)
 
     # --- Fingerprint -----------------------------------------------------------
     def fingerprint(self) -> str:
-        """Return a SHA1 hash of the parameters relevant to counting/faults/pose."""
+        """Calcular un hash SHA1 con los parámetros clave de conteo/fallos/pose."""
         payload = {
             "pose": _dataclass_to_dict(self.pose, convert_paths=True),
             "counting": _dataclass_to_dict(self.counting, convert_paths=True),
@@ -134,7 +135,7 @@ class Config:
 # --- Internal utilities -------------------------------------------------------
 
 def _dataclass_to_dict(obj: Any, *, convert_paths: bool = False) -> Any:
-    """Recursively convert dataclasses (and nested objects) to dictionaries."""
+    """Convertir recursivamente ``dataclasses`` (y objetos anidados) en diccionarios."""
     if is_dataclass(obj):
         return {key: _dataclass_to_dict(value, convert_paths=convert_paths) for key, value in obj.__dict__.items()}
     if isinstance(obj, dict):
@@ -147,7 +148,7 @@ def _dataclass_to_dict(obj: Any, *, convert_paths: bool = False) -> Any:
 
 
 def _update_dataclass(instance: Any, updates: Dict[str, Any]) -> Any:
-    """Recursively update ``instance`` with ``updates`` respecting dataclass boundaries."""
+    """Actualizar ``instance`` de forma recursiva respetando los límites de las dataclasses."""
     for key, value in updates.items():
         if not hasattr(instance, key):
             continue

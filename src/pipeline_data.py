@@ -1,4 +1,9 @@
-"""Data structures shared across the analysis pipeline."""
+"""Estructuras de datos compartidas en toda la *pipeline* de análisis.
+
+El módulo centraliza los objetos que permiten intercambiar información entre las
+distintas etapas (decodificación de video, estimación de pose, detección y
+visualización). Al documentar cada clase se busca dejar claro qué pieza del
+proceso la consume y qué atributos expone para otros componentes."""
 
 from __future__ import annotations
 
@@ -16,7 +21,11 @@ from src.core.types import ExerciseType, ViewType
 
 @dataclass
 class OutputPaths:
-    """Resolved output directories for a run."""
+    """Rutas finales donde se almacenarán los artefactos de una ejecución.
+
+    Las *pipelines* y las interfaces gráficas utilizan esta estructura para
+    conocer el directorio base y las subcarpetas destinadas a los conteos y a
+    las poses sin necesidad de recalcular las rutas absolutas en cada paso."""
 
     base_dir: Path
     counts_dir: Path
@@ -26,7 +35,12 @@ class OutputPaths:
 
 @dataclass
 class RunStats:
-    """Execution statistics shared with the UIs."""
+    """Estadísticas de ejecución que se comparten con las interfaces de usuario.
+
+    Los atributos resumen tanto la configuración efectiva como los valores
+    calculados durante el análisis (FPS, ángulos detectados, advertencias,
+    tiempos por etapa, etc.), lo que permite mostrar diagnósticos o depurar
+    problemas sin volver a procesar el video."""
 
     config_sha1: str
     fps_original: float
@@ -55,7 +69,11 @@ class RunStats:
 
 @dataclass
 class Report:
-    """Pipeline outcome."""
+    """Resultado final de la *pipeline*.
+
+    Contiene el conteo de repeticiones, las métricas calculadas y una copia de
+    la configuración utilizada para que la capa de presentación pueda
+    persistirlos o renderizarlos sin depender de otros módulos."""
 
     repetitions: int
     metrics: Optional["pd.DataFrame"]
@@ -66,7 +84,11 @@ class Report:
     effective_config_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
-        """Preserve the dictionary-based API used by the existing front-ends."""
+        """Convertir el reporte a un diccionario compatible con interfaces previas.
+
+        La aplicación original consumía estructuras dinámicas; este método
+        traduce las *dataclasses* a dicho formato para mantener compatibilidad
+        sin duplicar lógica."""
         stats_dict = asdict(self.stats)
         for key in ("exercise_selected", "exercise_detected", "view_detected"):
             val = stats_dict.get(key)

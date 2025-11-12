@@ -1,4 +1,4 @@
-"""Common typing helpers and lightweight data containers."""
+"""Tipos ligeros que describen resultados y estructuras de pose."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ LandmarkLike = Mapping[str, float]
 
 @dataclass(frozen=True)
 class Landmark(Mapping[str, float]):
-    """Mapping-compatible pose landmark representation."""
+    """Representación compatible con ``Mapping`` de un landmark de pose."""
 
     x: float
     y: float
@@ -38,16 +38,22 @@ class Landmark(Mapping[str, float]):
         return 4
 
     def get(self, key: str, default: Optional[float] = None) -> Optional[float]:
+        """Obtiene un atributo del landmark devolviendo ``default`` si no existe."""
+
         try:
             return self[key]
         except KeyError:
             return default
 
     def to_dict(self) -> dict[str, float]:
+        """Exporta el landmark a un diccionario simple de floats."""
+
         return {"x": float(self.x), "y": float(self.y), "z": float(self.z), "visibility": float(self.visibility)}
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, float]) -> "Landmark":
+        """Crea un ``Landmark`` tomando valores de cualquier ``Mapping`` compatible."""
+
         return cls(
             x=float(data.get("x", np.nan)),
             y=float(data.get("y", np.nan)),
@@ -62,13 +68,15 @@ PoseSequence = Sequence[PoseFrame]
 
 @dataclass
 class PoseResult:
-    """Container returned by pose estimators."""
+    """Contenedor con los datos producidos por los estimadores de pose."""
 
     landmarks: PoseFrame
     annotated_image: Optional[np.ndarray]
     crop_box: Optional[Sequence[int]]
 
     def as_tuple(self) -> Tuple[PoseFrame, Optional[np.ndarray], Optional[Sequence[int]]]:
+        """Devuelve los atributos en forma de tupla para desempaquetado rápido."""
+
         return self.landmarks, self.annotated_image, self.crop_box
 
 
@@ -76,7 +84,7 @@ T = TypeVar("T")
 
 
 def ensure_sequence(sequence: Iterable[T]) -> List[T]:
-    """Materialise ``sequence`` preserving order."""
+    """Materializa ``sequence`` en una lista preservando el orden original."""
 
     return list(sequence)
 

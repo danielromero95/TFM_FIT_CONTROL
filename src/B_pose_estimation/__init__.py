@@ -1,4 +1,4 @@
-"""Top-level package exports for pose estimation utilities."""
+"""Exportaciones principales del paquete de utilidades de estimación de pose."""
 
 from .constants import (
     DISTANCE_PAIRS,

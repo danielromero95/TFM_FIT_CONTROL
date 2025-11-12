@@ -1,4 +1,4 @@
-"""Exercise scoring, veto logic and confidence computation."""
+"""Heurísticas de puntuación para clasificar el ejercicio realizado."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ LABELS = ("squat", "deadlift", "bench_press")
 
 
 def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, ClassificationScores, Mapping[str, float]]:
-    """Compute exercise label, confidence and intermediate scores."""
+    """Calcula la etiqueta de ejercicio, la confianza y los puntajes intermedios."""
 
     raw_scores: Dict[str, float] = {label: 0.0 for label in LABELS}
     penalties: Dict[str, float] = {label: 0.0 for label in LABELS}
@@ -103,6 +103,7 @@ def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, Classification
 
 
 def _bench_score(agg: AggregateMetrics) -> float:
+    """Evalúa cuánto se parece la repetición a un press de banca."""
     torso_margin = _margin_above(agg.torso_tilt_bottom, BENCH_TORSO_HORIZONTAL_DEG)
     if torso_margin <= 0:
         return 0.0
@@ -129,6 +130,7 @@ def _bench_score(agg: AggregateMetrics) -> float:
 
 
 def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
+    """Devuelve el puntaje bruto y la penalización asociados a la sentadilla."""
     knee_depth = _margin_below(agg.knee_min, SQUAT_KNEE_BOTTOM_MAX_DEG)
     hip_depth = _margin_below(agg.hip_min, SQUAT_HIP_BOTTOM_MAX_DEG)
     depth = max(knee_depth, hip_depth)
@@ -171,6 +173,7 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
 
 
 def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
+    """Calcula el puntaje y la penalización para la hipótesis de peso muerto."""
     hinge_posture = _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG)
     wrist_drop = _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
     elbow_extension = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
@@ -218,6 +221,8 @@ def _apply_deadlift_veto(
     bench_score: float,
     deadlift_score: float,
 ) -> bool:
+    """Aplica un veto si las pistas no sostienen la predicción de peso muerto."""
+
     if bench_score > deadlift_score:
         return False
 
@@ -234,6 +239,7 @@ def _apply_deadlift_veto(
 
 
 def _pick_label(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[str, float, Mapping[str, float]]:
+    """Selecciona la etiqueta final con una softmax y desempates heurísticos."""
     scores = np.array([max(0.0, adjusted[label]) for label in LABELS], dtype=float)
     if not np.isfinite(scores).any():
         return "unknown", 0.0, {label: 0.0 for label in LABELS}
@@ -268,6 +274,7 @@ def _pick_label(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[s
 
 
 def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> str:
+    """Resuelve empates reutilizando rasgos posturales específicos."""
     squat_score = max(0.0, adjusted.get("squat", 0.0))
     deadlift_score = max(0.0, adjusted.get("deadlift", 0.0))
     bench_score = max(0.0, adjusted.get("bench_press", 0.0))
@@ -295,18 +302,21 @@ def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> str:
 
 
 def _margin_above(value: float, threshold: float) -> float:
+    """Cuantifica cuántas unidades normalizadas superan un umbral dado."""
     if not np.isfinite(value) or not np.isfinite(threshold):
         return 0.0
     return max(0.0, (value - threshold) / max(abs(threshold), 1e-6))
 
 
 def _margin_below(value: float, threshold: float) -> float:
+    """Cuantifica la distancia normalizada por debajo del umbral indicado."""
     if not np.isfinite(value) or not np.isfinite(threshold):
         return 0.0
     return max(0.0, (threshold - value) / max(abs(threshold), 1e-6))
 
 
 def _bench_gate(agg: AggregateMetrics) -> bool:
+    """Verifica si se cumplen los criterios mínimos para considerar press de banca."""
     return (
         np.isfinite(agg.torso_tilt_bottom)
         and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG

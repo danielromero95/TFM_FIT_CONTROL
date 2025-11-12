@@ -1,6 +1,7 @@
-"""
-Default tunable parameters and settings for the analysis pipeline and GUI.
-"""
+"""Parámetros ajustables por defecto para la pipeline de análisis y la GUI.
+
+Agruparlos aquí facilita entender qué valores gobiernan el comportamiento de
+los distintos componentes y cómo se espera que se modifiquen."""
 
 from __future__ import annotations
 
@@ -10,7 +11,11 @@ from pathlib import Path
 
 
 def configure_environment() -> None:
-    """Configure logging verbosity and Windows DLL lookup paths."""
+    """Preparar el entorno de ejecución antes de iniciar la aplicación.
+
+    Ajusta la verbosidad de los *logs* de TensorFlow/MediaPipe y añade las rutas
+    de DLL en Windows para evitar errores de carga. Se invoca al arrancar la
+    interfaz gráfica y también puede usarse en scripts de consola."""
 
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
     os.environ["GLOG_minloglevel"] = "2"

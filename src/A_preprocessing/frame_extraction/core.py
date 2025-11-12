@@ -1,4 +1,4 @@
-"""Public APIs for extracting and preprocessing video frames."""
+"""Extracción configurable de fotogramas con normalización y muestreo."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def extract_frames_stream(
     cap: Optional[cv2.VideoCapture] = None,
     prefetched_info: Optional["VideoInfo"] = None,
 ) -> Iterator[FrameInfo]:
-    """Stream video frames according to the requested sampling strategy."""
+    """Emitir fotogramas siguiendo la estrategia de muestreo solicitada."""
 
     sampling, normalized_target_fps, normalized_every_n = _validate_sampling_args(
         sampling, target_fps, every_n, start_time, end_time
@@ -118,7 +118,7 @@ def extract_processed_frames_stream(
     every_n: Optional[int] = None,
     target_fps: Optional[float] = None,
 ) -> Iterator[np.ndarray]:
-    """Stream frames applying rotation/resizing with optional sampling controls."""
+    """Generar fotogramas rotados/redimensionados con controles de muestreo."""
 
     sampling_kwargs: dict[str, object]
     if target_fps and target_fps > 0:

@@ -1,4 +1,4 @@
-"""Camera view classification independent from the exercise label."""
+"""Clasificación de la vista de cámara independientemente del ejercicio."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def classify_view(
     shoulder_width: np.ndarray | None,
     ankle_width: np.ndarray | None,
 ) -> ViewResult:
-    """Return a stable front/side view label and associated scores."""
+    """Devuelve una etiqueta estable (frontal/lateral) junto con puntajes y votos."""
 
     yaw = _to_array(shoulder_yaw)
     z = _to_array(shoulder_z_delta)
@@ -183,6 +183,7 @@ def classify_view(
 
 
 def _decide_label(scores: Mapping[str, float], votes: Mapping[str, int]) -> str:
+    """Escoge la etiqueta ganadora considerando puntajes y votos acumulados."""
     front_score = scores["front"]
     side_score = scores["side"]
     best_label = "front" if front_score >= side_score else "side"
@@ -200,6 +201,7 @@ def _decide_label(scores: Mapping[str, float], votes: Mapping[str, int]) -> str:
 
 
 def _score_below(value: float, threshold: float) -> float:
+    """Asigna puntuación cuando ``value`` se sitúa por debajo del umbral."""
     if not np.isfinite(value) or not np.isfinite(threshold):
         return 0.0
     margin = threshold - value
@@ -209,6 +211,7 @@ def _score_below(value: float, threshold: float) -> float:
 
 
 def _score_above(value: float, threshold: float) -> float:
+    """Asigna puntuación cuando ``value`` supera el umbral indicado."""
     if not np.isfinite(value) or not np.isfinite(threshold):
         return 0.0
     margin = value - threshold
@@ -218,6 +221,7 @@ def _score_above(value: float, threshold: float) -> float:
 
 
 def _margin_check(value: float, threshold: float, *, below: bool) -> bool:
+    """Verifica si la diferencia supera el margen mínimo para votar."""
     if not np.isfinite(value) or not np.isfinite(threshold):
         return False
     if below:
@@ -228,6 +232,7 @@ def _margin_check(value: float, threshold: float, *, below: bool) -> bool:
 
 
 def _to_array(series: np.ndarray | None) -> np.ndarray:
+    """Convierte series opcionales en un ``ndarray`` de ``float``."""
     if series is None:
         return np.array([], dtype=float)
     return np.asarray(series, dtype=float)

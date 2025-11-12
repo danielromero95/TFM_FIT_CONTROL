@@ -1,4 +1,4 @@
-"""Public entry point that wires together preprocessing and classifiers."""
+"""Orquestación de la clasificación de ejercicio y vista a partir de rasgos."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
-    """Classify exercise and camera view for a clip of pose features."""
+    """Clasifica el ejercicio y la vista de cámara a partir de rasgos preprocesados."""
 
     if features.valid_frames < MIN_VALID_FRAMES:
         return "unknown", "unknown", 0.0
@@ -138,6 +138,8 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
 
 def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
+    """Normaliza las series de rasgos a un mismo número de fotogramas."""
+
     data = {key: np.asarray(value, dtype=float) for key, value in features.data.items() if isinstance(value, (list, tuple, np.ndarray))}
     frame_count = int(features.total_frames or max((len(arr) for arr in data.values()), default=0))
     if frame_count <= 0:
@@ -159,6 +161,8 @@ def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
 
 
 def _resolve_torso_scale(torso_length: np.ndarray, torso_world: np.ndarray) -> float:
+    """Selecciona una escala de torso combinando señales en píxeles y mundo real."""
+
     candidates = np.concatenate([torso_length[np.isfinite(torso_length)], torso_world[np.isfinite(torso_world)]])
     if candidates.size == 0:
         return float("nan")
@@ -169,6 +173,8 @@ def _resolve_torso_scale(torso_length: np.ndarray, torso_world: np.ndarray) -> f
 def _select_visible_side(
     series: Dict[str, np.ndarray], *, visibility: Mapping[str, Tuple[int, float]] | None = None
 ) -> str:
+    """Escoge el lado (izquierdo/derecho) con mayor cobertura de frames visibles."""
+
     if visibility is None:
         visibility = _compute_side_visibility(series)
 
@@ -178,6 +184,8 @@ def _select_visible_side(
 
 
 def _compute_side_visibility(series: Dict[str, np.ndarray]) -> Dict[str, Tuple[int, float]]:
+    """Calcula cuántos puntos visibles aporta cada lado y su ratio normalizado."""
+
     frame_count = int(series.get("_length", 0) or 0)
     per_side: Dict[str, Tuple[int, float]] = {}
     total_possible = frame_count * len(_SIDE_VISIBILITY_KEYS)
@@ -203,6 +211,8 @@ def _both_sides_visible(
     *,
     min_ratio: float = _BOTH_SIDES_VISIBLE_MIN_RATIO,
 ) -> bool:
+    """Determina si ambos lados superan el ratio mínimo de visibilidad."""
+
     left_ratio = visibility.get("left", (0, 0.0))[1]
     right_ratio = visibility.get("right", (0, 0.0))[1]
     if left_ratio <= 0.0 or right_ratio <= 0.0:
@@ -211,10 +221,14 @@ def _both_sides_visible(
 
 
 def _is_invalid(series: np.ndarray) -> bool:
+    """Indica si la serie tiene menos de tres valores finitos."""
+
     return series.size == 0 or np.isfinite(series).sum() < 3
 
 
 def _nanmean_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    """Fusiona dos series tomando la media ignorando valores faltantes."""
+
     if left.size == 0 and right.size == 0:
         return np.array([], dtype=float)
     if left.size == 0:
@@ -236,6 +250,8 @@ def _nanmean_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
 
 
 def _log_summary(side: str, view_label: str, metrics: AggregateMetrics, scores: ClassificationScores) -> None:
+    """Escribe en el log los valores clave obtenidos durante la clasificación."""
+
     logger.info(
         "side=%s view=%s knee_min=%.1f hip_min=%.1f elbow_bottom=%.1f torso_tilt_bottom=%.1f "
         "wrist_shoulder_diff=%.3f wrist_hip_diff=%.3f knee_rom=%.1f hip_rom=%.1f elbow_rom=%.1f "
