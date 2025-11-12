@@ -35,6 +35,7 @@ from .constants import (
     YAW_SIDE_MIN_DEG,
     Z_DELTA_FRONT_MAX,
 )
+from .stats import safe_nanmean, safe_nanmedian, safe_nanpercentile, safe_nanstd
 from .types import ViewResult
 
 
@@ -52,15 +53,15 @@ def classify_view(
     ankle = _to_array(ankle_width)
 
     stats = {
-        "yaw_med": _nanmedian(yaw),
-        "yaw_p75": _nanpercentile(yaw, 75.0),
-        "z_med": _nanmedian(z),
-        "width_mean": _nanmean(width),
-        "width_std": _nanstd(width),
-        "width_p10": _nanpercentile(width, 10.0),
-        "ankle_mean": _nanmean(ankle),
-        "ankle_std": _nanstd(ankle),
-        "ankle_p10": _nanpercentile(ankle, 10.0),
+        "yaw_med": safe_nanmedian(yaw),
+        "yaw_p75": safe_nanpercentile(yaw, 75.0),
+        "z_med": safe_nanmedian(z),
+        "width_mean": safe_nanmean(width),
+        "width_std": safe_nanstd(width),
+        "width_p10": safe_nanpercentile(width, 10.0),
+        "ankle_mean": safe_nanmean(ankle),
+        "ankle_std": safe_nanstd(ankle),
+        "ankle_p10": safe_nanpercentile(ankle, 10.0),
     }
 
     scores = {"front": 0.0, "side": 0.0}
@@ -230,22 +231,4 @@ def _to_array(series: np.ndarray | None) -> np.ndarray:
     if series is None:
         return np.array([], dtype=float)
     return np.asarray(series, dtype=float)
-
-
-def _nanmedian(arr: np.ndarray) -> float:
-    return float(np.nanmedian(arr)) if arr.size else float("nan")
-
-
-def _nanmean(arr: np.ndarray) -> float:
-    return float(np.nanmean(arr)) if arr.size else float("nan")
-
-
-def _nanstd(arr: np.ndarray) -> float:
-    return float(np.nanstd(arr)) if arr.size else float("nan")
-
-
-def _nanpercentile(arr: np.ndarray, q: float) -> float:
-    if arr.size == 0 or not np.isfinite(arr).any():
-        return float("nan")
-    return float(np.nanpercentile(arr, q))
 
