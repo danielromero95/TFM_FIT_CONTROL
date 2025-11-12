@@ -11,6 +11,8 @@ from typing import Callable, Iterable, Optional, Sequence
 import cv2
 import numpy as np
 
+from src.config.constants import DEFAULT_VIDEO_CODEC_PREFERENCE
+
 from .landmark_drawing import _adaptive_style_for_region, draw_pose_on_frame
 from .landmark_geometry import _estimate_subject_bbox, _normalize_points_for_frame
 from .landmark_overlay_styles import OverlayStyle, RenderStats
@@ -39,7 +41,7 @@ def render_landmarks_video_streaming(
     style: OverlayStyle | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
-    codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
+    codec_preference: Sequence[str] = DEFAULT_VIDEO_CODEC_PREFERENCE,
 ) -> RenderStats:
     """Lee frames de disco, superpone marcadores y escribe un nuevo archivo de vídeo.
     Procesamos en streaming para monitorizar sesiones largas sin agotar memoria y
@@ -172,7 +174,7 @@ def render_landmarks_video(
     style: OverlayStyle | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
-    codec_preference: Sequence[str] = ("avc1", "mp4v", "H264"),
+    codec_preference: Sequence[str] = DEFAULT_VIDEO_CODEC_PREFERENCE,
     output_rotate: int = 0,
     tighten_to_subject: bool = False,
     subject_margin: float = 0.12,

@@ -15,3 +15,6 @@ DEFAULT_POSES_DIR = DEFAULT_OUTPUT_DIR / "poses"
 # --- CONSTANTES DEL PIPELINE ---
 MIN_DETECTION_CONFIDENCE = 0.7
 MIN_TRACKING_CONFIDENCE = 0.7
+
+# Preferencia por defecto de códecs al generar vídeos de depuración.
+DEFAULT_VIDEO_CODEC_PREFERENCE: tuple[str, ...] = ("mp4v",)

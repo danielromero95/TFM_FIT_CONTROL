@@ -21,7 +21,11 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
+from src.config.constants import (
+    DEFAULT_VIDEO_CODEC_PREFERENCE,
+    MIN_DETECTION_CONFIDENCE,
+    MIN_TRACKING_CONFIDENCE,
+)
 from src.config.settings import (
     DEFAULT_LANDMARK_MIN_VISIBILITY,
     DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS,
@@ -39,10 +43,6 @@ from src.exercise_detection.exercise_detector import (
 from src.core.types import ExerciseType, ViewType
 
 logger = logging.getLogger(__name__)
-
-# Prioriza mp4v para evitar dependencias de libopenh264 en Windows.
-_DEBUG_VIDEO_CODECS = ("mp4v", "avc1", "XVID", "H264")
-
 
 @dataclass
 class StreamingPoseResult:
@@ -384,7 +384,7 @@ def _open_debug_writer(output_path: Path, width: int, height: int, fps: float) -
     size = (int(width), int(height))
     fps_value = max(float(fps), 1.0)
     last_error = None
-    for code in _DEBUG_VIDEO_CODECS:
+    for code in DEFAULT_VIDEO_CODEC_PREFERENCE:
         try:
             writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*code), fps_value, size)
             if writer.isOpened():

@@ -10,6 +10,8 @@ from typing import Sequence, Tuple
 
 import cv2
 
+from src.config.constants import DEFAULT_VIDEO_CODEC_PREFERENCE
+
 logger = logging.getLogger(__name__)
 
 # Exponemos las utilidades de vídeo utilizadas por los renderizadores de anotaciones.
@@ -44,7 +46,7 @@ def transcode_video(
     dst_path: str,
     *,
     fps: float,
-    codec_preference: Sequence[str] = ("avc1", "H264"),
+    codec_preference: Sequence[str] = DEFAULT_VIDEO_CODEC_PREFERENCE,
 ) -> tuple[bool, str]:
     """Re-encode ``src_path`` utilizando las preferencias de códec deseadas.
     Convertimos el archivo a un códec conocido para poder compartirlo con clientes o
