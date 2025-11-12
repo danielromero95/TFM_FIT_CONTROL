@@ -71,7 +71,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         )
 
         if chosen_primary:
-            st.caption(f"Primary usado en el conteo: **{chosen_primary}**")
+            st.caption(f"Primary angle used for rep counting: **{chosen_primary}**")
 
         debug_video = st.checkbox(
             "Generate debug video",
