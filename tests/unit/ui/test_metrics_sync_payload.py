@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.ui.metrics_sync.viewer import _build_payload
+from src.ui.metrics_sync.component import _build_payload
 
 
 def test_build_payload_stride_and_nan_mapping():

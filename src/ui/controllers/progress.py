@@ -1,8 +1,11 @@
-from __future__ import annotations
+"""Conversión de valores de progreso a mensajes comprensibles para la UI."""
+
 from queue import SimpleQueue
 
 
 def phase_for(p: int, *, debug_enabled: bool) -> str:
+    """Traduce un valor de 0-100 a la fase textual mostrada al usuario."""
+
     value = int(max(0, min(100, p)))
     if value < 10:
         return "Preparing…"
@@ -26,12 +29,14 @@ def phase_for(p: int, *, debug_enabled: bool) -> str:
 
 
 def make_progress_callback(queue: SimpleQueue, run_id: str, debug_enabled: bool):
+    """Crea una función que publica progreso normalizado en la cola compartida."""
+
     def _cb(p: int) -> None:
         try:
             value = max(0, min(100, int(p)))
             queue.put((run_id, value, phase_for(value, debug_enabled=debug_enabled)))
         except Exception:
-            # defensivo: no romper el hilo de análisis por errores de UI/cola
+            # Defensivo: nunca debemos romper el hilo de análisis por errores de UI
             pass
 
     return _cb

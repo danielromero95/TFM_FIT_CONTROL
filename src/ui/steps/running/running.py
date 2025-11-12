@@ -1,3 +1,5 @@
+"""Pantalla que muestra el progreso en tiempo real del pipeline de análisis."""
+
 from __future__ import annotations
 
 import time
@@ -10,19 +12,21 @@ from concurrent.futures import CancelledError
 import cv2
 import streamlit as st
 
-from src.ui.state import Step, get_state, go_to
-from src.ui_controller.analysis_controller import (
+from src.ui.controllers import (
     RunHandle,
     cancel_run,
     get_progress_queue,
+    phase_for,
     poll_progress,
     start_run,
 )
-from src.ui_controller.progress import phase_for
+from src.ui.state import Step, get_state, go_to
 from ..utils import ensure_video_path, prepare_pipeline_inputs, step_container
 
 
 def _running_step() -> None:
+    """Gestiona la ejecución en curso y refleja su progreso en la UI."""
+
     with step_container("running"):
         st.markdown("### 4. Running the analysis")
         progress_queue = get_progress_queue()

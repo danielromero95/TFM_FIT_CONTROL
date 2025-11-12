@@ -1,26 +1,23 @@
+"""Funciones auxiliares para preparar las entradas del pipeline de análisis."""
+
 from __future__ import annotations
 
-from contextlib import contextmanager
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
-import streamlit as st
-
 from src import config
-from src.ui.state import AppState, CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, get_state
-
-
-@contextmanager
-def step_container(name: str):
-    st.markdown(f"<div class='step step--{name}'>", unsafe_allow_html=True)
-    try:
-        yield
-    finally:
-        st.markdown("</div>", unsafe_allow_html=True)
+from src.ui.state import (
+    AppState,
+    CONFIG_DEFAULTS,
+    DEFAULT_EXERCISE_LABEL,
+    get_state,
+)
 
 
 def ensure_video_path() -> None:
+    """Persistente el archivo subido en disco temporal y limpia restos previos."""
+
     state = get_state()
     upload_data = state.upload_data
     if not upload_data:
@@ -52,6 +49,8 @@ def ensure_video_path() -> None:
 def prepare_pipeline_inputs(
     state: AppState,
 ) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
+    """Prepara video, configuración y detecciones previas para ``run_pipeline``."""
+
     from src.ui.steps.detect import EXERCISE_TO_CONFIG
 
     video_path = state.video_path
@@ -63,7 +62,7 @@ def prepare_pipeline_inputs(
 
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
-    # Always run with auto and let the pipeline choose the best side/angle
+    # Siempre ejecutamos en modo auto para que el pipeline elija el ángulo ideal.
     cfg.counting.primary_angle = "auto"
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
     cfg.pose.use_crop = True
