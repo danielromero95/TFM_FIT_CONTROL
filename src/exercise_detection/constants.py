@@ -10,24 +10,44 @@ from __future__ import annotations
 from typing import Tuple
 
 MIN_VALID_FRAMES = 20
-SQUAT_KNEE_ROM_THRESHOLD_DEG = 40.0
-SQUAT_HIP_ROM_THRESHOLD_DEG = 30.0
-SQUAT_PELVIS_DISPLACEMENT_THRESHOLD = 0.20  # normalizado por longitud del torso
-SQUAT_KNEE_MIN_ANGLE_DEG = 130.0
-SQUAT_HIP_MIN_ANGLE_DEG = 150.0
-SQUAT_SIDE_SYMMETRY_TOLERANCE_DEG = 18.0
 
-BENCH_ELBOW_ROM_THRESHOLD_DEG = 55.0
-BENCH_WRIST_HORIZONTAL_THRESHOLD = 0.08
-BENCH_TORSO_TILT_THRESHOLD_DEG = 40.0  # grados de desviación respecto a la vertical
-BENCH_TORSO_MIN_DEG = 55.0
-BENCH_PELVIS_DROP_NORM_MAX = 0.12
-BENCH_LOWER_ROM_MAX_DEG = 25.0
+# --- Segmentación temporal -------------------------------------------------
+KNEE_DOWN_THRESHOLD_DEG = 115.0
+KNEE_UP_THRESHOLD_DEG = 150.0
+BAR_DROP_MIN_NORM = 0.06
+EVENT_MIN_GAP_SECONDS = 0.30
 
-DEADLIFT_HIP_ROM_THRESHOLD_DEG = 40.0
-DEADLIFT_WRIST_VERTICAL_THRESHOLD = 0.12
-DEADLIFT_TORSO_UPRIGHT_TARGET_DEG = 35.0
+# --- Heurísticas para press banca -----------------------------------------
+BENCH_TORSO_HORIZONTAL_DEG = 60.0
+BENCH_ELBOW_ROM_MIN_DEG = 35.0
+BENCH_KNEE_ROM_MAX_DEG = 30.0
+BENCH_HIP_ROM_MAX_DEG = 30.0
+BENCH_BAR_RANGE_MIN_NORM = 0.15
+BENCH_BAR_HORIZONTAL_STD_MAX = 0.05
+BENCH_HIP_RANGE_MAX_NORM = 0.08
 
+# --- Heurísticas para sentadilla ------------------------------------------
+SQUAT_KNEE_BOTTOM_MAX_DEG = 110.0
+SQUAT_HIP_BOTTOM_MAX_DEG = 140.0
+SQUAT_TORSO_TILT_MAX_DEG = 45.0
+SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM = 0.18
+SQUAT_ELBOW_BOTTOM_MIN_DEG = 60.0
+SQUAT_ELBOW_BOTTOM_MAX_DEG = 130.0
+SQUAT_KNEE_FORWARD_MIN_NORM = 0.05
+SQUAT_MIN_ROM_DEG = 35.0
+SQUAT_TIBIA_MAX_DEG = 32.0
+
+# --- Heurísticas para peso muerto -----------------------------------------
+DEADLIFT_KNEE_BOTTOM_MIN_DEG = 120.0
+DEADLIFT_TORSO_TILT_MIN_DEG = 35.0
+DEADLIFT_WRIST_HIP_DIFF_MIN_NORM = 0.20
+DEADLIFT_ELBOW_MIN_DEG = 160.0
+DEADLIFT_KNEE_FORWARD_MAX_NORM = 0.05
+DEADLIFT_BAR_ANKLE_MAX_NORM = 0.08
+DEADLIFT_HIP_ROM_MIN_DEG = 30.0
+DEADLIFT_BAR_RANGE_MIN_NORM = 0.10
+
+# --- Clasificación de vista ------------------------------------------------
 VIEW_FRONT_WIDTH_THRESHOLD = 0.55      # anchura de hombros / torso normalizada
 VIEW_WIDTH_STD_THRESHOLD = 0.12
 YAW_FRONT_MAX_DEG = 20.0
@@ -59,6 +79,7 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "shoulder_angle_right",
     "pelvis_y",
     "torso_length",
+    "torso_length_world",
     "wrist_left_x",
     "wrist_left_y",
     "wrist_right_x",
@@ -68,4 +89,24 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "shoulder_z_delta_abs",
     "torso_tilt_deg",
     "ankle_width_norm",
+    "shoulder_left_x",
+    "shoulder_left_y",
+    "shoulder_right_x",
+    "shoulder_right_y",
+    "hip_left_x",
+    "hip_left_y",
+    "hip_right_x",
+    "hip_right_y",
+    "knee_left_x",
+    "knee_left_y",
+    "knee_right_x",
+    "knee_right_y",
+    "ankle_left_x",
+    "ankle_left_y",
+    "ankle_right_x",
+    "ankle_right_y",
+    "elbow_left_x",
+    "elbow_left_y",
+    "elbow_right_x",
+    "elbow_right_y",
 )
