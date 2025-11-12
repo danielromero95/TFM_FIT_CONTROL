@@ -118,7 +118,7 @@ class IncrementalExerciseFeatureExtractor:
             return
         try:
             from mediapipe.python.solutions import pose as mp_pose_module
-        except ImportError as exc:  # pragma: no cover - defensive guard
+        except ImportError as exc:  # pragma: no cover - guardia defensiva
             raise RuntimeError("MediaPipe is not available for exercise detection") from exc
 
         pose_kwargs = dict(

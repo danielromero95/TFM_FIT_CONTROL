@@ -1,4 +1,4 @@
-"""Filtering and interpolation of pose landmarks."""
+"""Filtrado e interpolación de marcadores de pose."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def filter_and_interpolate_landmarks(
     vis_hysteresis_high: float = 0.55,
     vis_hang: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray | None]:
-    """Filter landmarks below ``min_confidence`` and interpolate gaps."""
+    """Filtra marcadores por debajo de ``min_confidence`` e interpola los huecos resultantes."""
 
     logger.info("Filtering and interpolating %d landmark frames.", len(df_raw))
     n_frames = len(df_raw)

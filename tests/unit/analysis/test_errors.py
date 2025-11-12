@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-# Provide lightweight stubs for heavy optional dependencies so the analysis
-# package can import even when optional wheels are missing in the environment.
+# Proporciona stubs ligeros para dependencias opcionales pesadas, de modo que
+# el paquete de análisis pueda importarse aunque falten esas ruedas en el entorno.
 if "cv2" not in sys.modules:
     class _FakeVideoCapture:
         _next_open: bool = False
@@ -19,19 +19,19 @@ if "cv2" not in sys.modules:
         def isOpened(self) -> bool:
             return self._opened
 
-        def release(self) -> None:  # pragma: no cover - not exercised
+        def release(self) -> None:  # pragma: no cover - no se ejecuta en estas pruebas
             self._opened = False
 
-        def set(self, *_args: Any, **_kwargs: Any) -> bool:  # pragma: no cover - stubbed
+        def set(self, *_args: Any, **_kwargs: Any) -> bool:  # pragma: no cover - stub simulado
             return False
 
-        def grab(self) -> bool:  # pragma: no cover - stubbed
+        def grab(self) -> bool:  # pragma: no cover - stub simulado
             return False
 
-        def read(self) -> tuple[bool, Any]:  # pragma: no cover - stubbed
+        def read(self) -> tuple[bool, Any]:  # pragma: no cover - stub simulado
             return False, None
 
-        def get(self, *_args: Any, **_kwargs: Any) -> float:  # pragma: no cover - stubbed
+        def get(self, *_args: Any, **_kwargs: Any) -> float:  # pragma: no cover - stub simulado
             return 0.0
 
     class _FakeCv2(ModuleType):
@@ -53,15 +53,15 @@ if "cv2" not in sys.modules:
             self.VideoCapture = _FakeVideoCapture
 
         @staticmethod
-        def rotate(frame: Any, _rot: Any) -> Any:  # pragma: no cover - stubbed
+        def rotate(frame: Any, _rot: Any) -> Any:  # pragma: no cover - stub simulado
             return frame
 
         @staticmethod
-        def resize(frame: Any, _size: Any, *, interpolation: Any = None) -> Any:  # pragma: no cover - stubbed
+        def resize(frame: Any, _size: Any, *, interpolation: Any = None) -> Any:  # pragma: no cover - stub simulado
             return frame
 
         @staticmethod
-        def cvtColor(frame: Any, _code: Any) -> Any:  # pragma: no cover - stubbed
+        def cvtColor(frame: Any, _code: Any) -> Any:  # pragma: no cover - stub simulado
             return frame
 
     sys.modules["cv2"] = _FakeCv2()
@@ -69,7 +69,7 @@ if "cv2" not in sys.modules:
 if "numpy" not in sys.modules:
     fake_numpy = ModuleType("numpy")
 
-    def _stub_np(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not be used here
+    def _stub_np(*_args: Any, **_kwargs: Any):  # pragma: no cover - no debería usarse en estas pruebas
         raise NotImplementedError("numpy stub")
 
     fake_numpy.array = _stub_np
@@ -91,20 +91,20 @@ if "numpy" not in sys.modules:
 if "pandas" not in sys.modules:
     fake_pandas = ModuleType("pandas")
 
-    class _FakeDataFrame:  # pragma: no cover - minimal placeholder
+    class _FakeDataFrame:  # pragma: no cover - marcador mínimo
         empty = True
 
         def copy(self, *_args: Any, **_kwargs: Any) -> "_FakeDataFrame":
             return self
 
-        def to_csv(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - stubbed
+        def to_csv(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover - stub simulado
             pass
 
         @property
-        def columns(self):  # pragma: no cover - stubbed
+        def columns(self):  # pragma: no cover - stub simulado
             return []
 
-    def _stub_pd(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not run here
+    def _stub_pd(*_args: Any, **_kwargs: Any):  # pragma: no cover - no debería ejecutarse aquí
         raise NotImplementedError("pandas stub")
 
     fake_pandas.DataFrame = _FakeDataFrame
@@ -117,7 +117,7 @@ if "scipy" not in sys.modules:
     fake_scipy = ModuleType("scipy")
     fake_signal = ModuleType("scipy.signal")
 
-    def _stub_scipy(*_args: Any, **_kwargs: Any):  # pragma: no cover - should not be used here
+    def _stub_scipy(*_args: Any, **_kwargs: Any):  # pragma: no cover - no debería usarse en estas pruebas
         raise NotImplementedError("scipy stub")
 
     fake_signal.find_peaks = _stub_scipy

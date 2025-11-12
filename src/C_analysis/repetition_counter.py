@@ -1,4 +1,4 @@
-"""Repetition counting via valley detection with refractory-window consolidation."""
+"""Conteo de repeticiones mediante detección de valles y consolidación por periodo refractario."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CountingDebugInfo:
-    """Debug payload returned by the repetition counter."""
+    """Carga de depuración que devuelve el contador de repeticiones."""
     valley_indices: List[int]
     prominences: List[float]
 
@@ -28,7 +28,7 @@ def _count_reps_by_valleys(
     prominence: float,
     distance: int,
 ) -> Tuple[int, CountingDebugInfo]:
-    """Detect valleys in the angle sequence by finding peaks on the inverted signal."""
+    """Detecta valles en la secuencia de ángulos buscando picos en la señal invertida."""
     if not angle_sequence:
         return 0, CountingDebugInfo([], [])
 
@@ -53,15 +53,15 @@ def _apply_refractory_filter(
     prominences: List[float],
     refractory_frames: int,
 ) -> Tuple[List[int], List[float]]:
-    """Cluster valleys closer than ``refractory_frames`` and keep the most prominent in each cluster."""
+    """Agrupa valles separados por menos de ``refractory_frames`` y conserva el más prominente de cada grupo."""
     if refractory_frames <= 0 or len(indices) <= 1:
         return indices, prominences
 
-    # Work with numpy arrays; inputs are expected in ascending order.
+    # Trabajamos con arreglos de NumPy; se espera que los índices lleguen en orden ascendente.
     idx = np.asarray(indices, dtype=np.int64)
     prom = np.asarray(prominences, dtype=np.float64)
 
-    # Identify cluster starts where the gap is >= refractory_frames
+    # Identifica el inicio de cada grupo cuando la separación es >= ``refractory_frames``
     diffs = np.diff(idx)
     starts = np.r_[0, np.flatnonzero(diffs >= int(refractory_frames)) + 1]
     ends = np.r_[starts[1:], idx.size]
@@ -69,9 +69,9 @@ def _apply_refractory_filter(
     kept_idx: list[int] = []
     kept_prom: list[float] = []
 
-    # Iterate per cluster (number of clusters << number of points typically)
+    # Itera por grupo (el número de grupos suele ser mucho menor que el número de puntos)
     for s, e in zip(starts, ends):
-        # Argmax returns first occurrence on ties → deterministic earliest index in cluster
+        # ``argmax`` devuelve la primera ocurrencia en empates → índice determinista más temprano del grupo
         local = s + int(np.argmax(prom[s:e]))
         kept_idx.append(int(idx[local]))
         kept_prom.append(float(prom[local]))
@@ -87,20 +87,19 @@ def count_repetitions_with_config(
     overrides: dict[str, float] | None = None,
 ) -> Tuple[int, CountingDebugInfo]:
     """
-    Count repetitions using configuration-driven parameters.
+    Cuenta repeticiones empleando los parámetros definidos en la configuración.
 
     Args:
-        df_metrics: DataFrame with biomechanical metrics; must contain ``counting_cfg.primary_angle``.
-        counting_cfg: instance of ``src.config.models.CountingConfig``.
-        fps: effective frames-per-second of the metric sequence.
+        df_metrics: DataFrame con las métricas biomecánicas; debe contener ``counting_cfg.primary_angle``.
+        counting_cfg: instancia de ``src.config.models.CountingConfig`` con los umbrales vigentes.
+        fps: fotogramas por segundo efectivos de la serie sobre la que se cuenta.
 
     Returns:
-        (repetition_count, CountingDebugInfo)
+        Tupla ``(repetition_count, CountingDebugInfo)`` con el total y la información de depuración.
 
     Keyword Args:
-        overrides: optional dictionary with keys ``min_prominence``, ``min_distance_sec`` and
-            ``refractory_sec`` to temporarily adjust the thresholds without mutating the
-            provided configuration object.
+        overrides: diccionario opcional con claves ``min_prominence``, ``min_distance_sec`` y
+            ``refractory_sec`` para ajustar temporalmente los umbrales sin mutar la configuración original.
     """
     angle_column = counting_cfg.primary_angle
 
@@ -111,7 +110,7 @@ def count_repetitions_with_config(
         )
         return 0, CountingDebugInfo([], [])
 
-    # Forward/back-fill to mitigate short NaN spans, then drop any remaining NaNs
+    # Rellena hacia adelante y hacia atrás para mitigar periodos breves de NaN y elimina los restantes
     angles = df_metrics[angle_column].ffill().bfill().dropna().tolist()
     if not angles:
         return 0, CountingDebugInfo([], [])

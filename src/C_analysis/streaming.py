@@ -349,7 +349,7 @@ def stream_pose_and_detection(
                     try:
                         frame_for_preview = ensure_overlay_frame()
                         preview_callback(frame_for_preview, int(frame_idx), float(ts_ms))
-                    except Exception:  # pragma: no cover - UI best effort
+                    except Exception:  # pragma: no cover - mejor esfuerzo desde la UI
                         preview_active = False
                         logger.exception("Preview callback failed; disabling previews for this run")
     finally:
@@ -359,7 +359,7 @@ def stream_pose_and_detection(
     if detection_extractor is not None:
         try:
             detection_result = detection_extractor.finalize()
-        except Exception:  # pragma: no cover - fallback
+        except Exception:  # pragma: no cover - ruta de respaldo
             logger.exception("Automatic exercise detection failed during finalization")
             detection_result = DetectionResult(ExerciseType.UNKNOWN, ViewType.UNKNOWN, 0.0)
 

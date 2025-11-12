@@ -29,10 +29,10 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(20)]
 
     class _DummyCap:
-        def release(self) -> None:  # pragma: no cover - best effort cleanup
+        def release(self) -> None:  # pragma: no cover - limpieza de mejor esfuerzo
             pass
 
-        def get(self, _prop) -> float:  # pragma: no cover - simple stub
+        def get(self, _prop) -> float:  # pragma: no cover - stub sencillo
             return 30.0
 
     monkeypatch.setattr("src.C_analysis.pipeline.open_video_cap", lambda _path: _DummyCap())

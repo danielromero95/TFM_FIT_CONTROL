@@ -16,7 +16,7 @@ from src.ui.state import (
 
 
 def ensure_video_path() -> None:
-    """Persistente el archivo subido en disco temporal y limpia restos previos."""
+    """Persiste el archivo subido en disco temporal y limpia restos previos."""
 
     state = get_state()
     upload_data = state.upload_data

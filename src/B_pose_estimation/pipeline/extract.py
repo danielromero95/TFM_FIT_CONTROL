@@ -1,4 +1,4 @@
-"""Pose landmark extraction pipeline stage."""
+"""Etapa de la *pipeline* encargada de extraer marcadores de pose."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def extract_landmarks_from_frames(
     min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
     min_visibility: float = 0.5,
 ) -> pd.DataFrame:
-    """Extract pose landmarks frame by frame and return a raw DataFrame."""
+    """Extrae marcadores de pose fotograma a fotograma y devuelve un DataFrame sin procesar."""
 
     logger.info("Extracting landmarks from streaming frames. Using crop: %s", use_crop)
     estimator_cls: Type[PoseEstimatorBase]

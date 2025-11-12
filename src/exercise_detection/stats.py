@@ -1,4 +1,4 @@
-"""Numerical helpers that avoid RuntimeWarnings on all-NaN inputs."""
+"""Utilidades numéricas que evitan *RuntimeWarnings* cuando todo son NaN."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Computation of biomechanical metrics from pose sequences."""
+"""Cálculo de métricas biomecánicas a partir de secuencias de marcadores corporales."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def calculate_metrics_from_sequence(
     sg_poly: int = 2,
     vel_method: str = "forward",
 ) -> pd.DataFrame:
-    """Compute biomechanical metrics for the provided landmark sequence."""
+    """Calcula métricas biomecánicas para la secuencia de marcadores proporcionada."""
 
     logger.info("Computing metrics for a sequence of %d frames.", len(sequence))
     if len(sequence) == 0:

@@ -1,4 +1,4 @@
-"""Public entry point that wires together preprocessing and classifiers."""
+"""Punto de entrada público que conecta el preprocesado con los clasificadores."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
-    """Classify exercise and camera view for a clip of pose features."""
+    """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose."""
 
     if features.valid_frames < MIN_VALID_FRAMES:
         return "unknown", "unknown", 0.0

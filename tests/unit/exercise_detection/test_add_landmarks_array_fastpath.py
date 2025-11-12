@@ -9,7 +9,7 @@ from exercise_detection.features import (
 
 
 def test_feature_parity_list_vs_array_minimal_case():
-    """Ensure list[dict] and ndarray landmark inputs produce identical features."""
+    """Comprueba que list[dict] y ndarray generen las mismas características."""
 
     lms = []
     for i in range(33):

@@ -21,7 +21,7 @@ class _RecordingWriter:
     def write(self, frame: np.ndarray) -> None:
         self.frames.append(np.asarray(frame))
 
-    def release(self) -> None:  # pragma: no cover - nothing to clean up
+    def release(self) -> None:  # pragma: no cover - nada que limpiar
         pass
 
 
@@ -167,7 +167,7 @@ def test_transcode_video_rewrites_file_when_possible(tmp_path, monkeypatch):
                 return False, None
             return True, frame
 
-        def release(self) -> None:  # pragma: no cover - nothing to clean up
+        def release(self) -> None:  # pragma: no cover - nada que limpiar
             pass
 
     transcode_factory = _WriterFactory(supported={"mp4v"})

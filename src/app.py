@@ -11,7 +11,7 @@ from pathlib import Path
 
 import streamlit as st
 
-# Ensure the project root is available on the import path when Streamlit executes the app
+# Garantiza que la raíz del proyecto esté en el ``import path`` cuando Streamlit ejecuta la app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))

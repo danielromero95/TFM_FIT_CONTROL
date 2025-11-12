@@ -1,4 +1,4 @@
-"""Feature calculations per repetition and aggregated statistics."""
+"""Cálculo de características por repetición y estadísticas agregadas."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def compute_metrics(
     torso_scale: float,
     sampling_rate: float,
 ) -> AggregateMetrics:
-    """Compute per-repetition metrics and aggregate robust statistics."""
+    """Calcula métricas por repetición y estadísticas robustas agregadas."""
 
     per_rep: List[RepMetrics] = []
     scale = torso_scale if np.isfinite(torso_scale) and torso_scale > 1e-6 else np.nan

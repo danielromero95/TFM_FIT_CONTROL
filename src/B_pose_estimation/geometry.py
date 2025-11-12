@@ -1,4 +1,4 @@
-"""Geometry helpers shared across pose estimation modules."""
+"""Utilidades geométricas compartidas entre los módulos de estimación de pose."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .types import Landmark, PoseSequence
 
 
 def landmarks_from_proto(landmarks: Iterable[object]) -> list[Landmark]:
-    """Convert Mediapipe landmarks to :class:`Landmark` objects."""
+    """Convierte los marcadores de Mediapipe en objetos :class:`Landmark`."""
 
     converted: list[Landmark] = []
     for lm in landmarks:
@@ -27,7 +27,7 @@ def landmarks_from_proto(landmarks: Iterable[object]) -> list[Landmark]:
 
 
 def landmarks_to_pixel_xy(landmarks: Sequence[Landmark], width: int, height: int) -> np.ndarray:
-    """Return an ``(N, 2)`` array with pixel coordinates."""
+    """Devuelve un arreglo ``(N, 2)`` con las coordenadas en píxeles."""
 
     arr = np.empty((len(landmarks), 2), dtype=float)
     for idx, lm in enumerate(landmarks):
@@ -39,7 +39,7 @@ def landmarks_to_pixel_xy(landmarks: Sequence[Landmark], width: int, height: int
 def bounding_box_from_landmarks(
     landmarks: Sequence[Landmark], width: int, height: int
 ) -> Optional[Tuple[float, float, float, float]]:
-    """Return ``(xmin, ymin, xmax, ymax)`` in pixel coordinates or ``None``."""
+    """Devuelve ``(xmin, ymin, xmax, ymax)`` en píxeles o ``None`` si no hay datos."""
 
     if not landmarks:
         return None
@@ -54,7 +54,7 @@ def bounding_box_from_landmarks(
 def expand_and_clip_box(
     bbox: Tuple[float, float, float, float], width: int, height: int, margin: float
 ) -> list[int]:
-    """Expand ``bbox`` by ``margin`` and clip to image boundaries."""
+    """Expande ``bbox`` con ``margin`` y recorta el resultado a los límites de la imagen."""
 
     x_min, y_min, x_max, y_max = bbox
     dx = (x_max - x_min) * float(margin)
@@ -86,7 +86,7 @@ def smooth_bounding_box(
     width: int,
     height: int,
 ) -> Tuple[float, float, float, float]:
-    """Blend ``new_bbox`` with ``previous`` keeping the result inside the frame."""
+    """Mezcla ``new_bbox`` con ``previous`` manteniendo la caja dentro del fotograma."""
 
     alpha = float(np.clip(factor, 0.0, 0.99))
     new_arr = np.array(new_bbox, dtype=float)
@@ -101,7 +101,7 @@ def smooth_bounding_box(
         prev_arr[1::2] = np.clip(prev_arr[1::2], 0.0, float(max(height, 1)))
         blended = alpha * prev_arr + (1.0 - alpha) * new_arr
 
-    # Guarantee a strictly positive box size before conversion to integers.
+    # Garantiza un tamaño estrictamente positivo antes de convertir a enteros.
     x1, y1, x2, y2 = blended.tolist()
     if x2 <= x1:
         center_x = (x1 + x2) * 0.5
@@ -120,7 +120,7 @@ def smooth_bounding_box(
 def sequence_to_coordinate_arrays(
     sequence: PoseSequence,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Convert a pose sequence into ``(x, y, z, visibility)`` arrays."""
+    """Convierte una secuencia de pose en arreglos de ``(x, y, z, visibility)``."""
 
     T = len(sequence)
     n = LANDMARK_COUNT
@@ -153,7 +153,7 @@ def angle_abc_deg(
     cx: np.ndarray,
     cy: np.ndarray,
 ) -> np.ndarray:
-    """Vectorised angle ABC in degrees for each row."""
+    """Calcula de forma vectorizada el ángulo ABC en grados para cada fila."""
 
     v1x, v1y = ax - bx, ay - by
     v2x, v2y = cx - bx, cy - by

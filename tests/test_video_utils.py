@@ -1,4 +1,4 @@
-"""Tests for video validation helpers."""
+"""Pruebas para las utilidades de validación de vídeos."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from src.A_preprocessing.video_utils import validate_video
 
 
 class _FakeCapture:
-    """Simple stub implementing the VideoCapture interface used in the tests."""
+    """Stub sencillo que implementa la interfaz de VideoCapture usada en las pruebas."""
 
     def __init__(self, *, opened: bool, fps: float, frame_count: int) -> None:
         self._opened = opened
@@ -26,7 +26,7 @@ class _FakeCapture:
             return self._frame_count
         return 0.0
 
-    def release(self) -> None:  # pragma: no cover - no state to clean up
+    def release(self) -> None:  # pragma: no cover - sin estado que limpiar
         self._opened = False
 
 
@@ -36,7 +36,7 @@ def _touch(path: str) -> None:
 
 
 def test_validate_video_ok(tmp_path, monkeypatch):
-    """validate_video should succeed when metadata is well-formed."""
+    """`validate_video` debería funcionar cuando los metadatos son correctos."""
 
     dummy_video = tmp_path / "test_ok.mp4"
     _touch(dummy_video)
@@ -55,14 +55,14 @@ def test_validate_video_ok(tmp_path, monkeypatch):
 
 
 def test_validate_video_no_exist():
-    """validate_video should raise when the path does not exist."""
+    """`validate_video` debe lanzar una excepción cuando la ruta no existe."""
 
     with pytest.raises(IOError):
         validate_video("path/that/does/not/exist/video.avi")
 
 
 def test_validate_video_corrupt(tmp_path, monkeypatch):
-    """Simulate a corrupt video by forcing FPS=0."""
+    """Simula un vídeo corrupto forzando FPS=0."""
 
     dummy_video = tmp_path / "corrupt.mp4"
     _touch(dummy_video)

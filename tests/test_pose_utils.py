@@ -1,4 +1,4 @@
-"""Tests covering the filtered landmark numpy artefacts."""
+"""Pruebas para los artefactos NumPy de marcadores filtrados."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 
 @pytest.fixture
 def filtered_array_path(tmp_path):
-    """Create a synthetic filtered landmark array for portable smoke tests."""
+    """Crea un arreglo sintético de marcadores filtrados para pruebas rápidas portables."""
 
     payload = np.array([
         {"landmarks": [(0.1, 0.2, 0.3), (0.4, 0.5, 0.6)]},
@@ -20,13 +20,13 @@ def filtered_array_path(tmp_path):
 
 
 def test_filtered_npy_exists(filtered_array_path):
-    """Ensure the filtered numpy file exists on disk."""
+    """Comprueba que el archivo NumPy filtrado exista en disco."""
 
     assert filtered_array_path.exists(), "Synthetic filtered array was not created."
 
 
 def test_load_filtered_npy(filtered_array_path):
-    """Load the numpy file and validate its structure."""
+    """Carga el archivo NumPy y valida que mantenga la estructura esperada."""
 
     arr = np.load(filtered_array_path, allow_pickle=True)
     assert isinstance(arr, np.ndarray), "np.load did not return an ndarray."

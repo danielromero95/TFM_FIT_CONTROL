@@ -72,13 +72,13 @@ def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float
         if cap.grab():
             duration_msec = cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0
             return float(duration_msec) / 1000.0 if duration_msec > 0 else 0.0
-    except Exception:  # pragma: no cover - backend dependent fallbacks
+    except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
         return 0.0
     finally:
         try:
             if original_pos is not None and original_pos >= 0:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, original_pos)
-        except Exception:  # pragma: no cover - backend dependent fallbacks
+        except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
             pass
     return 0.0
 
@@ -190,5 +190,5 @@ def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) 
         else:
             try:
                 cap_local.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            except Exception:  # pragma: no cover - backend dependent fallbacks
+            except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
                 pass

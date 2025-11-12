@@ -1,4 +1,4 @@
-"""Angle computations for pose landmarks."""
+"""Cálculo de ángulos a partir de marcadores de pose."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _points_finite(landmarks: Sequence[Mapping[str, float]], indices: Iterable[i
 
 
 def calculate_angle(p1: Mapping[str, float], p2: Mapping[str, float], p3: Mapping[str, float]) -> float:
-    """Compute the angle in degrees formed by three points."""
+    """Calcula en grados el ángulo formado por tres puntos consecutivos."""
 
     v1 = (p1["x"] - p2["x"], p1["y"] - p2["y"])
     v2 = (p3["x"] - p2["x"], p3["y"] - p2["y"])
@@ -33,7 +33,7 @@ def calculate_angle(p1: Mapping[str, float], p2: Mapping[str, float], p3: Mappin
 
 
 def extract_joint_angles(landmarks: Sequence[Mapping[str, float]]) -> Dict[str, float]:
-    """Return a dictionary with key joint angles."""
+    """Devuelve un diccionario con los ángulos principales de cada articulación."""
 
     angles: Dict[str, float] = {}
     for name, indices in JOINT_INDEX_MAP.items():
