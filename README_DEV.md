@@ -17,3 +17,8 @@ are dominating a prediction when calibrating the constants.
 Run the synthetic unit tests with `pytest -q` to confirm that refactors keep the
 expected qualitative behaviour across squat, deadlift, bench, and unknown
 scenarios.
+
+When adding new derived metrics or summary statistics, use the helpers in
+`exercise_detection.stats` (for example `safe_nanmedian` and `safe_nanstd`).
+They guard against all-NaN inputs so the pipeline remains free of NumPy
+`RuntimeWarning`s while preserving existing behaviour.

@@ -6,6 +6,7 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 
+from .stats import safe_nanmax, safe_nanmedian, safe_nanmin, safe_nanstd
 from .types import AggregateMetrics, RepMetrics, RepSlice
 
 
@@ -81,19 +82,19 @@ def _compute_single_rep(
     bottom_mask = np.zeros_like(knee, dtype=bool)
     bottom_mask[bottom_indices] = True
 
-    knee_bottom = _nanmedian(knee[bottom_mask])
-    hip_bottom = _nanmedian(hip[bottom_mask])
-    elbow_bottom = _nanmedian(elbow[bottom_mask])
-    torso_bottom = _nanmedian(torso[bottom_mask])
+    knee_bottom = safe_nanmedian(knee[bottom_mask])
+    hip_bottom = safe_nanmedian(hip[bottom_mask])
+    elbow_bottom = safe_nanmedian(elbow[bottom_mask])
+    torso_bottom = safe_nanmedian(torso[bottom_mask])
 
-    wrist_y_bottom = _nanmedian(wrist_y[bottom_mask])
-    shoulder_bottom = _nanmedian(shoulder_y[bottom_mask])
-    hip_y_bottom = _nanmedian(hip_y[bottom_mask])
-    ankle_x_bottom = _nanmedian(ankle_x[bottom_mask])
-    knee_x_bottom = _nanmedian(knee_x[bottom_mask])
-    ankle_y_bottom = _nanmedian(ankle_y[bottom_mask])
-    knee_y_bottom = _nanmedian(knee_y[bottom_mask])
-    bar_x_bottom = _nanmedian(bar_x[bottom_mask])
+    wrist_y_bottom = safe_nanmedian(wrist_y[bottom_mask])
+    shoulder_bottom = safe_nanmedian(shoulder_y[bottom_mask])
+    hip_y_bottom = safe_nanmedian(hip_y[bottom_mask])
+    ankle_x_bottom = safe_nanmedian(ankle_x[bottom_mask])
+    knee_x_bottom = safe_nanmedian(knee_x[bottom_mask])
+    ankle_y_bottom = safe_nanmedian(ankle_y[bottom_mask])
+    knee_y_bottom = safe_nanmedian(knee_y[bottom_mask])
+    bar_x_bottom = safe_nanmedian(bar_x[bottom_mask])
 
     wrist_shoulder_diff_norm = _normed_difference(wrist_y_bottom, shoulder_bottom, torso_scale)
     wrist_hip_diff_norm = _normed_difference(wrist_y_bottom, hip_y_bottom, torso_scale)
@@ -104,10 +105,10 @@ def _compute_single_rep(
     tibia_angle = np.degrees(np.arctan2(delta_x, delta_y)) if np.isfinite(delta_x) and np.isfinite(delta_y) else np.nan
     bar_ankle_diff_norm = _normed_difference(bar_x_bottom, ankle_x_bottom, torso_scale, absolute=True)
 
-    knee_rom = np.nanmax(knee) - np.nanmin(knee)
-    hip_rom = np.nanmax(hip) - np.nanmin(hip)
-    elbow_rom = np.nanmax(elbow) - np.nanmin(elbow)
-    bar_range_norm = _normed_difference(_nanmax(bar_y), _nanmin(bar_y), torso_scale, absolute=True)
+    knee_rom = safe_nanmax(knee) - safe_nanmin(knee)
+    hip_rom = safe_nanmax(hip) - safe_nanmin(hip)
+    elbow_rom = safe_nanmax(elbow) - safe_nanmin(elbow)
+    bar_range_norm = _normed_difference(safe_nanmax(bar_y), safe_nanmin(bar_y), torso_scale, absolute=True)
 
     duration_s = max(0.0, (end - start) / max(sampling_rate, 1e-6))
 
@@ -134,7 +135,7 @@ def _compute_single_rep(
 def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], torso_scale: float) -> AggregateMetrics:
     def med(name: str) -> float:
         values = [getattr(rep, name) for rep in per_rep]
-        return float(np.nanmedian(values))
+        return safe_nanmedian(values)
 
     hip_series = series.get("hip_y", np.array([]))
     bar_y_series = series.get("bar_y", np.array([]))
@@ -162,7 +163,7 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
         hip_range_norm=hip_range_norm,
         bar_vertical_range_norm=bar_vertical_range_norm,
         bar_horizontal_std_norm=bar_horizontal_std_norm,
-        duration_s=float(np.nanmedian([rep.duration_s for rep in per_rep])),
+        duration_s=safe_nanmedian([rep.duration_s for rep in per_rep]),
         rep_count=len(per_rep),
     )
 
@@ -182,12 +183,6 @@ def _has_enough_finite(series: np.ndarray) -> bool:
     return np.isfinite(series).sum() >= max(BOTTOM_MIN_FRAMES, 3)
 
 
-def _nanmedian(values: np.ndarray) -> float:
-    if values.size == 0:
-        return float("nan")
-    return float(np.nanmedian(values))
-
-
 def _normed_difference(a: float, b: float, scale: float, *, absolute: bool = False) -> float:
     if not np.isfinite(scale) or scale <= 1e-6:
         return float("nan")
@@ -200,30 +195,20 @@ def _normed_difference(a: float, b: float, scale: float, *, absolute: bool = Fal
 
 
 def _series_range_norm(series: np.ndarray, torso_scale: float) -> float:
-    if series.size == 0 or not np.isfinite(series).any():
+    array = np.asarray(series, dtype=float)
+    if array.size == 0 or not np.isfinite(array).any():
         return float("nan")
     if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
         return float("nan")
-    rng = np.nanmax(series) - np.nanmin(series)
+    rng = safe_nanmax(array) - safe_nanmin(array)
     return float(rng / torso_scale)
 
 
 def _series_std_norm(series: np.ndarray, torso_scale: float) -> float:
-    if series.size == 0 or not np.isfinite(series).any():
+    array = np.asarray(series, dtype=float)
+    if array.size == 0 or not np.isfinite(array).any():
         return float("nan")
     if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
         return float("nan")
-    return float(np.nanstd(series) / torso_scale)
-
-
-def _nanmax(values: np.ndarray) -> float:
-    if values.size == 0 or not np.isfinite(values).any():
-        return float("nan")
-    return float(np.nanmax(values))
-
-
-def _nanmin(values: np.ndarray) -> float:
-    if values.size == 0 or not np.isfinite(values).any():
-        return float("nan")
-    return float(np.nanmin(values))
+    return float(safe_nanstd(array) / torso_scale)
 
