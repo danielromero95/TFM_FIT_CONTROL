@@ -1,23 +1,37 @@
-"""Constantes tunables específicas de la detección de ejercicio.
+"""Centralised numeric thresholds for the exercise classifier.
 
-Separar estos valores aclara que no forman parte de la configuración global de
-la aplicación sino de las heurísticas concretas.  Aquí agrupamos los umbrales
-kinemáticos y geométricos que alimentan al clasificador.
+The values defined here are intentionally easy to tweak when calibrating the
+detector with new footage.  Every module should import thresholds from this
+file rather than hard-coding literals, which keeps experiments reproducible and
+auditable.
 """
 
 from __future__ import annotations
 
-from typing import Tuple
+# ---------------------------------------------------------------------------
+# Sampling and validity
+# ---------------------------------------------------------------------------
 
-MIN_VALID_FRAMES = 20
+DEFAULT_SAMPLING_RATE = 30.0  # frames per second expected from MediaPipe
+MIN_VALID_FRAMES = 20         # tunable: shortest clip that we attempt to score
 
-# --- Segmentación temporal -------------------------------------------------
+# Savitzky–Golay smoothing (seconds rather than frames for easier tuning)
+SMOOTHING_WINDOW_SECONDS = 0.35  # tunable window that adapts to the FPS
+SMOOTHING_POLY_ORDER = 2
+
+# ---------------------------------------------------------------------------
+# Segmentation thresholds
+# ---------------------------------------------------------------------------
+
 KNEE_DOWN_THRESHOLD_DEG = 115.0
 KNEE_UP_THRESHOLD_DEG = 150.0
 BAR_DROP_MIN_NORM = 0.06
 EVENT_MIN_GAP_SECONDS = 0.30
 
-# --- Heurísticas para press banca -----------------------------------------
+# ---------------------------------------------------------------------------
+# Bench press heuristics
+# ---------------------------------------------------------------------------
+
 BENCH_TORSO_HORIZONTAL_DEG = 60.0
 BENCH_ELBOW_ROM_MIN_DEG = 35.0
 BENCH_KNEE_ROM_MAX_DEG = 30.0
@@ -25,8 +39,19 @@ BENCH_HIP_ROM_MAX_DEG = 30.0
 BENCH_BAR_RANGE_MIN_NORM = 0.15
 BENCH_BAR_HORIZONTAL_STD_MAX = 0.05
 BENCH_HIP_RANGE_MAX_NORM = 0.08
+BENCH_GATE_BONUS = 1.5
+BENCH_ELBOW_ROM_GATE_FACTOR = 1.4
 
-# --- Heurísticas para sentadilla ------------------------------------------
+BENCH_POSTURE_WEIGHT = 0.8
+BENCH_ELBOW_ROM_WEIGHT = 0.6
+BENCH_BAR_RANGE_WEIGHT = 0.5
+BENCH_ROM_PENALTY_WEIGHT = 0.4
+BENCH_BAR_HORIZONTAL_PENALTY_WEIGHT = 0.7
+
+# ---------------------------------------------------------------------------
+# Squat heuristics
+# ---------------------------------------------------------------------------
+
 SQUAT_KNEE_BOTTOM_MAX_DEG = 110.0
 SQUAT_HIP_BOTTOM_MAX_DEG = 140.0
 SQUAT_TORSO_TILT_MAX_DEG = 45.0
@@ -34,50 +59,102 @@ SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM = 0.18
 SQUAT_ELBOW_BOTTOM_MIN_DEG = 60.0
 SQUAT_ELBOW_BOTTOM_MAX_DEG = 130.0
 SQUAT_KNEE_FORWARD_MIN_NORM = 0.05
-SQUAT_MIN_ROM_DEG = 35.0
 SQUAT_TIBIA_MAX_DEG = 32.0
+SQUAT_MIN_ROM_DEG = 35.0
 
-# --- Heurísticas para peso muerto -----------------------------------------
-DEADLIFT_KNEE_BOTTOM_MIN_DEG = 120.0
+SQUAT_DEPTH_WEIGHT = 0.9
+SQUAT_TORSO_WEIGHT = 0.6
+SQUAT_ARM_BONUS_WEIGHT = 0.7
+SQUAT_KNEE_FORWARD_WEIGHT = 0.5
+SQUAT_TIBIA_PENALTY_WEIGHT = 0.6
+SQUAT_ROM_WEIGHT = 0.5
+SQUAT_ARM_PENALTY_FACTOR = 0.65
+SQUAT_HINGE_PENALTY_WEIGHT = 0.5
+
+# ---------------------------------------------------------------------------
+# Deadlift heuristics
+# ---------------------------------------------------------------------------
+
 DEADLIFT_TORSO_TILT_MIN_DEG = 35.0
 DEADLIFT_WRIST_HIP_DIFF_MIN_NORM = 0.20
 DEADLIFT_ELBOW_MIN_DEG = 160.0
+DEADLIFT_KNEE_BOTTOM_MIN_DEG = 120.0
 DEADLIFT_KNEE_FORWARD_MAX_NORM = 0.05
 DEADLIFT_BAR_ANKLE_MAX_NORM = 0.08
 DEADLIFT_HIP_ROM_MIN_DEG = 30.0
 DEADLIFT_BAR_RANGE_MIN_NORM = 0.10
+DEADLIFT_BAR_HORIZONTAL_STD_MAX = 0.06
+DEADLIFT_BENCH_PENALTY_WEIGHT = 1.5
 
-# --- Clasificación de vista ------------------------------------------------
-VIEW_FRONT_WIDTH_THRESHOLD = 0.55      # anchura de hombros / torso normalizada
+DEADLIFT_TORSO_WEIGHT = 0.9
+DEADLIFT_WRIST_HIP_WEIGHT = 0.8
+DEADLIFT_ELBOW_WEIGHT = 0.5
+DEADLIFT_KNEE_PENALTY_WEIGHT = 0.7
+DEADLIFT_BAR_ANKLE_WEIGHT = 0.8
+DEADLIFT_BAR_HORIZONTAL_WEIGHT = 0.4
+DEADLIFT_BAR_RANGE_WEIGHT = 0.6
+DEADLIFT_ROM_WEIGHT = 0.4
+DEADLIFT_LOW_MOVEMENT_CAP = 1.2
+DEADLIFT_SQUAT_PENALTY_WEIGHT = 0.6
+
+DEADLIFT_VETO_SCORE_CLAMP = 0.8
+DEADLIFT_VETO_MOVEMENT_MIN = 0.08
+
+# ---------------------------------------------------------------------------
+# View classification heuristics
+# ---------------------------------------------------------------------------
+
+VIEW_FRONT_WIDTH_THRESHOLD = 0.55
 VIEW_WIDTH_STD_THRESHOLD = 0.12
 YAW_FRONT_MAX_DEG = 20.0
 YAW_SIDE_MIN_DEG = 25.0
-Z_DELTA_FRONT_MAX = 0.08               # unidades normalizadas de MediaPipe; pequeño implica vista frontal
-SIDE_WIDTH_MAX = 0.50                  # si la anchura normalizada ≤ este valor, asumimos vista lateral
+Z_DELTA_FRONT_MAX = 0.08
+SIDE_WIDTH_MAX = 0.50
 ANKLE_FRONT_WIDTH_THRESHOLD = 0.50
 ANKLE_SIDE_WIDTH_MAX = 0.40
 ANKLE_WIDTH_STD_THRESHOLD = 0.12
 
+VIEW_FRONT_YAW_WEIGHT = 1.0
+VIEW_FRONT_Z_WEIGHT = 0.6
+VIEW_FRONT_WIDTH_WEIGHT = 0.8
+VIEW_FRONT_WIDTH_STD_WEIGHT = 0.5
+VIEW_FRONT_ANKLE_WIDTH_WEIGHT = 0.6
+VIEW_FRONT_ANKLE_STD_WEIGHT = 0.4
+
+VIEW_SIDE_YAW_WEIGHT = 1.0
+VIEW_SIDE_Z_WEIGHT = 0.7
+VIEW_SIDE_WIDTH_WEIGHT = 0.8
+VIEW_SIDE_WIDTH_STD_WEIGHT = 0.5
+VIEW_SIDE_ANKLE_WIDTH_WEIGHT = 0.6
+VIEW_SIDE_ANKLE_STD_WEIGHT = 0.5
+
+VIEW_SCORE_MIN = 0.8
+VIEW_SCORE_MARGIN = 0.3
 VIEW_SCORE_PER_EVIDENCE_THRESHOLD = 0.22
 VIEW_MARGIN_PER_EVIDENCE_THRESHOLD = 0.10
 VIEW_FRONT_FALLBACK_YAW_DEG = 24.0
 VIEW_SIDE_FALLBACK_YAW_DEG = 27.0
+VIEW_STRONG_CONTRADICTION_YAW_DEG = 35.0
+
+# ---------------------------------------------------------------------------
+# Confidence handling
+# ---------------------------------------------------------------------------
 
 CLASSIFICATION_MARGIN = 0.12
 MIN_CONFIDENCE_SCORE = 0.45
 
-DEFAULT_SAMPLING_RATE = 30.0
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
 
-FEATURE_NAMES: Tuple[str, ...] = (
+FEATURE_NAMES = (
     "knee_angle_left",
     "knee_angle_right",
     "hip_angle_left",
     "hip_angle_right",
     "elbow_angle_left",
     "elbow_angle_right",
-    "shoulder_angle_left",
-    "shoulder_angle_right",
-    "pelvis_y",
+    "torso_tilt_deg",
     "torso_length",
     "torso_length_world",
     "wrist_left_x",
@@ -87,15 +164,10 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "shoulder_width_norm",
     "shoulder_yaw_deg",
     "shoulder_z_delta_abs",
-    "torso_tilt_deg",
     "ankle_width_norm",
-    "shoulder_left_x",
     "shoulder_left_y",
-    "shoulder_right_x",
     "shoulder_right_y",
-    "hip_left_x",
     "hip_left_y",
-    "hip_right_x",
     "hip_right_y",
     "knee_left_x",
     "knee_left_y",
@@ -105,8 +177,5 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "ankle_left_y",
     "ankle_right_x",
     "ankle_right_y",
-    "elbow_left_x",
-    "elbow_left_y",
-    "elbow_right_x",
-    "elbow_right_y",
 )
+
