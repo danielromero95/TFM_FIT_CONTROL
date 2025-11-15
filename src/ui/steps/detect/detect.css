@@ -22,27 +22,27 @@
 .step--detect .form-label { margin: 0; }
 
 /* Fila Back | Continue */
-.step--detect .app-nav-buttons { margin-top: var(--fc-space-3); }
+.step--detect .app-nav-buttons { margin-top: var(--fc-space-2); }
 .step--detect .app-nav-buttons [data-testid="stHorizontalBlock"] {
   margin-top: 0;
-  gap: var(--fc-hstack-gap);
+  gap: var(--fc-hstack-gap) !important;
   align-items: stretch;
 }
 .step--detect .app-nav-buttons [data-testid="column"] > div { width: 100%; }
 
 /* Alertas compactas */
-.step--detect .stAlert { margin-top: var(--fc-space-2); margin-bottom: var(--fc-space-3); }
+.step--detect .stAlert { margin-top: var(--fc-space-2) !important; margin-bottom: var(--fc-space-3) !important; }
 
 /* Ajustes de layout dentro del step */
 .step--detect .form-label--inline { min-height: auto; }
 .step--detect [data-testid="stVerticalBlock"] {
-  gap: var(--fc-space-0);
-  row-gap: var(--fc-space-0);
+  gap: var(--fc-space-0) !important;
+  row-gap: var(--fc-space-0) !important;
 }
 .step--detect [data-testid="stHorizontalBlock"] {
-  margin-top: var(--fc-space-1);
+  margin-top: 0;
   align-items: center;
-  column-gap: var(--fc-hstack-gap);
+  column-gap: var(--fc-hstack-gap) !important;
 }
 .step--detect [data-testid="column"] > div { margin-top: 0; padding-top: 0; }
 

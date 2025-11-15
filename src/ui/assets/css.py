@@ -24,9 +24,16 @@ _CSS_FILES = [
 ]
 
 
-@st.cache_data(show_spinner=False)
 def _load_css(path: str) -> str:
-    """Lee el contenido de un archivo CSS y lo cachea entre reruns."""
+    """Lee el contenido de un archivo CSS.
+
+    El CSS forma parte de la experiencia de desarrollo y se modifica con
+    frecuencia mientras se ajusta el diseño.  Usar ``st.cache_data`` impide
+    que los cambios se reflejen en caliente, porque Streamlit conservaría en
+    memoria la versión antigua incluso tras un rerun del script.  Leer el
+    archivo directamente en cada render garantiza que cualquier edición se
+    aplique de inmediato.
+    """
 
     css_path = Path(path)
     return css_path.read_text(encoding="utf-8")

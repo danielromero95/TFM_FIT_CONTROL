@@ -1,5 +1,5 @@
 /* Upload step minimal tweaks */
 .step--upload h3 { margin-bottom: var(--fc-space-2); }
-.step--upload .stAlert { margin-top: var(--fc-space-2); }
+.step--upload .stAlert { margin-top: var(--fc-space-1) !important; }
 .step--upload .stButton > button { border-radius: var(--fc-radius) !important; }
-.step--upload [data-testid="stHorizontalBlock"] { gap: var(--fc-hstack-gap); }
+.step--upload [data-testid="stHorizontalBlock"] { gap: var(--fc-hstack-gap) !important; }
