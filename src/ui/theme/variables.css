@@ -38,6 +38,7 @@
   /* Header/layout */
   --fc-header-h: 48px;
   --fc-header-pr: 140px;
+  --app-toolbar-title: "";
 
   /* Radius */
   --fc-radius-sm: 8px;
