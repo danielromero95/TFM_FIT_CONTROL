@@ -629,10 +629,7 @@ def _results_panel() -> Dict[str, bool]:
                 else:
                     st.info("No numeric metrics available for charting.")
 
-                st.markdown(
-                    "<h4 class='results-metrics-heading'>Calculated metrics</h4>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown("#### Calculated metrics")
                 st.dataframe(metrics_df, width="stretch")
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
