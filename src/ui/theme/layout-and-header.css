@@ -1,5 +1,6 @@
 html, body { font-family: var(--fc-font-sans); }
-header[data-testid="stHeader"] {
+header[data-testid="stHeader"],
+div[data-testid="stHeader"] {
   background: var(--fc-bg);
   border-bottom: 1px solid var(--fc-border);
   height: var(--fc-header-h);
@@ -10,14 +11,18 @@ header[data-testid="stHeader"] {
   z-index: 1000;
 }
 
-header[data-testid="stHeader"] .app-toolbar-title {
-  display: block;
+[data-testid="stToolbar"] > .app-toolbar-title,
+[data-testid="stHeaderToolbar"] > .app-toolbar-title,
+header[data-testid="stHeader"] .app-toolbar-title,
+div[data-testid="stHeader"] .app-toolbar-title {
+  display: flex;
   color: var(--fc-fg);
   font-weight: 600;
   font-size: 20px;
   line-height: 1.2;
   margin-right: auto;
   padding-left: 1rem;
+  align-items: center;
 }
 
 /* Pack content closer to header: keep Streamlit paddings minimal */
@@ -61,10 +66,16 @@ section[data-testid="stMain"], main { padding-top: 0 !important; }
 }
 
 @media (max-width: 520px) {
-  header[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
+  [data-testid="stToolbar"] > .app-toolbar-title,
+  [data-testid="stHeaderToolbar"] > .app-toolbar-title,
+  header[data-testid="stHeader"] .app-toolbar-title,
+  div[data-testid="stHeader"] .app-toolbar-title { font-size: 16px; }
 }
 @media (max-width: 420px) {
-  header[data-testid="stHeader"] .app-toolbar-title {
+  [data-testid="stToolbar"] > .app-toolbar-title,
+  [data-testid="stHeaderToolbar"] > .app-toolbar-title,
+  header[data-testid="stHeader"] .app-toolbar-title,
+  div[data-testid="stHeader"] .app-toolbar-title {
     display: block;
     white-space: nowrap;
     overflow: hidden;
