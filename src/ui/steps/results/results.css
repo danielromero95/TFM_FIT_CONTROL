@@ -1,7 +1,17 @@
 /* Results step – extra tweaks (base panel rules live in ui-components.css) */
-.step--results h3, .step--results .stMarkdown h3 { margin-bottom: var(--fc-heading-bottom) !important; }
-.step--results h4 { margin-bottom: var(--fc-heading-bottom) !important; }
+.step--results h3,
+.step--results .stMarkdown h3 {
+  margin-top: 0 !important;
+  margin-bottom: var(--fc-heading-bottom) !important;
+}
+.step--results h4 {
+  margin-top: 0 !important;
+  margin-bottom: var(--fc-heading-bottom) !important;
+}
 /* normalized by heading spacing tokens */
 .results-panel .results-metrics-block [data-baseweb="select"] {
   margin-top: 0 !important;
+}
+.results-panel div[data-testid="stElementContainer"]:has(.results-metrics-block) {
+  margin-bottom: var(--fc-space-0) !important;
 }
