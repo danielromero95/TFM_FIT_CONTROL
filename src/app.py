@@ -93,8 +93,8 @@ def _reset_app() -> None:
 def main() -> None:
     """Punto de entrada principal para ejecutar la aplicación en Streamlit."""
 
+    inject_css()
     if threading.current_thread() is threading.main_thread():
-        inject_css()
         inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)
 
     results_action = AppAction.NONE
@@ -115,15 +115,11 @@ def main() -> None:
                 _running_step()
             elif mode == "results":
                 _results_summary()
-        else:
-            st.empty()
 
     with col_right:
         right_state = get_state()
         if right_state.step == Step.RESULTS:
             results_action = _results_action_from_payload(_results_panel())
-        else:
-            st.empty()
 
     handle_results_action(results_action)
 

@@ -22,30 +22,42 @@ header[data-testid="stHeader"] .app-toolbar-title {
 
 /* Pack content closer to header: keep Streamlit paddings minimal */
 section[data-testid="stMain"], main { padding-top: 0 !important; }
-section[data-testid="stMain"] > div:first-child,
-main > div:first-child,
-main .block-container,
-main .block-container > div:first-child,
-main [data-testid="stToolbar"],
-main [data-testid="stToolbar"] + div,
-main [data-testid="stVerticalBlock"],
-main [data-testid="stVerticalBlock"] > div:first-child,
-main [data-testid="stHorizontalBlock"],
-main [data-testid="column"],
-main [data-testid="column"] > div {
+:is(section[data-testid="stMain"], main) > div:first-child,
+:is(section[data-testid="stMain"], main) .block-container,
+:is(section[data-testid="stMain"], main) .block-container > div:first-child,
+:is(section[data-testid="stMain"], main) [data-testid="stToolbar"],
+:is(section[data-testid="stMain"], main) [data-testid="stToolbar"] + div,
+:is(section[data-testid="stMain"], main) [data-testid="stVerticalBlock"],
+:is(section[data-testid="stMain"], main) [data-testid="stVerticalBlock"] > div:first-child,
+:is(section[data-testid="stMain"], main) [data-testid="stHorizontalBlock"],
+:is(section[data-testid="stMain"], main) [data-testid="stColumn"],
+:is(section[data-testid="stMain"], main) [data-testid="stColumn"] > div {
   margin-top: 0 !important;
   padding-top: 0 !important;
 }
 
 /* Streamlit columns add row-gap between blocks; neutralise it so tokens drive rhythm */
-main [data-testid="stVerticalBlock"] {
-  gap: 0 !important;
-  row-gap: 0 !important;
+:is(section[data-testid="stMain"], main) [data-testid="stVerticalBlock"] {
+  gap: var(--fc-step-vspace) !important;
+  row-gap: var(--fc-step-vspace) !important;
 }
-main [data-testid="stColumn"] > div[data-testid="stVerticalBlock"],
-main [data-testid="column"] > div > [data-testid="stVerticalBlock"] {
-  gap: 0 !important;
-  row-gap: 0 !important;
+:is(section[data-testid="stMain"], main) [data-testid="stColumn"] > div[data-testid="stVerticalBlock"],
+:is(section[data-testid="stMain"], main) [data-testid="column"] > div > [data-testid="stVerticalBlock"] {
+  gap: var(--fc-step-vspace) !important;
+  row-gap: var(--fc-step-vspace) !important;
+}
+
+:is(section[data-testid="stMain"], main) [data-testid="stHorizontalBlock"] {
+  column-gap: var(--fc-hstack-gap) !important;
+  row-gap: var(--fc-step-vspace) !important;
+}
+
+:is(section[data-testid="stMain"], main) [data-testid="stElementContainer"] {
+  margin: 0 0 var(--fc-step-vspace) !important;
+  padding: 0 !important;
+}
+:is(section[data-testid="stMain"], main) [data-testid="stElementContainer"]:last-child {
+  margin-bottom: 0 !important;
 }
 
 @media (max-width: 520px) {

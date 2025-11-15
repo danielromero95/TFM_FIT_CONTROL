@@ -15,12 +15,12 @@
 
   /* Spacing scale (rem) */
   --fc-space-0: 0;
-  --fc-space-1: .25rem;
-  --fc-space-2: .35rem;
-  --fc-space-3: .5rem;
-  --fc-space-4: .75rem;
-  --fc-space-5: 1rem;
-  --fc-space-6: 1.25rem;
+  --fc-space-1: .18rem;
+  --fc-space-2: .28rem;
+  --fc-space-3: .42rem;
+  --fc-space-4: .6rem;
+  --fc-space-5: .9rem;
+  --fc-space-6: 1.1rem;
   --fc-space-7: 1.5rem;
   --fc-space-8: 2rem;
 
@@ -29,11 +29,11 @@
   --fc-gap: var(--fc-space-4);
 
   /* Layout tokens */
-  --fc-step-vspace: var(--fc-space-4);
-  --fc-form-row-gap: var(--fc-space-3);
-  --fc-hstack-gap: var(--fc-space-3);
-  --fc-heading-bottom: var(--fc-space-2);
-  --fc-alert-vspace: var(--fc-space-2);
+  --fc-step-vspace: var(--fc-space-2);
+  --fc-form-row-gap: var(--fc-space-1);
+  --fc-hstack-gap: var(--fc-space-1);
+  --fc-heading-bottom: var(--fc-space-1);
+  --fc-alert-vspace: var(--fc-space-1);
 
   /* Header/layout */
   --fc-header-h: 48px;

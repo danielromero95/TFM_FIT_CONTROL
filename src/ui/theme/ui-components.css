@@ -32,8 +32,8 @@
 
 /* Default vertical rhythm inside steps, overridable per-step */
 .step [data-testid="stVerticalBlock"] {
-  gap: var(--fc-step-vspace);
-  row-gap: var(--fc-step-vspace);
+  gap: var(--fc-step-vspace) !important;
+  row-gap: var(--fc-step-vspace) !important;
 }
 
 .form-label {
