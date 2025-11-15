@@ -298,7 +298,11 @@
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));
 
   if (window.frameElement && wrapper) {
-    const fit = () => { window.frameElement.style.height = (wrapper.scrollHeight + 24) + "px"; };
+    const extraPadding = HAS_VIDEO ? 24 : 0;
+    const fit = () => {
+      const height = wrapper.scrollHeight + extraPadding;
+      window.frameElement.style.height = Math.max(0, Math.ceil(height)) + "px";
+    };
     const ro = (typeof ResizeObserver !== "undefined") ? new ResizeObserver(fit) : null;
     if (ro) ro.observe(wrapper);
     window.addEventListener("load", fit, { once: true });
