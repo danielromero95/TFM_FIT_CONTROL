@@ -313,6 +313,7 @@ def run_pipeline(
 
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
+    overlay_video_stream_path: Optional[Path] = None
     overlay_disabled = False
     overlay_scale_side: Optional[int] = None
     if cfg.debug.generate_debug_video:
@@ -368,7 +369,7 @@ def run_pipeline(
                 elif fps_for_overlay <= 0:
                     fps_for_overlay = overlay_cap
 
-                overlay_video_path = generate_overlay_video(
+                overlay_result = generate_overlay_video(
                     Path(video_path),
                     output_paths.session_dir,
                     frame_sequence=filtered_sequence,
@@ -382,8 +383,15 @@ def run_pipeline(
                     progress_cb=_overlay_progress,
                     overlay_max_long_side=overlay_scale_side,
                 )
-                if overlay_video_path is not None:
-                    logger.info("Overlay video generated at %s", overlay_video_path)
+                if overlay_result is not None:
+                    overlay_video_path = overlay_result.raw_path
+                    overlay_video_stream_path = overlay_result.stream_path
+                    logger.info(
+                        "Overlay video generated at %s (web_safe=%s stream=%s)",
+                        overlay_video_path,
+                        overlay_result.web_safe_ok,
+                        overlay_video_stream_path,
+                    )
             except Exception:
                 logger.exception("Failed to render overlay video")
     elif cfg.debug.generate_debug_video:
@@ -537,6 +545,7 @@ def run_pipeline(
         metrics=df_metrics,
         debug_video_path=debug_video_path,
         overlay_video_path=overlay_video_path,
+        overlay_video_stream_path=overlay_video_stream_path,
         stats=stats,
         config_used=cfg,
         effective_config_path=effective_config_path,

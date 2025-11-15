@@ -7,6 +7,7 @@ enfocado en la orquestación y delega la lógica específica de visualización.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
@@ -15,6 +16,16 @@ import numpy as np
 
 from src.A_preprocessing.frame_extraction import extract_frames_stream
 from src.D_visualization import render_landmarks_video
+from src.D_visualization.landmark_video_io import make_web_safe_h264
+
+
+@dataclass(slots=True)
+class OverlayVideoResult:
+    """Agrupa artefactos generados al crear el overlay con landmarks."""
+
+    raw_path: Path
+    stream_path: Path
+    web_safe_ok: bool
 
 
 def iter_original_frames_for_overlay(
@@ -74,8 +85,13 @@ def generate_overlay_video(
     output_rotate: int = 0,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     overlay_max_long_side: Optional[int] = None,
-) -> Optional[Path]:
-    """Renderizar un video de depuración con las poses reconstruidas."""
+) -> Optional[OverlayVideoResult]:
+    """Renderizar un video de depuración con las poses reconstruidas.
+
+    Devuelve ``OverlayVideoResult`` con la ruta original y la copia web-safe
+    preparada para su reproducción en navegadores. Si el proceso falla se
+    retorna ``None``.
+    """
 
     if frame_sequence is None:
         return None
@@ -140,4 +156,13 @@ def generate_overlay_video(
         overlay_path.unlink(missing_ok=True)
         return None
 
-    return overlay_path
+    web_safe = make_web_safe_h264(overlay_path)
+    stream_path = overlay_path
+    if web_safe.ok and web_safe.output_path is not None:
+        stream_path = web_safe.output_path
+
+    return OverlayVideoResult(
+        raw_path=overlay_path,
+        stream_path=stream_path,
+        web_safe_ok=web_safe.ok,
+    )

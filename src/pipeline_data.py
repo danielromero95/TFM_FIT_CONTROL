@@ -63,6 +63,7 @@ class Report:
     config_used: config.Config
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
+    overlay_video_stream_path: Optional[Path] = None
     effective_config_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
@@ -79,6 +80,9 @@ class Report:
             "debug_video_path": str(self.debug_video_path) if self.debug_video_path else None,
             "overlay_video_path": str(self.overlay_video_path)
             if self.overlay_video_path
+            else None,
+            "overlay_video_stream_path": str(self.overlay_video_stream_path)
+            if self.overlay_video_stream_path
             else None,
             "stats": stats_dict,
             "config_sha1": self.stats.config_sha1,

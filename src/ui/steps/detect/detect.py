@@ -43,33 +43,54 @@ def _resolve_overlay_video(state, *, debug_requested: bool) -> tuple[str | None,
     overlay_missing = False
     overlay_source: str | None = None
 
-    if state.overlay_video_path:
-        candidate = Path(str(state.overlay_video_path))
+    def _resolve_candidate(value) -> tuple[str | None, bool]:
+        if not value:
+            return None, False
+        try:
+            candidate = Path(str(value)).expanduser()
+        except Exception:
+            return None, debug_requested
         if candidate.exists() and candidate.is_file():
-            overlay_source = str(candidate)
-        else:
+            return str(candidate), False
+        return None, debug_requested
+
+    for value in (
+        getattr(state, "overlay_video_stream_path", None),
+        getattr(state, "overlay_video_download_path", None),
+    ):
+        resolved, missing = _resolve_candidate(value)
+        if resolved:
+            overlay_source = resolved
+            break
+        if missing:
             overlay_missing = True
 
     if overlay_source is None:
         candidate_value = None
         report = getattr(state, "report", None)
         if report is not None:
-            for attr in (
-                "overlay_video_path",
-                "overlay_video",
-                "debug_video_path",
-                "debug_video",
-            ):
-                if hasattr(report, attr):
-                    value = getattr(report, attr)
-                    if value:
-                        candidate_value = value
-                        break
+            attr_groups = [
+                ("overlay_video_stream_path", "overlay_video_stream"),
+                (
+                    "overlay_video_path",
+                    "overlay_video",
+                    "debug_video_path",
+                    "debug_video",
+                ),
+            ]
+            for group in attr_groups:
+                for attr in group:
+                    if hasattr(report, attr):
+                        value = getattr(report, attr)
+                        if value:
+                            candidate_value = value
+                            break
+                if candidate_value:
+                    break
         if candidate_value:
-            candidate_path = Path(str(candidate_value))
-            if candidate_path.exists() and candidate_path.is_file():
-                overlay_source = str(candidate_path)
-            elif debug_requested:
+            resolved, missing = _resolve_candidate(candidate_value)
+            overlay_source = resolved
+            if missing:
                 overlay_missing = True
 
     base_video = str(state.video_path) if state.video_path else None

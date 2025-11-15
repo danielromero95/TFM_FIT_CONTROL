@@ -66,7 +66,8 @@ def _running_step() -> None:
             state.last_run_success = False
             state.pipeline_error = "Analysis canceled by the user."
             state.preview_enabled = False
-            state.overlay_video_path = None
+            state.overlay_video_stream_path = None
+            state.overlay_video_download_path = None
 
         debug_enabled = bool((state.configure_values or {}).get("debug_video", True))
 
@@ -77,7 +78,8 @@ def _running_step() -> None:
         if not state.video_path:
             state.pipeline_error = "The video to process was not found."
             state.preview_enabled = False
-            state.overlay_video_path = None
+            state.overlay_video_stream_path = None
+            state.overlay_video_download_path = None
             go_to(Step.RESULTS)
             try:
                 st.rerun()
@@ -91,7 +93,8 @@ def _running_step() -> None:
             except ValueError as exc:
                 state.pipeline_error = str(exc)
                 state.preview_enabled = False
-                state.overlay_video_path = None
+                state.overlay_video_stream_path = None
+                state.overlay_video_download_path = None
                 go_to(Step.RESULTS)
                 try:
                     st.rerun()
@@ -104,7 +107,8 @@ def _running_step() -> None:
             state.count_path = None
             state.metrics_path = None
             state.cfg_fingerprint = None
-            state.overlay_video_path = None
+            state.overlay_video_stream_path = None
+            state.overlay_video_download_path = None
             state.progress_value_from_cb = 0
             state.phase_text_from_cb = phase_for(0, debug_enabled=debug_enabled)
             # Asegura que el estado de preview arranca deshabilitado
@@ -202,7 +206,8 @@ def _running_step() -> None:
                     state.count_path = None
                     state.metrics_path = None
                     state.cfg_fingerprint = None
-                    state.overlay_video_path = None
+                    state.overlay_video_stream_path = None
+                    state.overlay_video_download_path = None
                     state.last_run_success = False
                     state.progress_value_from_cb = latest_progress
                     state.phase_text_from_cb = latest_phase
@@ -252,7 +257,8 @@ def _running_step() -> None:
                 state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
-                state.overlay_video_path = None
+                state.overlay_video_stream_path = None
+                state.overlay_video_download_path = None
                 state.last_run_success = False
                 state.progress_value_from_cb = latest_progress
                 state.phase_text_from_cb = latest_phase
@@ -292,7 +298,8 @@ def _running_step() -> None:
                 state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
-                state.overlay_video_path = None
+                state.overlay_video_stream_path = None
+                state.overlay_video_download_path = None
                 state.last_run_success = False
                 state.progress_value_from_cb = latest_progress
                 state.phase_text_from_cb = latest_phase
@@ -319,7 +326,8 @@ def _running_step() -> None:
                 state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
-                state.overlay_video_path = None
+                state.overlay_video_stream_path = None
+                state.overlay_video_download_path = None
                 state.last_run_success = False
                 state.progress_value_from_cb = latest_progress
                 state.phase_text_from_cb = latest_phase
@@ -347,48 +355,63 @@ def _running_step() -> None:
             state.report = report
             state.cfg_fingerprint = report.stats.config_sha1
 
-            overlay_candidate = None
-            if isinstance(report, dict):
-                for key in (
-                    "overlay_video_path",
-                    "overlay_video",
-                    "debug_video_path",
-                    "debug_video",
-                ):
-                    if key in report:
-                        overlay_candidate = report[key]
-                        if overlay_candidate:
-                            break
-            else:
-                for key in (
-                    "overlay_video_path",
-                    "overlay_video",
-                    "debug_video_path",
-                    "debug_video",
-                ):
-                    if hasattr(report, key):
-                        candidate_value = getattr(report, key)
-                        if candidate_value:
-                            overlay_candidate = candidate_value
-                            break
+            def _extract_candidate(container: object, keys: tuple[str, ...]) -> object | None:
+                if isinstance(container, dict):
+                    for key in keys:
+                        value = container.get(key)
+                        if value:
+                            return value
+                else:
+                    for key in keys:
+                        if hasattr(container, key):
+                            value = getattr(container, key)
+                            if value:
+                                return value
+                return None
 
-            overlay_path: Path | None = None
-            if overlay_candidate:
+            overlay_stream_candidate = _extract_candidate(
+                report,
+                ("overlay_video_stream_path", "overlay_video_stream"),
+            )
+            overlay_download_candidate = _extract_candidate(
+                report,
+                (
+                    "overlay_video_path",
+                    "overlay_video",
+                    "debug_video_path",
+                    "debug_video",
+                ),
+            )
+            if overlay_stream_candidate is None:
+                overlay_stream_candidate = overlay_download_candidate
+
+            def _to_existing_path(candidate: object | None) -> Path | None:
+                if not candidate:
+                    return None
                 try:
-                    overlay_path = Path(str(overlay_candidate)).expanduser()
+                    path = Path(str(candidate)).expanduser()
                 except Exception:
-                    overlay_path = None
+                    return None
+                if path.exists() and path.is_file():
+                    return path
+                return None
 
+            stream_path = _to_existing_path(overlay_stream_candidate)
+            download_path = _to_existing_path(overlay_download_candidate)
             debug_requested = bool((state.configure_values or {}).get("debug_video", True))
-            if (
-                debug_requested
-                and overlay_path is not None
-                and overlay_path.exists()
-                and overlay_path.is_file()
-            ):
-                state.overlay_video_path = str(overlay_path)
+
+            if debug_requested and stream_path is not None:
+                state.overlay_video_stream_path = str(stream_path)
             else:
-                state.overlay_video_path = None
+                state.overlay_video_stream_path = None
+
+            if debug_requested:
+                chosen_download = download_path or stream_path
+                state.overlay_video_download_path = (
+                    str(chosen_download) if chosen_download is not None else None
+                )
+            else:
+                state.overlay_video_download_path = None
 
             file_errors: list[str] = []
             video_path = state.video_path
@@ -462,7 +485,8 @@ def _running_step() -> None:
             state.count_path = None
             state.metrics_path = None
             state.cfg_fingerprint = None
-            state.overlay_video_path = None
+            state.overlay_video_stream_path = None
+            state.overlay_video_download_path = None
             state.progress_value_from_cb = latest_progress
             state.phase_text_from_cb = latest_phase
             state.last_run_success = False
