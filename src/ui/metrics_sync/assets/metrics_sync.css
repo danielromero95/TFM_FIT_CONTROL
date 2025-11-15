@@ -4,9 +4,18 @@
   max-width: var(--fc-media-max-width, 720px);
   margin: 0 auto var(--fc-video-bottom, 1.25rem) auto;
 }
+
+.vmx-wrapper--plot-only {
+  margin-bottom: 0;
+}
 .vmx-plot {
   width: 100%;
   overflow: visible;
+}
+.vmx-plot .js-plotly-plot,
+.vmx-plot .plotly-graph-div {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
 }
 .vmx-wrapper--plot-only .vmx-video-box { display: none; }
 .vmx-video-box {
