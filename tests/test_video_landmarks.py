@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import pytest
@@ -8,6 +9,7 @@ import pytest
 np = pytest.importorskip("numpy")
 
 from src.D_visualization import render_landmarks_video, transcode_video
+from src.D_visualization.landmark_video_io import WEB_SAFE_SUFFIX, make_web_safe_h264
 from src.D_visualization.landmark_geometry import _normalize_points_for_frame
 
 
@@ -189,3 +191,48 @@ def test_transcode_video_rewrites_file_when_possible(tmp_path, monkeypatch):
     assert codec == "mp4v"
     assert dst.exists()
     assert transcode_factory.created[0].frames
+
+
+def test_make_web_safe_h264_generates_copy_when_ffmpeg_succeeds(tmp_path, monkeypatch):
+    source = tmp_path / "overlay.mp4"
+    source.write_bytes(b"raw")
+
+    created_commands: list[list[str]] = []
+
+    def _fake_run(cmd, check, capture_output):
+        created_commands.append(cmd)
+        Path(cmd[-1]).write_bytes(b"websafe")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_video_io.subprocess.run",
+        _fake_run,
+    )
+
+    result = make_web_safe_h264(source)
+    expected_path = source.with_name(f"{source.stem}{WEB_SAFE_SUFFIX}{source.suffix}")
+
+    assert result.ok
+    assert result.output_path == expected_path
+    assert expected_path.exists() and expected_path.read_bytes() == b"websafe"
+    assert created_commands and created_commands[0][-1].endswith(".tmp")
+
+
+def test_make_web_safe_h264_handles_missing_ffmpeg(tmp_path, monkeypatch):
+    source = tmp_path / "overlay.mp4"
+    source.write_bytes(b"raw")
+
+    def _missing_run(*_args, **_kwargs):
+        raise FileNotFoundError("ffmpeg")
+
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_video_io.subprocess.run",
+        _missing_run,
+    )
+
+    result = make_web_safe_h264(source)
+    expected_path = source.with_name(f"{source.stem}{WEB_SAFE_SUFFIX}{source.suffix}")
+
+    assert not result.ok
+    assert result.output_path is None
+    assert not expected_path.exists()

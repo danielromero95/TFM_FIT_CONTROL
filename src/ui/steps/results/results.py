@@ -534,8 +534,11 @@ def _results_panel() -> Dict[str, bool]:
                 st.info("El vídeo con landmarks se visualizó durante el análisis.")
 
             debug_video_enabled = bool((state.configure_values or {}).get("debug_video", True))
-            overlay_video_path = getattr(report, "overlay_video_path", None)
-            debug_video_path = overlay_video_path or report.debug_video_path
+            overlay_stream_path = getattr(report, "overlay_video_stream_path", None)
+            overlay_raw_path = getattr(report, "overlay_video_path", None)
+            debug_video_path = (
+                overlay_stream_path or overlay_raw_path or report.debug_video_path
+            )
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
@@ -683,9 +686,10 @@ def _results_panel() -> Dict[str, bool]:
 
             if debug_video_enabled and debug_video_path:
                 debug_path = Path(debug_video_path)
+                has_overlay = bool(overlay_stream_path or overlay_raw_path)
                 download_label = (
                     "Download landmark overlay video"
-                    if overlay_video_path
+                    if has_overlay
                     else "Download debug video"
                 )
                 try:

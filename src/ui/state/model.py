@@ -69,4 +69,5 @@ class AppState:
     preview_fps: float = float(DEFAULT_PREVIEW_FPS)
     preview_frame_count: int = 0
     preview_last_ts_ms: float = 0.0
-    overlay_video_path: Optional[str] = None
+    overlay_video_stream_path: Optional[str] = None
+    overlay_video_download_path: Optional[str] = None
