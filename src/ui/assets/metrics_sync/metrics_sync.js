@@ -65,7 +65,7 @@
   }));
 
   const layout = {
-    margin: { l: 40, r: 10, t: 10, b: 90 },
+    margin: { l: 40, r: 10, t: 24, b: 40 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     showlegend: true,
@@ -99,8 +99,12 @@
       orientation: "h",
       x: 0.5,
       xanchor: "center",
-      y: -0.15,
-      yanchor: "top"
+      y: 1.08,
+      yanchor: "bottom",
+      bgcolor: "rgba(17, 24, 39, 0.6)",
+      borderwidth: 0,
+      itemclick: "toggleothers",
+      itemdoubleclick: "toggle"
     },
     shapes: [cursor, ...thrShapes, ...bands]
   };
