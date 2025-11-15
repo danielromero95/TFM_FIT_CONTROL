@@ -11,7 +11,14 @@ _APP_ENHANCER_TEMPLATE = """
   (() => {
     const TITLE = __APP_TITLE__;
     const ENHANCER_KEY = '__appEnhancer';
-    const doc = (window.parent && window.parent.document) ? window.parent.document : document;
+    const doc = (() => {
+      try {
+        if (window.parent && window.parent !== window && window.parent.document) {
+          return window.parent.document;
+        }
+      } catch (error) { /* Ignore cross-origin access errors */ }
+      return document;
+    })();
     if (!doc) { return; }
 
     const existingEnhancer = doc[ENHANCER_KEY];
@@ -26,7 +33,7 @@ _APP_ENHANCER_TEMPLATE = """
     let enhancementFrame = null;
 
     function ensureToolbarTitle(reattach = true) {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
+      const header = getHeader();
       if (!header) { return false; }
       let title = header.querySelector('.app-toolbar-title');
       if (!title) {
@@ -48,10 +55,10 @@ _APP_ENHANCER_TEMPLATE = """
     }
 
     function attachHeaderObserver() {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
+      const header = getHeader();
       if (!header) { headerObserver.disconnect(); return false; }
       headerObserver.disconnect();
-      headerObserver.observe(header, { childList: true });
+      headerObserver.observe(header, { childList: true, subtree: true });
       return true;
     }
 
@@ -70,6 +77,10 @@ _APP_ENHANCER_TEMPLATE = """
     }
 
     function applyEnhancements() { ensureToolbarTitle(false); }
+
+    function getHeader() {
+      return doc.querySelector('header[data-testid="stHeader"], div[data-testid="stHeader"]');
+    }
 
     function init() {
       ensureToolbarTitleWithRetry();
