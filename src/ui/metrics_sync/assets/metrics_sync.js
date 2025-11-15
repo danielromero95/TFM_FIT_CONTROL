@@ -65,7 +65,7 @@
   }));
 
   const layout = {
-    margin: { l: 40, r: 10, t: 10, b: 90 },
+    margin: { l: 40, r: 10, t: 80, b: 32, pad: 0 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     showlegend: true,
@@ -97,10 +97,11 @@
     legend: {
       font: { color: "#ffffff" },
       orientation: "h",
-      x: 0.5,
-      xanchor: "center",
-      y: -0.15,
-      yanchor: "top"
+      x: 0,
+      xanchor: "left",
+      y: 1.1,
+      yanchor: "bottom",
+      bgcolor: "rgba(0,0,0,0)"
     },
     shapes: [cursor, ...thrShapes, ...bands]
   };
@@ -298,7 +299,11 @@
   plot.on("plotly_doubleclick", () => Plotly.relayout(plot, {"xaxis.autorange": true}));
 
   if (window.frameElement && wrapper) {
-    const fit = () => { window.frameElement.style.height = (wrapper.scrollHeight + 24) + "px"; };
+    const extraPadding = HAS_VIDEO ? 24 : 0;
+    const fit = () => {
+      const height = wrapper.scrollHeight + extraPadding;
+      window.frameElement.style.height = Math.max(0, Math.ceil(height)) + "px";
+    };
     const ro = (typeof ResizeObserver !== "undefined") ? new ResizeObserver(fit) : null;
     if (ro) ro.observe(wrapper);
     window.addEventListener("load", fit, { once: true });
