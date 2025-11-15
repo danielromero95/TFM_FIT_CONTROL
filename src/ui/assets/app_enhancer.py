@@ -11,32 +11,48 @@ _APP_ENHANCER_TEMPLATE = """
   (() => {
     const TITLE = __APP_TITLE__;
     const ENHANCER_KEY = '__appEnhancer';
-    const doc = (window.parent && window.parent.document) ? window.parent.document : document;
-    if (!doc) { return; }
+    const scriptDoc = document;
+    const candidateDocs = (() => {
+      const docs = [];
+      try {
+        if (window.parent && window.parent !== window && window.parent.document) {
+          docs.push(window.parent.document);
+        }
+      } catch (error) { /* Ignore cross-origin access errors */ }
+      docs.push(scriptDoc);
+      return Array.from(new Set(docs.filter(Boolean)));
+    })();
+    if (!candidateDocs.length) { return; }
 
-    const existingEnhancer = doc[ENHANCER_KEY];
+    const stateDoc = candidateDocs[0];
+    const existingEnhancer = stateDoc[ENHANCER_KEY];
     if (existingEnhancer && typeof existingEnhancer.init === 'function') {
       existingEnhancer.init();
       return;
     }
 
-    const headerObserver = new MutationObserver(() => { ensureToolbarTitle(false); });
-    const mainObserver = new MutationObserver(() => { scheduleEnhancements(); });
-
+    const headerObservers = new Map();
+    const mainObservers = new Map();
     let enhancementFrame = null;
 
     function ensureToolbarTitle(reattach = true) {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) { return false; }
-      let title = header.querySelector('.app-toolbar-title');
-      if (!title) {
-        title = doc.createElement('div');
-        title.className = 'app-toolbar-title';
-        header.insertBefore(title, header.firstChild);
+      let applied = false;
+      for (const doc of candidateDocs) {
+        const header = getHeader(doc);
+        if (!header) { continue; }
+        const ownerDoc = header.ownerDocument || doc;
+        let title = header.querySelector('.app-toolbar-title');
+        if (!title) {
+          title = ownerDoc.createElement('div');
+          title.className = 'app-toolbar-title';
+          header.insertBefore(title, header.firstChild);
+        }
+        if (title.textContent !== TITLE) { title.textContent = TITLE; }
+        applied = true;
+        if (reattach) { attachHeaderObserver(doc, header); }
       }
-      if (title.textContent !== TITLE) { title.textContent = TITLE; }
-      if (reattach) { attachHeaderObserver(); }
-      return true;
+      if (reattach) { attachMainObservers(); }
+      return applied;
     }
 
     function ensureToolbarTitleWithRetry() {
@@ -47,20 +63,37 @@ _APP_ENHANCER_TEMPLATE = """
       setTimeout(() => clearInterval(retryInterval), 5000);
     }
 
-    function attachHeaderObserver() {
-      const header = doc.querySelector('header[data-testid="stHeader"]');
-      if (!header) { headerObserver.disconnect(); return false; }
-      headerObserver.disconnect();
-      headerObserver.observe(header, { childList: true });
+    function attachHeaderObserver(doc, header) {
+      if (!header) {
+        const observer = headerObservers.get(doc);
+        if (observer) { observer.disconnect(); }
+        return false;
+      }
+      let observer = headerObservers.get(doc);
+      if (!observer) {
+        observer = new MutationObserver(() => { ensureToolbarTitle(false); });
+        headerObservers.set(doc, observer);
+      }
+      observer.disconnect();
+      observer.observe(header, { childList: true, subtree: true });
       return true;
     }
 
-    function attachMainObserver() {
-      const main = doc.querySelector('main');
-      if (!main) { mainObserver.disconnect(); return false; }
-      mainObserver.disconnect();
-      mainObserver.observe(main, { childList: true, subtree: true });
-      return true;
+    function attachMainObservers() {
+      for (const doc of candidateDocs) {
+        const main = doc.querySelector('main');
+        let observer = mainObservers.get(doc);
+        if (!main) {
+          if (observer) { observer.disconnect(); }
+          continue;
+        }
+        if (!observer) {
+          observer = new MutationObserver(() => { scheduleEnhancements(); });
+          mainObservers.set(doc, observer);
+        }
+        observer.disconnect();
+        observer.observe(main, { childList: true, subtree: true });
+      }
     }
 
     function scheduleEnhancements() {
@@ -71,21 +104,34 @@ _APP_ENHANCER_TEMPLATE = """
 
     function applyEnhancements() { ensureToolbarTitle(false); }
 
+    function getHeader(doc) {
+      return doc.querySelector('header[data-testid=\"stHeader\"], div[data-testid=\"stHeader\"]');
+    }
+
     function init() {
       ensureToolbarTitleWithRetry();
-      attachHeaderObserver();
-      attachMainObserver();
+      ensureToolbarTitle();
       applyEnhancements();
     }
 
-    if (doc.readyState === 'loading') {
-      doc.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
+    let started = false;
+    function start() {
+      if (started) { return; }
+      started = true;
       init();
     }
 
-    doc[ENHANCER_KEY] = { init, ensure: ensureToolbarTitleWithRetry };
-    doc.__appToolbarTitleInit = doc[ENHANCER_KEY];
+    for (const doc of Array.from(new Set([stateDoc, scriptDoc]))) {
+      if (!doc) { continue; }
+      if (doc.readyState === 'loading') {
+        doc.addEventListener('DOMContentLoaded', start, { once: true });
+      } else {
+        start();
+      }
+    }
+
+    stateDoc[ENHANCER_KEY] = { init, ensure: ensureToolbarTitleWithRetry };
+    stateDoc.__appToolbarTitleInit = stateDoc[ENHANCER_KEY];
   })();
 </script>
 """
