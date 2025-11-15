@@ -27,9 +27,8 @@ _APP_ENHANCER_TEMPLATE = """
       return;
     }
 
-    const headerObserver = new MutationObserver(() => { ensureToolbarTitle(false); });
-    const mainObserver = new MutationObserver(() => { scheduleEnhancements(); });
-
+    const headerObservers = new Map();
+    const mainObservers = new Map();
     let enhancementFrame = null;
 
     function ensureToolbarTitle(reattach = true) {
@@ -41,9 +40,8 @@ _APP_ENHANCER_TEMPLATE = """
         title.className = 'app-toolbar-title';
         header.insertBefore(title, header.firstChild);
       }
-      if (title.textContent !== TITLE) { title.textContent = TITLE; }
-      if (reattach) { attachHeaderObserver(); }
-      return true;
+      if (reattach) { attachMainObservers(); }
+      return applied;
     }
 
     function ensureToolbarTitleWithRetry() {
@@ -62,12 +60,21 @@ _APP_ENHANCER_TEMPLATE = """
       return true;
     }
 
-    function attachMainObserver() {
-      const main = doc.querySelector('main');
-      if (!main) { mainObserver.disconnect(); return false; }
-      mainObserver.disconnect();
-      mainObserver.observe(main, { childList: true, subtree: true });
-      return true;
+    function attachMainObservers() {
+      for (const doc of candidateDocs) {
+        const main = doc.querySelector('main');
+        let observer = mainObservers.get(doc);
+        if (!main) {
+          if (observer) { observer.disconnect(); }
+          continue;
+        }
+        if (!observer) {
+          observer = new MutationObserver(() => { scheduleEnhancements(); });
+          mainObservers.set(doc, observer);
+        }
+        observer.disconnect();
+        observer.observe(main, { childList: true, subtree: true });
+      }
     }
 
     function scheduleEnhancements() {
@@ -84,19 +91,28 @@ _APP_ENHANCER_TEMPLATE = """
 
     function init() {
       ensureToolbarTitleWithRetry();
-      attachHeaderObserver();
-      attachMainObserver();
+      ensureToolbarTitle();
       applyEnhancements();
     }
 
-    if (doc.readyState === 'loading') {
-      doc.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
+    let started = false;
+    function start() {
+      if (started) { return; }
+      started = true;
       init();
     }
 
-    doc[ENHANCER_KEY] = { init, ensure: ensureToolbarTitleWithRetry };
-    doc.__appToolbarTitleInit = doc[ENHANCER_KEY];
+    for (const doc of Array.from(new Set([stateDoc, scriptDoc]))) {
+      if (!doc) { continue; }
+      if (doc.readyState === 'loading') {
+        doc.addEventListener('DOMContentLoaded', start, { once: true });
+      } else {
+        start();
+      }
+    }
+
+    stateDoc[ENHANCER_KEY] = { init, ensure: ensureToolbarTitleWithRetry };
+    stateDoc.__appToolbarTitleInit = stateDoc[ENHANCER_KEY];
   })();
 </script>
 """
