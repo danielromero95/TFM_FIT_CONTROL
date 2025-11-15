@@ -93,7 +93,8 @@ def main() -> None:
     """Punto de entrada principal para ejecutar la aplicación en Streamlit."""
 
     inject_css()
-    inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)
+    if threading.current_thread() is threading.main_thread():
+        inject_js(title=APP_NAME, enable=ENABLE_JS_ENHANCEMENTS)
 
     results_action = AppAction.NONE
     col_left, col_mid, col_right = st.columns(3)
