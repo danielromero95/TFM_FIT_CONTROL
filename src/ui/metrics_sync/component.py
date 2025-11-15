@@ -90,7 +90,6 @@ def render_video_with_metrics_sync(
     show_video: bool = False,
     sync_channel: str | None = None,
     bottom_gap: float | int | str | None = None,
-    plot_height_px: int | float | None = None,
 ) -> None:
     """Renderiza el panel combinado de vídeo y curvas temporales.
 
