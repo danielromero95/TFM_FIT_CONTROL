@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-import streamlit as st
+import streamlit.components.v1 as components
 
 _APP_ENHANCER_TEMPLATE = """
 <script>
@@ -21,7 +21,8 @@ _APP_ENHANCER_TEMPLATE = """
     })();
     if (!doc) { return; }
 
-    const existingEnhancer = doc[ENHANCER_KEY];
+    const stateDoc = candidateDocs[0];
+    const existingEnhancer = stateDoc[ENHANCER_KEY];
     if (existingEnhancer && typeof existingEnhancer.init === 'function') {
       existingEnhancer.init();
       return;
@@ -57,6 +58,42 @@ _APP_ENHANCER_TEMPLATE = """
       if (!header) { headerObserver.disconnect(); return false; }
       headerObserver.disconnect();
       headerObserver.observe(header, { childList: true, subtree: true });
+      return true;
+    }
+
+    function attachMainObservers() {
+      for (const doc of candidateDocs) {
+        const main = doc.querySelector('main');
+        let observer = mainObservers.get(doc);
+        if (!main) {
+          if (observer) { observer.disconnect(); }
+          continue;
+        }
+        if (!observer) {
+          observer = new MutationObserver(() => { scheduleEnhancements(); });
+          mainObservers.set(doc, observer);
+        }
+        observer.disconnect();
+        observer.observe(main, { childList: true, subtree: true });
+      }
+    }
+
+    function detachToolbarObserver(doc) {
+      const observer = toolbarObservers.get(doc);
+      if (observer) { observer.disconnect(); }
+      return false;
+    }
+
+    function attachContainerObserver(header) {
+      const container = getHeaderContainer(header);
+      if (!container) { return false; }
+      let observer = containerObservers.get(container);
+      if (!observer) {
+        observer = new MutationObserver(() => { scheduleEnhancements(); });
+        containerObservers.set(container, observer);
+      }
+      observer.disconnect();
+      observer.observe(container, { childList: true });
       return true;
     }
 
@@ -125,4 +162,4 @@ def inject_js(title: str, enable: bool = True) -> None:
         return
     title_js = json.dumps(title)  # Codificación segura en JSON
     script = _APP_ENHANCER_TEMPLATE.replace("__APP_TITLE__", title_js)
-    st.markdown(script, unsafe_allow_html=True)
+    components.html(script, height=0, width=0)

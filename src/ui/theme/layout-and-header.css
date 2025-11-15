@@ -20,6 +20,7 @@ div[data-testid="stHeader"] .app-toolbar-title {
   line-height: 1.2;
   margin-right: auto;
   padding-left: 1rem;
+  align-items: center;
 }
 
 /* Pack content closer to header: keep Streamlit paddings minimal */
