@@ -64,8 +64,17 @@
     y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.15)", line: {width: 0}
   }));
 
+  function computePlotHeight() {
+    const target = wrapper || plot;
+    if (target && target.clientWidth) {
+      const approx = Math.round(target.clientWidth * 9 / 16);
+      return Math.max(320, approx);
+    }
+    return 400;
+  }
+
   const layout = {
-    margin: { l: 40, r: 10, t: 10, b: 90 },
+    margin: { l: 40, r: 10, t: 24, b: 40 },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
     showlegend: true,
@@ -99,13 +108,30 @@
       orientation: "h",
       x: 0.5,
       xanchor: "center",
-      y: -0.15,
-      yanchor: "top"
+      y: 1.08,
+      yanchor: "bottom",
+      bgcolor: "rgba(17, 24, 39, 0.6)",
+      borderwidth: 0,
+      itemclick: "toggleothers",
+      itemdoubleclick: "toggle"
     },
-    shapes: [cursor, ...thrShapes, ...bands]
+    shapes: [cursor, ...thrShapes, ...bands],
+    height: computePlotHeight()
   };
 
   Plotly.newPlot(plot, traces, layout, CFG);
+
+  const resizeHeight = () => {
+    const nextHeight = computePlotHeight();
+    Plotly.relayout(plot, { height: nextHeight });
+  };
+
+  if (typeof ResizeObserver !== "undefined" && wrapper) {
+    const observer = new ResizeObserver(() => resizeHeight());
+    observer.observe(wrapper);
+  }
+  window.addEventListener("resize", () => resizeHeight());
+  resizeHeight();
 
   const hasTimeAxis = DATA.x_mode === "time";
   const xMin = x.length ? x[0] : 0;

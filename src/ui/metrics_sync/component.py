@@ -89,8 +89,16 @@ def render_video_with_metrics_sync(
     max_width_px: int = 720,
     show_video: bool = False,
     sync_channel: str | None = None,
+    bottom_gap: float | int | str | None = None,
+    plot_height_px: int | float | None = None,
 ) -> None:
-    """Renderiza el panel combinado de vídeo y curvas temporales."""
+    """Renderiza el panel combinado de vídeo y curvas temporales.
+
+    Cuando no se muestra el vídeo se ajusta automáticamente la altura del
+    ``iframe`` para reducir el espacio vertical desperdiciado bajo la gráfica.
+    Un valor explícito puede proporcionarse mediante ``plot_height_px`` si se
+    desea un alto concreto.
+    """
 
     if metrics_df is None or metrics_df.empty:
         st.info("No metrics available to display.")
@@ -154,11 +162,44 @@ def render_video_with_metrics_sync(
         signature = inspect.signature(html)
     except Exception:
         signature = None
-    html_kwargs: dict[str, object] = {"height": 560, "scrolling": False}
+    def _positive_int(value: object) -> int | None:
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _default_plot_height() -> int:
+        width_hint = _positive_int(max_width_px)
+        if width_hint:
+            approx = int(round(width_hint * 9 / 16))
+            return max(320, approx)
+        return 400
+
+    iframe_height = 560
+    if show_video_final:
+        custom_height = _positive_int(plot_height_px)
+        if custom_height:
+            iframe_height = custom_height
+    else:
+        custom_height = _positive_int(plot_height_px)
+        iframe_height = custom_height or _default_plot_height()
+
+    html_kwargs: dict[str, object] = {"height": iframe_height, "scrolling": False}
     if signature and "key" in signature.parameters:
         html_kwargs["key"] = key
 
-    wrapper_style = f"width:100%;max-width:{max_width_px}px;margin:0 auto;"
+    style_parts = [f"width:100%", f"max-width:{max_width_px}px", "margin:0 auto"]
+    if bottom_gap is not None:
+        if isinstance(bottom_gap, (int, float)):
+            gap_value = f"{float(bottom_gap):g}px"
+        else:
+            try:
+                gap_value = f"{float(bottom_gap):g}px"
+            except (TypeError, ValueError):
+                gap_value = str(bottom_gap)
+        style_parts.append(f"--fc-video-bottom:{gap_value}")
+    wrapper_style = ";".join(style_parts) + ";"
     wrapper_class = "vmx-wrapper vmx-wrapper--plot-only" if not show_video_final else "vmx-wrapper"
 
     video_block = ""

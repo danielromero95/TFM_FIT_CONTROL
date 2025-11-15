@@ -5,3 +5,10 @@
 .results-panel .results-metrics-block [data-baseweb="select"] {
   margin-top: 0 !important;
 }
+.results-panel .results-metrics-block [data-testid="stMarkdown"] {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.results-panel .results-metrics-block .results-metrics-heading {
+  margin: calc(var(--fc-step-vspace) * -1) 0 var(--fc-heading-bottom) !important;
+}
