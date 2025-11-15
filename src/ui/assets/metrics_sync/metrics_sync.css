@@ -4,6 +4,10 @@
   max-width: var(--fc-media-max-width, 720px);
   margin: 0 auto var(--fc-video-bottom, 1.25rem) auto;
 }
+
+.vmx-wrapper--plot-only {
+  margin-bottom: 0;
+}
 .vmx-plot {
   width: 100%;
   overflow: visible;
