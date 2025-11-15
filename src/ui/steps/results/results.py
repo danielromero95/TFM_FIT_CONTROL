@@ -622,11 +622,15 @@ def _results_panel() -> Dict[str, bool]:
                             max_width_px=720,
                             show_video=False,
                             sync_channel=sync_channel,
+                            bottom_gap=0,
                         )
                     else:
                         st.info("Select at least one metric to visualize.")
                 else:
                     st.info("No numeric metrics available for charting.")
+
+                st.markdown("#### Calculated metrics")
+                st.dataframe(metrics_df, width="stretch")
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.info("No metrics were generated for this run.")
@@ -653,10 +657,6 @@ def _results_panel() -> Dict[str, bool]:
                 {"Field": "refractory_sec", "Value": f"{stats.refractory_sec:.2f}"},
             ]
             stats_df = pd.DataFrame(stats_rows, columns=["Field", "Value"]).astype({"Value": "string"})
-
-            if metrics_df is not None:
-                st.markdown("#### Calculated metrics")
-                st.dataframe(metrics_df, width="stretch")
 
             if stats.warnings:
                 st.warning("\n".join(f"• {msg}" for msg in stats.warnings))

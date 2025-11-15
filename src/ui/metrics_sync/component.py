@@ -89,6 +89,7 @@ def render_video_with_metrics_sync(
     max_width_px: int = 720,
     show_video: bool = False,
     sync_channel: str | None = None,
+    bottom_gap: float | int | str | None = None,
 ) -> None:
     """Renderiza el panel combinado de vídeo y curvas temporales."""
 
@@ -158,7 +159,17 @@ def render_video_with_metrics_sync(
     if signature and "key" in signature.parameters:
         html_kwargs["key"] = key
 
-    wrapper_style = f"width:100%;max-width:{max_width_px}px;margin:0 auto;"
+    style_parts = [f"width:100%", f"max-width:{max_width_px}px", "margin:0 auto"]
+    if bottom_gap is not None:
+        if isinstance(bottom_gap, (int, float)):
+            gap_value = f"{float(bottom_gap):g}px"
+        else:
+            try:
+                gap_value = f"{float(bottom_gap):g}px"
+            except (TypeError, ValueError):
+                gap_value = str(bottom_gap)
+        style_parts.append(f"--fc-video-bottom:{gap_value}")
+    wrapper_style = ";".join(style_parts) + ";"
     wrapper_class = "vmx-wrapper vmx-wrapper--plot-only" if not show_video_final else "vmx-wrapper"
 
     video_block = ""
