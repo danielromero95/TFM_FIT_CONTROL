@@ -176,6 +176,8 @@ def make_web_safe_h264(
         "yuv420p",
         "-movflags",
         "+faststart",
+        "-f",
+        "mp4",
         str(tmp_destination),
     ]
 

@@ -216,6 +216,7 @@ def test_make_web_safe_h264_generates_copy_when_ffmpeg_succeeds(tmp_path, monkey
     assert result.output_path == expected_path
     assert expected_path.exists() and expected_path.read_bytes() == b"websafe"
     assert created_commands and created_commands[0][-1].endswith(".tmp")
+    assert created_commands[0][-3:-1] == ["-f", "mp4"]
 
 
 def test_make_web_safe_h264_handles_missing_ffmpeg(tmp_path, monkeypatch):
