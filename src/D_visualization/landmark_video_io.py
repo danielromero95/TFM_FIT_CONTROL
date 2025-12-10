@@ -138,7 +138,11 @@ def make_web_safe_h264(
         logger.warning("Could not stat source video for web-safe conversion: %s", exc)
         return WebSafeVideoResult(output_path=None, ok=False, used_ffmpeg=False, error="stat_failed")
 
-    destination = source.with_name(f"{source.stem}{suffix}{source.suffix}")
+    # For sources like ``.mov`` we still emit a true MP4 so browsers can play it
+    # reliably. Using an ``.mp4`` extension also ensures downstream MIME
+    # detection matches the encoded format instead of the original container.
+    destination_suffix = ".mp4" if source.suffix.lower() != ".mp4" else source.suffix
+    destination = source.with_name(f"{source.stem}{suffix}{destination_suffix}")
 
     try:
         if destination.exists():
