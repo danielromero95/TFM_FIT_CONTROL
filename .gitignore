@@ -79,3 +79,6 @@ models/**
 .streamlit/*
 !.streamlit/config.toml
 .streamlit/secrets.toml
+
+# --- Demos TFM (no subir los vídeos grandes) ---
+1-ENTREGA_TFM/demos/

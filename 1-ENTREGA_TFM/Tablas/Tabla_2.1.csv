@@ -1,0 +1,10 @@
+Paquete,Rol en FIT CONTROL
+numpy,"Cálculo numérico, arrays y operaciones"
+pandas,"Organización y exportación de métricas"
+scipy,"Procesamiento de señal y detección de picos"
+scikit-learn,"Utilidades de ML y clasificación"
+mediapipe,"Estimación de pose humana"
+opencv-contrib-python-headless,"Entrada/salida y preprocesado de vídeo"
+streamlit,"Interfaz web interactiva"
+protobuf,"Soporte de modelos MediaPipe"
+cachetools,"Cacheo ligero en componentes y servicios"
