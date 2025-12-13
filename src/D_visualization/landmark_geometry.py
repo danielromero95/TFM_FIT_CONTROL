@@ -39,19 +39,27 @@ def _normalize_points_for_frame(
         except Exception:
             crop_vals = None
 
-    treat_as_global = False
+    coords_are_pixels = False
+    treat_as_global = crop_vals is None
     if crop_vals is not None and max(crop_vals) > 1.0:
         # Algunos modelos devuelven coordenadas absolutas cuando el recorte ya está en píxeles.
+        spans_frame = (
+            math.isclose(crop_vals[0], 0.0, abs_tol=1e-3)
+            and math.isclose(crop_vals[1], 0.0, abs_tol=1e-3)
+            and math.isclose(crop_vals[2], float(proc_w), rel_tol=0.01)
+            and math.isclose(crop_vals[3], float(proc_h), rel_tol=0.01)
+        )
+        treat_as_global = spans_frame
         for lm in frame_landmarks:
             try:
                 x = float(lm["x"])
                 y = float(lm["y"])
             except Exception:
                 continue
-            if not (math.isfinite(x) and math.isfinite(y)):
+            if not math.isfinite(x) or not math.isfinite(y):
                 continue
-            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
-                treat_as_global = True
+            if x > 1.0 or y > 1.0:
+                coords_are_pixels = True
                 break
 
     sx, sy = (orig_w / float(proc_w)), (orig_h / float(proc_h))
@@ -62,7 +70,10 @@ def _normalize_points_for_frame(
                 continue
         except Exception:
             continue
-        if not treat_as_global and crop_vals is not None:
+        if coords_are_pixels:
+            final_x = int(round(x * sx))
+            final_y = int(round(y * sy))
+        elif not treat_as_global and crop_vals is not None:
             x1_p, y1_p, x2_p, y2_p = crop_vals
             # Convertimos el punto relativo al recorte en coordenadas absolutas del frame procesado.
             abs_x_p = x1_p + x * (x2_p - x1_p)

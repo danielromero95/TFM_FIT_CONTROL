@@ -75,6 +75,21 @@ def test_mapping_with_crop_scales_correctly():
     assert points[0] == (320, 180)
 
 
+def test_pixel_coordinates_respect_processed_scale():
+    landmarks = [{"x": 128.0, "y": 64.0}]
+    crop_box = [32, 32, 192, 192]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+    # Coordenadas en píxeles deben escalarse por la relación de tamaños sin aplicar recorte.
+    assert points[0] == (320, 90)
+
+
 def _make_test_frames(count: int, width: int = 640, height: int = 360):
     for i in range(count):
         frame = np.full((height, width, 3), i * 40, dtype=np.uint8)
