@@ -62,11 +62,16 @@ def _normalize_points_for_frame(
                 continue
         except Exception:
             continue
-        if not treat_as_global and crop_vals is not None:
+        normalized_input = 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
+        if crop_vals is None and not normalized_input:
+            # Los landmarks ya vienen en coordenadas de píxel relativas al frame procesado.
+            final_x = int(round(x * sx))
+            final_y = int(round(y * sy))
+        elif not treat_as_global and crop_vals is not None:
             x1_p, y1_p, x2_p, y2_p = crop_vals
             # Convertimos el punto relativo al recorte en coordenadas absolutas del frame procesado.
-            abs_x_p = x1_p + x * (x2_p - x1_p)
-            abs_y_p = y1_p + y * (y2_p - y1_p)
+            abs_x_p = x1_p + (x * (x2_p - x1_p) if normalized_input else x)
+            abs_y_p = y1_p + (y * (y2_p - y1_p) if normalized_input else y)
             final_x = int(round(abs_x_p * sx))
             final_y = int(round(abs_y_p * sy))
         else:
