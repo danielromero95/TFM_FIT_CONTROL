@@ -22,6 +22,108 @@ from .base import PoseEstimatorBase
 from .mediapipe_pool import PoseGraphPool
 
 
+def _resize_with_padding(
+    image: np.ndarray, target_size: Tuple[int, int]
+) -> tuple[np.ndarray, float, int, int]:
+    """Resize ``image`` preserving aspect ratio and pad to ``target_size``.
+
+    Returns the padded image along with ``scale`` (applied to the original
+    frame) and the ``pad_x``/``pad_y`` offsets used to center the resized crop.
+    """
+
+    target_w, target_h = target_size
+    height, width = image.shape[:2]
+    if width <= 0 or height <= 0:
+        return (
+            np.zeros((target_h, target_w, image.shape[2]), dtype=image.dtype),
+            0.0,
+            0,
+            0,
+        )
+
+    scale = min(target_w / float(width), target_h / float(height))
+    resized_w = max(1, int(round(width * scale)))
+    resized_h = max(1, int(round(height * scale)))
+
+    resized = cv2.resize(image, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
+    channels = image.shape[2] if image.ndim == 3 else 1
+    if resized.shape[:2] != (resized_h, resized_w):
+        resized = cv2.resize(resized, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
+    if resized.shape[:2] != (resized_h, resized_w):
+        resized = np.zeros((resized_h, resized_w, channels), dtype=image.dtype)
+    else:
+        if resized.ndim == 2 and channels == 3:
+            resized = np.repeat(resized[:, :, np.newaxis], channels, axis=2)
+    resized_h, resized_w = resized.shape[:2]
+    padded = np.zeros((target_h, target_w, channels), dtype=image.dtype)
+
+    pad_x = max(0, int((target_w - resized_w) // 2))
+    pad_y = max(0, int((target_h - resized_h) // 2))
+    end_x = min(target_w, pad_x + resized_w)
+    end_y = min(target_h, pad_y + resized_h)
+    padded[pad_y:end_y, pad_x:end_x] = resized[: end_y - pad_y, : end_x - pad_x]
+    return padded, float(scale), pad_x, pad_y
+
+
+def _remap_landmarks_from_padded_result(
+    landmarks: List[object],
+    *,
+    crop_box: Tuple[int, int, int, int],
+    target_size: Tuple[int, int],
+    pad_x: int,
+    pad_y: int,
+    scale: float,
+    frame_width: int,
+    frame_height: int,
+    to_frame: bool,
+) -> list[Landmark]:
+    """Undo padding/letterboxing and remap landmarks to crop or frame space."""
+
+    target_w, target_h = target_size
+    x1, y1, x2, y2 = crop_box
+    crop_w = max(1.0, float(x2 - x1))
+    crop_h = max(1.0, float(y2 - y1))
+    safe_scale = float(scale) if scale > 0 else 1.0
+
+    mapped: list[Landmark] = []
+    for lm in landmarks:
+        try:
+            x_norm = float(getattr(lm, "x", np.nan))
+            y_norm = float(getattr(lm, "y", np.nan))
+        except Exception:
+            continue
+        if not np.isfinite(x_norm) or not np.isfinite(y_norm):
+            continue
+
+        x_target = x_norm * float(target_w) - float(pad_x)
+        y_target = y_norm * float(target_h) - float(pad_y)
+
+        x_crop = x_target / safe_scale
+        y_crop = y_target / safe_scale
+
+        if to_frame:
+            x_final = (x_crop + float(x1)) / float(max(frame_width, 1))
+            y_final = (y_crop + float(y1)) / float(max(frame_height, 1))
+        else:
+            x_final = x_crop / crop_w
+            y_final = y_crop / crop_h
+
+        z_val = float(getattr(lm, "z", np.nan))
+        if np.isfinite(z_val):
+            z_val /= safe_scale
+
+        mapped.append(
+            Landmark(
+                x=float(np.clip(x_final, 0.0, 1.0)),
+                y=float(np.clip(y_final, 0.0, 1.0)),
+                z=z_val,
+                visibility=float(getattr(lm, "visibility", np.nan)),
+            )
+        )
+
+    return mapped
+
+
 class PoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
@@ -138,12 +240,23 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self._smoothed_bbox = None
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
-        crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
+        crop_resized, scale, pad_x, pad_y = _resize_with_padding(crop, self.target_size)
         results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
         annotated_crop = crop_resized.copy()
         if results_crop.pose_landmarks:
-            landmarks_crop = landmarks_from_proto(results_crop.pose_landmarks.landmark)
-            self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, POSE_CONNECTIONS)
+            landmarks_crop = _remap_landmarks_from_padded_result(
+                list(results_crop.pose_landmarks.landmark),
+                crop_box=tuple(crop_box),
+                target_size=self.target_size,
+                pad_x=pad_x,
+                pad_y=pad_y,
+                scale=scale,
+                frame_width=width,
+                frame_height=height,
+                to_frame=False,
+            )
+            landmark_list = self.mp_pose.NormalizedLandmarkList(landmark=results_crop.pose_landmarks.landmark)
+            self.mp_drawing.draw_landmarks(annotated_crop, landmark_list, POSE_CONNECTIONS)
         else:
             # Si el recorte falla, usamos el resultado del frame completo para no perder la detección.
             return PoseResult(landmarks=landmarks_full, annotated_image=annotated_full, crop_box=None)
@@ -288,7 +401,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 # Si el recorte está vacío, intentamos una detección completa para recuperar la caja.
                 output = _detect_full_frame()
             else:
-                crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
+                crop_resized, scale, pad_x, pad_y = _resize_with_padding(crop, self.target_size)
                 results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
                 if not results_crop.pose_landmarks:
                     self.misses += 1
@@ -298,27 +411,17 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     else:
                         output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
                 else:
-                    scale_x = x2 - x1
-                    scale_y = y2 - y1
-                    landmarks_full: list[Landmark] = []
-                    for lm in results_crop.pose_landmarks.landmark:
-                        if scale_x > 0:
-                            x_full = (lm.x * scale_x + x1) / width
-                        else:
-                            x_full = 0.0
-                        if scale_y > 0:
-                            y_full = (lm.y * scale_y + y1) / height
-                        else:
-                            y_full = 0.0
-                        x_clipped = float(np.clip(x_full, 0.0, 1.0))
-                        y_clipped = float(np.clip(y_full, 0.0, 1.0))
-                        landmark = Landmark(
-                            x=x_clipped,
-                            y=y_clipped,
-                            z=float(lm.z),
-                            visibility=float(lm.visibility),
-                        )
-                        landmarks_full.append(landmark)
+                    landmarks_full = _remap_landmarks_from_padded_result(
+                        list(results_crop.pose_landmarks.landmark),
+                        crop_box=(x1, y1, x2, y2),
+                        target_size=self.target_size,
+                        pad_x=pad_x,
+                        pad_y=pad_y,
+                        scale=scale,
+                        frame_width=width,
+                        frame_height=height,
+                        to_frame=True,
+                    )
 
                     smoothed = self._smooth_landmarks(landmarks_full)
                     annotated_image = image_bgr.copy()
