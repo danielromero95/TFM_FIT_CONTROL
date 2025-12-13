@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
+from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import (
     DEFAULT_LANDMARK_MIN_VISIBILITY,
@@ -128,11 +129,13 @@ def infer_upright_quadrant_from_sequence(
 
     if votes:
         counts = {v: votes.count(v) for v in (0, 90, 180, 270)}
-        return max(counts, key=counts.get)
+        winner, runner_up = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:2]
+        if winner[1] >= max(runner_up[1] * dominance, min_valid // 2):
+            return normalize_rotation_deg(winner[0])
 
     median_ang = float(np.median(np.asarray(angles, dtype=float)))
     quant = int(round(median_ang / 90.0) * 90) % 360
-    return (360 - quant) % 360
+    return normalize_rotation_deg((360 - quant) % 360)
 
 
 def stream_pose_and_detection(

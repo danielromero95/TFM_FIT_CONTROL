@@ -14,6 +14,7 @@ import pandas as pd
 
 from src import config
 from src.A_preprocessing.frame_extraction import extract_processed_frames_stream
+from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from .errors import NoFramesExtracted
@@ -98,7 +99,7 @@ def run_pipeline(
 
     cap = open_video_cap(video_path)
     manual_rotate = cfg.pose.rotate
-    processing_rotate = int(manual_rotate) if manual_rotate is not None else 0
+    processing_rotate = normalize_rotation_deg(int(manual_rotate)) if manual_rotate is not None else 0
     warnings: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -161,11 +162,11 @@ def run_pipeline(
 
         initial_sample_rate = compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
 
-        metadata_rotation = int(info.rotation or 0)
+        metadata_rotation = normalize_rotation_deg(int(info.rotation or 0))
         if manual_rotate is None:
             processing_rotate = metadata_rotation
         else:
-            processing_rotate = int(manual_rotate)
+            processing_rotate = normalize_rotation_deg(int(manual_rotate))
 
         plan = make_sampling_plan(
             fps_metadata=fps_original,
@@ -305,7 +306,9 @@ def run_pipeline(
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes = filter_landmarks(df_raw_landmarks)
-    overlay_rotate_cw = infer_upright_quadrant_from_sequence(filtered_sequence)
+    overlay_rotate_cw = normalize_rotation_deg(
+        infer_upright_quadrant_from_sequence(filtered_sequence)
+    )
     logger.info(
         "Overlay rotation (clockwise) inferred from landmarks: %d°",
         overlay_rotate_cw,

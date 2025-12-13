@@ -9,6 +9,8 @@ from typing import Dict
 import cv2
 import numpy as np
 
+from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
+
 # Indicamos qué elementos forman parte de la API pública del módulo.
 __all__ = ["_normalize_rotation_deg", "_rotate_frame"]
 
@@ -22,18 +24,9 @@ _ROTATE_CODE: Dict[int, int | None] = {
 
 
 def _normalize_rotation_deg(value: int) -> int:
-    """Ajusta ``value`` al múltiplo de 90° más cercano para rotaciones compatibles.
-    OpenCV solo soporta giros discretos, por eso redondeamos para evitar cálculos
-    adicionales con matrices de transformación personalizadas."""
+    """Alias interno que reutiliza la normalización global de rotaciones."""
 
-    value = int(value) % 360
-    if value in _ROTATE_CODE:
-        return value
-    candidates = tuple(_ROTATE_CODE.keys())
-    return min(
-        candidates,
-        key=lambda cand: min((value - cand) % 360, (cand - value) % 360),
-    )
+    return normalize_rotation_deg(value)
 
 
 def _rotate_frame(frame: np.ndarray, rotation_deg: int) -> np.ndarray:

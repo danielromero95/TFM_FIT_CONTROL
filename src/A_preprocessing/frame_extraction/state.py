@@ -8,6 +8,8 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 
+from .utils import normalize_rotation_deg
+
 
 @dataclass(slots=True)
 class FrameInfo:
@@ -31,7 +33,7 @@ _ROTATE_MAP = {
 def _apply_rotation(frame: np.ndarray, rotation_deg: Optional[int]) -> np.ndarray:
     """Rota el fotograma cuando el ángulo solicitado está soportado."""
 
-    rot = _ROTATE_MAP.get(int(rotation_deg or 0))
+    rot = _ROTATE_MAP.get(normalize_rotation_deg(int(rotation_deg or 0)))
     return cv2.rotate(frame, rot) if rot is not None else frame
 
 

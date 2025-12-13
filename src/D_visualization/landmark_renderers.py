@@ -14,7 +14,7 @@ import numpy as np
 from .landmark_drawing import _adaptive_style_for_region, draw_pose_on_frame
 from .landmark_geometry import _estimate_subject_bbox, _normalize_points_for_frame
 from .landmark_overlay_styles import OverlayStyle, RenderStats
-from .landmark_transforms import _rotate_frame
+from .landmark_transforms import _normalize_rotation_deg, _rotate_frame
 from .landmark_video_io import DEFAULT_CODEC_PREFERENCE, _open_writer
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,8 @@ def render_landmarks_video_streaming(
         cap.release()
         return RenderStats(0, 0, 0, 0.0, "")
 
-    first = _rotate_frame(first_raw, rotate)
+    rotation_in = _normalize_rotation_deg(rotate)
+    first = _rotate_frame(first_raw, rotation_in)
     orig_h, orig_w = first.shape[:2]
     try:
         writer, used_fourcc = _open_writer(
@@ -125,7 +126,7 @@ def render_landmarks_video_streaming(
             ok, raw = cap.read()
             if not ok:
                 break
-            fr = _rotate_frame(raw, rotate)
+            fr = _rotate_frame(raw, rotation_in)
             frames_in += 1
             _handle_one(frames_in - 1, fr)
             if progress_cb and (frames_in % 10 == 0):
@@ -192,7 +193,7 @@ def render_landmarks_video(
     orig_h, orig_w = first.shape[:2]
     base_style = style or OverlayStyle()
     subject_region_size: Optional[tuple[int, int]] = None
-    rotation_out = output_rotate
+    rotation_out = _normalize_rotation_deg(output_rotate)
 
     def _safe_get(seq, idx):
         try:
