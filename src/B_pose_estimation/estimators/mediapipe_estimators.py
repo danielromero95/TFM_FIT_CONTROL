@@ -343,7 +343,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 else:
                     landmarks_full, landmark_list = _rescale_landmarks_from_crop(
                         results_crop.pose_landmarks.landmark,
-                        crop_box,
+                        (x1, y1, x2, y2),
                         width,
                         height,
                         self.landmark_pb2,
