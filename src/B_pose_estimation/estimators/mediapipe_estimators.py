@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -20,6 +20,57 @@ from ..geometry import (
 from ..types import Landmark, PoseResult
 from .base import PoseEstimatorBase
 from .mediapipe_pool import PoseGraphPool
+
+
+def _rescale_landmarks_from_crop(
+    mp_landmarks: Iterable[object],
+    crop_box: Sequence[int],
+    image_width: int,
+    image_height: int,
+    landmark_pb2_module,
+) -> tuple[list[Landmark], object]:
+    """Reescala *landmarks* normalizados del recorte al fotograma completo.
+
+    Mantiene las coordenadas normalizadas en ``[0, 1]`` para que los renderizadores
+    de vídeo no sufran desplazamientos cuando el recorte o el *resize* cambian el
+    sistema de referencia.  Devuelve tanto la lista de ``Landmark`` propia como
+    una instancia de ``NormalizedLandmarkList`` lista para dibujarse con MediaPipe.
+    """
+
+    if len(crop_box) != 4:
+        raise ValueError("crop_box must contain four integers (x1, y1, x2, y2)")
+
+    x1, y1, x2, y2 = map(int, crop_box)
+    scale_x = x2 - x1
+    scale_y = y2 - y1
+
+    landmarks_full: list[Landmark] = []
+    mp_landmarks_full = []
+
+    for lm in mp_landmarks:
+        x_full = (float(lm.x) * scale_x + x1) / image_width if scale_x > 0 else 0.0
+        y_full = (float(lm.y) * scale_y + y1) / image_height if scale_y > 0 else 0.0
+        x_clipped = float(np.clip(x_full, 0.0, 1.0))
+        y_clipped = float(np.clip(y_full, 0.0, 1.0))
+        landmark = Landmark(
+            x=x_clipped,
+            y=y_clipped,
+            z=float(getattr(lm, "z", 0.0)),
+            visibility=float(getattr(lm, "visibility", 0.0)),
+        )
+        landmarks_full.append(landmark)
+        mp_landmarks_full.append(
+            landmark_pb2_module.NormalizedLandmark(
+                x=landmark.x,
+                y=landmark.y,
+                z=landmark.z,
+                visibility=landmark.visibility,
+            )
+        )
+
+    return landmarks_full, landmark_pb2_module.NormalizedLandmarkList(
+        landmark=mp_landmarks_full
+    )
 
 
 class PoseEstimator(PoseEstimatorBase):
@@ -185,7 +236,10 @@ class RoiPoseEstimator(PoseEstimatorBase):
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
-        from mediapipe.framework.formats import landmark_pb2
+        try:
+            from mediapipe.framework.formats import landmark_pb2
+        except ImportError as exc:  # pragma: no cover - entorno sin MediaPipe
+            raise RuntimeError("MediaPipe landmark protobufs are not available") from exc
 
         self.landmark_pb2 = landmark_pb2
         self.pose_full = None
@@ -268,39 +322,15 @@ class RoiPoseEstimator(PoseEstimatorBase):
                         self._smoothed_bbox = None
                     output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
                 else:
-                    scale_x = x2 - x1
-                    scale_y = y2 - y1
-                    landmarks_full: list[Landmark] = []
-                    mp_landmarks = []
-                    for lm in results_crop.pose_landmarks.landmark:
-                        if scale_x > 0:
-                            x_full = (lm.x * scale_x + x1) / width
-                        else:
-                            x_full = 0.0
-                        if scale_y > 0:
-                            y_full = (lm.y * scale_y + y1) / height
-                        else:
-                            y_full = 0.0
-                        x_clipped = float(np.clip(x_full, 0.0, 1.0))
-                        y_clipped = float(np.clip(y_full, 0.0, 1.0))
-                        landmark = Landmark(
-                            x=x_clipped,
-                            y=y_clipped,
-                            z=float(lm.z),
-                            visibility=float(lm.visibility),
-                        )
-                        landmarks_full.append(landmark)
-                        mp_landmarks.append(
-                            self.landmark_pb2.NormalizedLandmark(
-                                x=x_clipped,
-                                y=y_clipped,
-                                z=float(lm.z),
-                                visibility=float(lm.visibility),
-                            )
-                        )
+                    landmarks_full, landmark_list = _rescale_landmarks_from_crop(
+                        results_crop.pose_landmarks.landmark,
+                        crop_box,
+                        width,
+                        height,
+                        self.landmark_pb2,
+                    )
 
                     annotated_image = image_bgr.copy()
-                    landmark_list = self.landmark_pb2.NormalizedLandmarkList(landmark=mp_landmarks)
                     self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
                     bbox = bounding_box_from_landmarks(landmarks_full, width, height)
                     if bbox is None:
