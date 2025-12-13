@@ -212,18 +212,9 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             # contrato de "extract_landmarks_from_frames", pero usamos la versión
             # reescalada al fotograma completo para la visualización.
             del landmarks_full
-            return PoseResult(
-                landmarks=landmarks_crop, annotated_image=annotated_image, crop_box=crop_box
-            )
-
-        # Si el recorte falla, dibujamos y devolvemos los *landmarks* del fotograma completo
-        # para evitar perder detecciones en vistas laterales u oblicuas.
-        self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
-        return PoseResult(
-            landmarks=landmarks_full,
-            annotated_image=annotated_image,
-            crop_box=crop_box,
-        )
+        else:
+            landmarks_crop = None
+        return PoseResult(landmarks=landmarks_crop, annotated_image=annotated_image, crop_box=crop_box)
 
     def close(self) -> None:
         if self.pose_full is not None and self._key_full is not None:

@@ -157,34 +157,3 @@ def test_cropped_estimator_draws_full_frame_landmarks(monkeypatch):
     assert isinstance(drawn_landmarks, _FakeNormalizedLandmarkList)
     assert pytest.approx(drawn_landmarks.landmark[0].x) == pytest.approx(0.5)
     assert pytest.approx(drawn_landmarks.landmark[0].y) == pytest.approx(0.375)
-
-
-def test_cropped_estimator_falls_back_to_full_pose_when_crop_fails(monkeypatch):
-    _install_fake_mediapipe(monkeypatch)
-
-    drawing = _FakeDrawing()
-    poses = [
-        _FakePose([_FakeNormalizedLandmark(0.25, 0.5, visibility=1.0)]),
-        _FakePose([]),  # recorte sin detección
-    ]
-
-    def _fake_acquire(**_kwargs):
-        pose = poses.pop(0)
-        return pose, (False, 2, 0.5, 0.5)
-
-    monkeypatch.setattr(
-        PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs))
-    )
-    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
-    monkeypatch.setattr(PoseGraphPool, "_imported", True)
-    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
-    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
-    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
-
-    estimator = CroppedPoseEstimator(target_size=(4, 4), crop_margin=0.0)
-    image = np.zeros((4, 4, 3), dtype=np.uint8)
-    result = estimator.estimate(image)
-
-    assert result.landmarks is not None
-    assert result.landmarks[0].get("x") == pytest.approx(0.25)
-    assert drawing.calls, "Debe dibujar los landmarks del fotograma completo si el recorte falla"
