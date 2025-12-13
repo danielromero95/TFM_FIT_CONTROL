@@ -25,7 +25,7 @@ from .mediapipe_pool import PoseGraphPool
 class PoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -68,7 +68,7 @@ class PoseEstimator(PoseEstimatorBase):
 class CroppedPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -116,6 +116,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
         landmarks_full = landmarks_from_proto(results_full.pose_landmarks.landmark)
+        annotated_full = image_bgr.copy()
+        self.mp_drawing.draw_landmarks(annotated_full, results_full.pose_landmarks, POSE_CONNECTIONS)
         bbox = bounding_box_from_landmarks(landmarks_full, width, height)
         if bbox is None:
             self._smoothed_bbox = None
@@ -143,7 +145,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             landmarks_crop = landmarks_from_proto(results_crop.pose_landmarks.landmark)
             self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, POSE_CONNECTIONS)
         else:
-            landmarks_crop = None
+            # Si el recorte falla, usamos el resultado del frame completo para no perder la detección.
+            return PoseResult(landmarks=landmarks_full, annotated_image=annotated_full, crop_box=None)
         return PoseResult(landmarks=landmarks_crop, annotated_image=annotated_crop, crop_box=crop_box)
 
     def close(self) -> None:
@@ -159,7 +162,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
 class RoiPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -212,6 +215,35 @@ class RoiPoseEstimator(PoseEstimatorBase):
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
         self._ensure_graphs()
         height, width = image_bgr.shape[:2]
+
+        def _detect_full_frame() -> PoseResult:
+            results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+            if not results_full.pose_landmarks:
+                self.misses += 1
+                self.last_box = None
+                self._smoothed_bbox = None
+                return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+
+            landmarks = landmarks_from_proto(results_full.pose_landmarks.landmark)
+            annotated_image = image_bgr.copy()
+            self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
+            bbox = bounding_box_from_landmarks(landmarks, width, height)
+            if bbox is None:
+                self.last_box = None
+                self._smoothed_bbox = None
+            else:
+                smoothed_bbox = smooth_bounding_box(
+                    self._smoothed_bbox,
+                    bbox,
+                    factor=self.smooth_factor,
+                    width=width,
+                    height=height,
+                )
+                self._smoothed_bbox = smoothed_bbox
+                self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
+            self.misses = 0
+            return PoseResult(landmarks=landmarks, annotated_image=annotated_image, crop_box=self.last_box)
+
         run_full = (
             self.last_box is None
             or (self.frame_idx % self.refresh_period == 0)
@@ -224,49 +256,24 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 run_full = True
 
         if run_full:
-            results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
-            if not results_full.pose_landmarks:
-                self.misses += 1
-                self.last_box = None
-                self._smoothed_bbox = None
-                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
-            else:
-                landmarks = landmarks_from_proto(results_full.pose_landmarks.landmark)
-                annotated_image = image_bgr.copy()
-                self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
-                bbox = bounding_box_from_landmarks(landmarks, width, height)
-                if bbox is None:
-                    self.last_box = None
-                    self._smoothed_bbox = None
-                else:
-                    smoothed_bbox = smooth_bounding_box(
-                        self._smoothed_bbox,
-                        bbox,
-                        factor=self.smooth_factor,
-                        width=width,
-                        height=height,
-                    )
-                    self._smoothed_bbox = smoothed_bbox
-                    self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
-                self.misses = 0
-                output = PoseResult(landmarks=landmarks, annotated_image=annotated_image, crop_box=self.last_box)
+            output = _detect_full_frame()
         else:
             x1, y1, x2, y2 = self.last_box  # type: ignore[misc]
             crop = image_bgr[y1:y2, x1:x2]
             if crop.size == 0:
                 self.misses += 1
-                self.last_box = None
-                self._smoothed_bbox = None
-                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+                # Si el recorte está vacío, intentamos una detección completa para recuperar la caja.
+                output = _detect_full_frame()
             else:
                 crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
                 results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
                 if not results_crop.pose_landmarks:
                     self.misses += 1
-                    if self.misses >= self.max_misses:
-                        self.last_box = None
-                        self._smoothed_bbox = None
-                    output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+                    # Recaemos en el detector completo para recuperarnos rápido cuando el seguimiento falla.
+                    if self.misses >= self.max_misses or self.misses == 1:
+                        output = _detect_full_frame()
+                    else:
+                        output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
                 else:
                     scale_x = x2 - x1
                     scale_y = y2 - y1

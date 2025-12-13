@@ -18,6 +18,8 @@ def _normalize_points_for_frame(
     orig_h: int,
     proc_w: int,
     proc_h: int,
+    *,
+    min_visibility: float | None = None,
 ) -> dict[int, tuple[int, int]]:
     """Convierte puntos normalizados del modelo en coordenadas de píxel absolutas.
     Lo necesitamos para dibujar sobre frames reales y medir distancias en píxeles sin
@@ -64,6 +66,14 @@ def _normalize_points_for_frame(
 
     sx, sy = (orig_w / float(proc_w)), (orig_h / float(proc_h))
     for idx, lm in enumerate(frame_landmarks):
+        visibility: float | None = None
+        if min_visibility is not None:
+            try:
+                visibility = float(lm.get("visibility", float("nan")))  # type: ignore[index]
+            except Exception:
+                visibility = float("nan")
+            if not math.isfinite(visibility) or visibility < min_visibility:
+                continue
         try:
             x, y = float(lm["x"]), float(lm["y"])
             if math.isnan(x) or math.isnan(y):

@@ -37,6 +37,7 @@ def render_landmarks_video_streaming(
     sample_rate: int = 1,
     rotate: int = 0,
     style: OverlayStyle | None = None,
+    min_visibility: float | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = DEFAULT_CODEC_PREFERENCE,
@@ -93,6 +94,7 @@ def render_landmarks_video_streaming(
             orig_h,
             processed_size[0],
             processed_size[1],
+            min_visibility=min_visibility,
         )
         if not pts:
             skipped += 1
@@ -171,6 +173,7 @@ def render_landmarks_video(
     *,
     processed_size: tuple[int, int],
     style: OverlayStyle | None = None,
+    min_visibility: float | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = DEFAULT_CODEC_PREFERENCE,
@@ -218,6 +221,7 @@ def render_landmarks_video(
             orig_h,
             processed_size[0],
             processed_size[1],
+            min_visibility=min_visibility,
         )
 
         if not pts:
