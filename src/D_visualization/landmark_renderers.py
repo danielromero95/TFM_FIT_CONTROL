@@ -14,7 +14,6 @@ import numpy as np
 from .landmark_drawing import _adaptive_style_for_region, draw_pose_on_frame
 from .landmark_geometry import _estimate_subject_bbox, _normalize_points_for_frame
 from .landmark_overlay_styles import OverlayStyle, RenderStats
-from .landmark_transforms import _normalize_rotation_deg, _rotate_frame
 from .landmark_video_io import DEFAULT_CODEC_PREFERENCE, _open_writer
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ def render_landmarks_video_streaming(
     *,
     processed_size: tuple[int, int],
     sample_rate: int = 1,
-    rotate: int = 0,
     style: OverlayStyle | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
@@ -54,8 +52,7 @@ def render_landmarks_video_streaming(
         cap.release()
         return RenderStats(0, 0, 0, 0.0, "")
 
-    rotation_in = _normalize_rotation_deg(rotate)
-    first = _rotate_frame(first_raw, rotation_in)
+    first = first_raw
     orig_h, orig_w = first.shape[:2]
     try:
         writer, used_fourcc = _open_writer(
@@ -126,7 +123,7 @@ def render_landmarks_video_streaming(
             ok, raw = cap.read()
             if not ok:
                 break
-            fr = _rotate_frame(raw, rotation_in)
+            fr = raw
             frames_in += 1
             _handle_one(frames_in - 1, fr)
             if progress_cb and (frames_in % 10 == 0):
@@ -174,11 +171,10 @@ def render_landmarks_video(
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
     codec_preference: Sequence[str] = DEFAULT_CODEC_PREFERENCE,
-    output_rotate: int = 0,
     tighten_to_subject: bool = False,
     subject_margin: float = 0.12,
 ) -> RenderStats:
-    """Procesa frames en memoria aplicando anotaciones y rotaciones opcionales.
+    """Procesa frames en memoria aplicando anotaciones.
     Este modo evita E/S innecesaria cuando los frames ya están precargados y permite
     experimentar con el pipeline sin depender de archivos temporales."""
 
@@ -193,7 +189,6 @@ def render_landmarks_video(
     orig_h, orig_w = first.shape[:2]
     base_style = style or OverlayStyle()
     subject_region_size: Optional[tuple[int, int]] = None
-    rotation_out = _normalize_rotation_deg(output_rotate)
 
     def _safe_get(seq, idx):
         try:
@@ -222,10 +217,7 @@ def render_landmarks_video(
 
         if not pts:
             skipped += 1
-            frame_to_write = frame
-            if rotation_out:
-                frame_to_write = _rotate_frame(frame_to_write, rotation_out)
-            return frame_to_write
+            return frame
 
         frame_region = frame
         points_for_draw = pts
@@ -275,11 +267,7 @@ def render_landmarks_video(
 
         frame_to_annotate = frame_region.copy()
         draw_pose_on_frame(frame_to_annotate, points_for_draw, style=style_for_draw)
-        frame_to_write = frame_to_annotate
-
-        if rotation_out:
-            frame_to_write = _rotate_frame(frame_to_write, rotation_out)
-        return frame_to_write
+        return frame_to_annotate
 
     writer = None
     used_code = ""
