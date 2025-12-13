@@ -28,6 +28,22 @@ _POSE_LANDMARK_INDEX = {
     "RIGHT_WRIST": 16,
 }
 
+_FEATURE_LANDMARKS = (
+    "LEFT_HIP",
+    "RIGHT_HIP",
+    "LEFT_KNEE",
+    "RIGHT_KNEE",
+    "LEFT_ANKLE",
+    "RIGHT_ANKLE",
+    "LEFT_SHOULDER",
+    "RIGHT_SHOULDER",
+    "LEFT_ELBOW",
+    "RIGHT_ELBOW",
+    "LEFT_WRIST",
+    "RIGHT_WRIST",
+)
+_FEATURE_INDICES = np.array([_POSE_LANDMARK_INDEX[name] for name in _FEATURE_LANDMARKS])
+
 
 def build_features_from_landmark_array(
     landmarks_arr: "np.ndarray",
@@ -60,29 +76,41 @@ def build_features_from_landmarks(
     if len(landmarks) < 33:
         raise ValueError(f"Expected 33 pose landmarks, received {len(landmarks)}")
 
-    coords = np.empty((33, 3), dtype=float)
-
     def _safe_float(value: Any, default: float = float("nan")) -> float:
         try:
             return float(value)
         except (TypeError, ValueError):
             return float(default)
 
-    for i in range(33):
-        entry = landmarks[i] if 0 <= i < len(landmarks) else None
-        coords[i, 0] = _safe_float(entry.get("x") if entry else float("nan"))
-        coords[i, 1] = _safe_float(entry.get("y") if entry else float("nan"))
-        coords[i, 2] = _safe_float(entry.get("z") if entry else float("nan"))
+    coords = np.asarray(
+        [
+            [
+                _safe_float((landmarks[i] or {}).get("x")),
+                _safe_float((landmarks[i] or {}).get("y")),
+                _safe_float((landmarks[i] or {}).get("z")),
+            ]
+            if 0 <= i < len(landmarks)
+            else [float("nan"), float("nan"), float("nan")]
+            for i in range(33)
+        ],
+        dtype=float,
+    )
 
     world_coords: "np.ndarray | None" = None
     if world_landmarks:
-        world_coords = np.empty((33, 3), dtype=float)
-
-        for i in range(33):
-            entry = world_landmarks[i] if 0 <= i < len(world_landmarks) else None
-            world_coords[i, 0] = _safe_float(entry.get("x") if entry else float("nan"))
-            world_coords[i, 1] = _safe_float(entry.get("y") if entry else float("nan"))
-            world_coords[i, 2] = _safe_float(entry.get("z") if entry else float("nan"))
+        world_coords = np.asarray(
+            [
+                [
+                    _safe_float((world_landmarks[i] or {}).get("x")),
+                    _safe_float((world_landmarks[i] or {}).get("y")),
+                    _safe_float((world_landmarks[i] or {}).get("z")),
+                ]
+                if 0 <= i < len(world_landmarks)
+                else [float("nan"), float("nan"), float("nan")]
+                for i in range(33)
+            ],
+            dtype=float,
+        )
 
     return _features_from_coords(coords, world_coords=world_coords)
 
@@ -105,26 +133,27 @@ def _features_from_coords(
         if world.ndim != 2 or world.shape[0] < 33 or world.shape[1] < 3:
             world = None
 
-    def _coord(name: str) -> np.ndarray:
-        return coords[_POSE_LANDMARK_INDEX[name]]
+    (
+        left_hip,
+        right_hip,
+        left_knee,
+        right_knee,
+        left_ankle,
+        right_ankle,
+        left_shoulder,
+        right_shoulder,
+        left_elbow,
+        right_elbow,
+        left_wrist,
+        right_wrist,
+    ) = coords.take(_FEATURE_INDICES, axis=0, mode="clip")
 
-    def _world_coord(name: str) -> Optional[np.ndarray]:
-        if world is None:
-            return None
-        return world[_POSE_LANDMARK_INDEX[name]]
-
-    left_hip = _coord("LEFT_HIP")
-    right_hip = _coord("RIGHT_HIP")
-    left_knee = _coord("LEFT_KNEE")
-    right_knee = _coord("RIGHT_KNEE")
-    left_ankle = _coord("LEFT_ANKLE")
-    right_ankle = _coord("RIGHT_ANKLE")
-    left_shoulder = _coord("LEFT_SHOULDER")
-    right_shoulder = _coord("RIGHT_SHOULDER")
-    left_elbow = _coord("LEFT_ELBOW")
-    right_elbow = _coord("RIGHT_ELBOW")
-    left_wrist = _coord("LEFT_WRIST")
-    right_wrist = _coord("RIGHT_WRIST")
+    world_points: "np.ndarray | None" = None
+    if world is not None:
+        try:
+            world_points = world.take(_FEATURE_INDICES, axis=0, mode="clip")
+        except Exception:
+            world_points = None
 
     hip_mid = (left_hip + right_hip) / 2.0
     shoulder_mid = (left_shoulder + right_shoulder) / 2.0
@@ -147,25 +176,19 @@ def _features_from_coords(
     tilt = math.degrees(math.atan2(abs(torso_vec[0]), abs(torso_vec[1]) + 1e-6))
 
     def _torso_length_world() -> float:
-        left_shoulder_world = _world_coord("LEFT_SHOULDER")
-        right_shoulder_world = _world_coord("RIGHT_SHOULDER")
-        left_hip_world = _world_coord("LEFT_HIP")
-        right_hip_world = _world_coord("RIGHT_HIP")
-
-        if (
-            left_shoulder_world is None
-            or right_shoulder_world is None
-            or left_hip_world is None
-            or right_hip_world is None
-        ):
+        if world_points is None:
             return float("nan")
 
-        if (
-            np.any(~np.isfinite(left_shoulder_world))
-            or np.any(~np.isfinite(right_shoulder_world))
-            or np.any(~np.isfinite(left_hip_world))
-            or np.any(~np.isfinite(right_hip_world))
-        ):
+        try:
+            left_shoulder_world, right_shoulder_world = world_points[6:8]
+            left_hip_world, right_hip_world = world_points[0:2]
+        except Exception:
+            return float("nan")
+
+        combined = np.concatenate(
+            [left_shoulder_world, right_shoulder_world, left_hip_world, right_hip_world]
+        )
+        if np.any(~np.isfinite(combined)):
             return float("nan")
 
         left_len = float(np.linalg.norm(left_shoulder_world - left_hip_world))

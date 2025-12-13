@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 import numpy as np
 
@@ -56,23 +56,43 @@ def segment_reps(
         knee[finite_mask],
     )
 
-    state = "up"
+    min_gap = int(round(sampling_rate * EVENT_MIN_GAP_SECONDS))
+
+    down_candidates = np.flatnonzero(knee <= KNEE_DOWN_THRESHOLD_DEG)
+    up_candidates = np.flatnonzero(knee >= KNEE_UP_THRESHOLD_DEG)
+
     down_frames: List[int] = []
     up_frames: List[int] = []
-    min_gap = int(round(sampling_rate * EVENT_MIN_GAP_SECONDS))
-    last_event = -min_gap
 
-    for idx, value in enumerate(knee):
-        if state == "up" and value <= KNEE_DOWN_THRESHOLD_DEG:
-            if idx - last_event >= min_gap:
-                state = "down"
-                down_frames.append(idx)
-                last_event = idx
-        elif state == "down" and value >= KNEE_UP_THRESHOLD_DEG:
-            if idx - last_event >= min_gap:
-                state = "up"
-                up_frames.append(idx)
-                last_event = idx
+    if down_candidates.size == 0 or up_candidates.size == 0:
+        return [RepSlice(0, n)]
+
+    down_idx = 0
+    up_idx = 0
+    last_event = -min_gap
+    looking_down = True
+
+    while down_idx < down_candidates.size or up_idx < up_candidates.size:
+        if looking_down:
+            if down_idx >= down_candidates.size:
+                break
+            candidate = int(down_candidates[down_idx])
+            down_idx += 1
+            if candidate - last_event < min_gap:
+                continue
+            down_frames.append(candidate)
+            last_event = candidate
+            looking_down = False
+        else:
+            if up_idx >= up_candidates.size:
+                break
+            candidate = int(up_candidates[up_idx])
+            up_idx += 1
+            if candidate <= down_frames[-1] or candidate - last_event < min_gap:
+                continue
+            up_frames.append(candidate)
+            last_event = candidate
+            looking_down = True
 
     if not down_frames or not up_frames:
         return [RepSlice(0, n)]
@@ -95,8 +115,9 @@ def segment_reps(
 
         if np.isfinite(bar_drop_threshold) and bar_drop_threshold > 0 and np.isfinite(bar).any():
             segment_bar = bar[start:end]
-            if np.isfinite(segment_bar).any():
-                drop = np.nanmax(segment_bar) - np.nanmin(segment_bar)
+            finite_bar = segment_bar[np.isfinite(segment_bar)]
+            if finite_bar.size:
+                drop = float(finite_bar.max() - finite_bar.min())
                 if drop < bar_drop_threshold:
                     continue
 
