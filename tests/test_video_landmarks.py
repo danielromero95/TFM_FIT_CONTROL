@@ -75,6 +75,98 @@ def test_mapping_with_crop_scales_correctly():
     assert points[0] == (320, 180)
 
 
+def test_normalized_crop_is_ignored_when_points_are_global():
+    """Los recortes normalizados no deben distorsionar puntos ya globales."""
+
+    landmarks = [{"x": 0.5, "y": 0.5}]
+    crop_box = [0.25, 0.25, 0.75, 0.75]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=320,
+        proc_h=180,
+    )
+    assert points[0] == (320, 180)
+
+
+def test_slight_overflow_still_counts_as_normalized():
+    """Un pequeño overflow por interpolación no debe disparar re-recortes."""
+
+    landmarks = [{"x": 1.02, "y": -0.01}]
+    crop_box = [64, 64, 192, 192]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=320,
+        proc_h=180,
+    )
+    assert points[0] == (389, 125)
+
+
+def test_far_out_values_force_crop_application():
+    """Valores claramente fuera de rango obligan a usar el recorte asociado."""
+
+    landmarks = [{"x": 1.5, "y": 1.2}]
+    crop_box = [64, 64, 192, 192]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+    assert points[0] == (639, 306)
+
+
+def test_pixel_crop_is_not_ignored_for_normalized_landmarks():
+    """Cuando el recorte está en píxeles, debe aplicarse aunque los puntos sean 0-1."""
+
+    landmarks = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}]
+    crops = ([64, 64, 192, 192], [128, 32, 256, 160])
+
+    first = _normalize_points_for_frame(
+        landmarks,
+        crops[0],
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+    second = _normalize_points_for_frame(
+        landmarks,
+        crops[1],
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+
+    assert first[0] != second[0]
+    assert first[0] == (160, 90)
+    assert second[0] == (320, 45)
+
+
+def test_pixel_coordinates_are_respected_without_double_scaling():
+    """Coordenadas ya en píxeles no deben reinterpretarse como normalizadas."""
+
+    landmarks = [{"x": 128, "y": 128}]
+    points = _normalize_points_for_frame(
+        landmarks,
+        [64, 64, 192, 192],
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+
+    assert points[0] == (320, 180)
+
+
 def _make_test_frames(count: int, width: int = 640, height: int = 360):
     for i in range(count):
         frame = np.full((height, width, 3), i * 40, dtype=np.uint8)
