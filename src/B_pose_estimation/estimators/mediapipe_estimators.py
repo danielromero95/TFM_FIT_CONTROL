@@ -258,14 +258,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 frame_height=height,
                 to_frame=False,
             )
-            landmark_list = self.landmark_pb2.NormalizedLandmarkList(
-                landmark=[
-                    self.landmark_pb2.NormalizedLandmark(
-                        x=float(lm.x), y=float(lm.y), z=float(lm.z), visibility=float(lm.visibility)
-                    )
-                    for lm in results_crop.pose_landmarks.landmark
-                ]
-            )
+            landmark_list = self.mp_pose.NormalizedLandmarkList(landmark=results_crop.pose_landmarks.landmark)
             self.mp_drawing.draw_landmarks(annotated_crop, landmark_list, POSE_CONNECTIONS)
         else:
             # Si el recorte falla, usamos el resultado del frame completo para no perder la detección.
