@@ -141,6 +141,12 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
+        try:
+            from mediapipe.framework.formats import landmark_pb2
+        except ImportError as exc:  # pragma: no cover - entorno sin MediaPipe
+            raise RuntimeError("MediaPipe landmark protobufs are not available") from exc
+
+        self.landmark_pb2 = landmark_pb2
 
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
@@ -189,13 +195,35 @@ class CroppedPoseEstimator(PoseEstimatorBase):
 
         crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
         results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
-        annotated_crop = crop_resized.copy()
+        annotated_image = image_bgr.copy()
+
         if results_crop.pose_landmarks:
             landmarks_crop = landmarks_from_proto(results_crop.pose_landmarks.landmark)
-            self.mp_drawing.draw_landmarks(annotated_crop, results_crop.pose_landmarks, POSE_CONNECTIONS)
-        else:
-            landmarks_crop = None
-        return PoseResult(landmarks=landmarks_crop, annotated_image=annotated_crop, crop_box=crop_box)
+            landmarks_full, landmark_list = _rescale_landmarks_from_crop(
+                results_crop.pose_landmarks.landmark,
+                crop_box,
+                width,
+                height,
+                self.landmark_pb2,
+            )
+            self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
+
+            # Mantenemos los *landmarks* normalizados al recorte para no alterar el
+            # contrato de "extract_landmarks_from_frames", pero usamos la versión
+            # reescalada al fotograma completo para la visualización.
+            del landmarks_full
+            return PoseResult(
+                landmarks=landmarks_crop, annotated_image=annotated_image, crop_box=crop_box
+            )
+
+        # Si el recorte falla, dibujamos y devolvemos los *landmarks* del fotograma completo
+        # para evitar perder detecciones en vistas laterales u oblicuas.
+        self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
+        return PoseResult(
+            landmarks=landmarks_full,
+            annotated_image=annotated_image,
+            crop_box=crop_box,
+        )
 
     def close(self) -> None:
         if self.pose_full is not None and self._key_full is not None:
@@ -324,7 +352,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 else:
                     landmarks_full, landmark_list = _rescale_landmarks_from_crop(
                         results_crop.pose_landmarks.landmark,
-                        crop_box,
+                        (x1, y1, x2, y2),
                         width,
                         height,
                         self.landmark_pb2,

@@ -39,6 +39,7 @@ def extract_landmarks_from_frames(
 
     rows: list[dict[str, float]] = []
     with estimator_cls(
+        static_image_mode=False,
         min_detection_confidence=min_detection_confidence,
         min_tracking_confidence=min_tracking_confidence,
     ) as estimator:
