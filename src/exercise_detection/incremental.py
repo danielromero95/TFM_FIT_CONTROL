@@ -17,7 +17,11 @@ from src.config.constants import (
     MIN_DETECTION_CONFIDENCE,
     MIN_TRACKING_CONFIDENCE,
 )
-from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY, MODEL_COMPLEXITY
+from src.config.settings import (
+    DEFAULT_LANDMARK_MIN_VISIBILITY,
+    MODEL_COMPLEXITY,
+    build_pose_kwargs,
+)
 from src.core.types import ExerciseType, ViewType
 
 from .classification import classify_features
@@ -121,11 +125,9 @@ class IncrementalExerciseFeatureExtractor:
         except ImportError as exc:  # pragma: no cover - guardia defensiva
             raise RuntimeError("MediaPipe is not available for exercise detection") from exc
 
-        pose_kwargs = dict(
+        pose_kwargs = build_pose_kwargs(
             static_image_mode=False,
             model_complexity=MODEL_COMPLEXITY,
-            smooth_landmarks=True,
-            enable_segmentation=False,
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         )

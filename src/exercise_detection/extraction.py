@@ -21,7 +21,11 @@ from src.config.constants import (
     MIN_DETECTION_CONFIDENCE,
     MIN_TRACKING_CONFIDENCE,
 )
-from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY, MODEL_COMPLEXITY
+from src.config.settings import (
+    DEFAULT_LANDMARK_MIN_VISIBILITY,
+    MODEL_COMPLEXITY,
+    build_pose_kwargs,
+)
 
 from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES
 from .features import build_features_from_landmarks
@@ -63,11 +67,9 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         raise RuntimeError("MediaPipe is not available in the runtime environment") from exc
 
     pose_landmark = mp_pose_module.PoseLandmark
-    pose_kwargs = dict(
+    pose_kwargs = build_pose_kwargs(
         static_image_mode=False,
         model_complexity=MODEL_COMPLEXITY,
-        smooth_landmarks=True,
-        enable_segmentation=False,
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
     )
@@ -129,11 +131,9 @@ def extract_features_from_frames(
         raise RuntimeError("MediaPipe is not available in the runtime environment") from exc
 
     pose_landmark = mp_pose_module.PoseLandmark
-    pose_kwargs = dict(
+    pose_kwargs = build_pose_kwargs(
         static_image_mode=False,
         model_complexity=MODEL_COMPLEXITY,
-        smooth_landmarks=True,
-        enable_segmentation=False,
         min_detection_confidence=MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
     )
