@@ -245,21 +245,11 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 self.misses += 1
                 self.last_box = None
                 self._smoothed_bbox = None
-                self.prev_landmarks = None
                 return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
             landmarks = landmarks_from_proto(results_full.pose_landmarks.landmark)
-            landmarks = self._smooth_landmarks(landmarks)
             annotated_image = image_bgr.copy()
-            landmark_list = self.landmark_pb2.NormalizedLandmarkList(
-                landmark=[
-                    self.landmark_pb2.NormalizedLandmark(
-                        x=float(lm.x), y=float(lm.y), z=float(lm.z), visibility=float(lm.visibility)
-                    )
-                    for lm in landmarks
-                ]
-            )
-            self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
+            self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
             bbox = bounding_box_from_landmarks(landmarks, width, height)
             if bbox is None:
                 self.last_box = None
