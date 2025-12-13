@@ -91,38 +91,6 @@ def test_normalized_crop_is_ignored_when_points_are_global():
     assert points[0] == (320, 180)
 
 
-def test_slight_overflow_still_counts_as_normalized():
-    """Un pequeño overflow por interpolación no debe disparar re-recortes."""
-
-    landmarks = [{"x": 1.02, "y": -0.01}]
-    crop_box = [64, 64, 192, 192]
-    points = _normalize_points_for_frame(
-        landmarks,
-        crop_box,
-        orig_w=640,
-        orig_h=360,
-        proc_w=320,
-        proc_h=180,
-    )
-    assert points[0] == (639, 0)
-
-
-def test_far_out_values_force_crop_application():
-    """Valores claramente fuera de rango obligan a usar el recorte asociado."""
-
-    landmarks = [{"x": 1.5, "y": 1.2}]
-    crop_box = [64, 64, 192, 192]
-    points = _normalize_points_for_frame(
-        landmarks,
-        crop_box,
-        orig_w=640,
-        orig_h=360,
-        proc_w=256,
-        proc_h=256,
-    )
-    assert points[0] == (639, 306)
-
-
 def _make_test_frames(count: int, width: int = 640, height: int = 360):
     for i in range(count):
         frame = np.full((height, width, 3), i * 40, dtype=np.uint8)

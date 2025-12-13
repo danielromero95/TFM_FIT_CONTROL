@@ -11,19 +11,15 @@ from typing import Optional, Sequence
 __all__ = ["_normalize_points_for_frame", "_estimate_subject_bbox"]
 
 
-def _landmarks_in_unit_square(frame_landmarks, *, tolerance: float = 0.025) -> bool:
-    """Comprueba si los puntos finitos están normalizados en ``[0, 1]`` con holgura.
+def _landmarks_in_unit_square(frame_landmarks) -> bool:
+    """Comprueba si todos los puntos finitos están normalizados en ``[0, 1]``.
 
-    Admitimos un margen configurable (por defecto ±2.5 %) para absorber errores de
-    interpolación o redondeos que podrían llevar coordenadas a valores como 1.01.
-    Si todos los puntos finitos caen en ``[-tol, 1+tol]`` consideramos que la
-    serie ya está global y no requiere reproyección adicional.
+    Esto permite decidir cuándo ignorar cajas de recorte preexistentes porque las
+    coordenadas ya están expresadas en el sistema de referencia global del frame
+    (y volver a aplicar el recorte provocaría una desalineación de los overlays).
     """
 
     any_finite = False
-    tol = max(0.0, float(tolerance))
-    lower, upper = -tol, 1.0 + tol
-
     for lm in frame_landmarks or []:
         try:
             x = float(lm["x"])
@@ -33,9 +29,8 @@ def _landmarks_in_unit_square(frame_landmarks, *, tolerance: float = 0.025) -> b
         if not (math.isfinite(x) and math.isfinite(y)):
             continue
         any_finite = True
-        if not (lower <= x <= upper and lower <= y <= upper):
+        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             return False
-
     return any_finite
 
 
