@@ -1,12 +1,12 @@
 # requirements.txt
-numpy<2
+numpy>=1.26.0,<2
 pandas
 scipy
 scikit-learn
-streamlit>=1.30
-mediapipe>=0.10
-opencv-contrib-python-headless>=4.8
-protobuf<5
+streamlit>=1.52.1
+mediapipe==0.10.21
+opencv-contrib-python-headless==4.11.0.86
+protobuf>=4.25.3,<5
 cachetools==5.3.3
 
 # Herramientas de desarrollo / tests
