@@ -11,6 +11,29 @@ from typing import Optional, Sequence
 __all__ = ["_normalize_points_for_frame", "_estimate_subject_bbox"]
 
 
+def _landmarks_in_unit_square(frame_landmarks) -> bool:
+    """Comprueba si todos los puntos finitos están normalizados en ``[0, 1]``.
+
+    Esto permite decidir cuándo ignorar cajas de recorte preexistentes porque las
+    coordenadas ya están expresadas en el sistema de referencia global del frame
+    (y volver a aplicar el recorte provocaría una desalineación de los overlays).
+    """
+
+    any_finite = False
+    for lm in frame_landmarks or []:
+        try:
+            x = float(lm["x"])
+            y = float(lm["y"])
+        except Exception:
+            continue
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        any_finite = True
+        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+            return False
+    return any_finite
+
+
 def _normalize_points_for_frame(
     frame_landmarks,
     crop_box: Optional[Sequence[float]],
@@ -32,6 +55,8 @@ def _normalize_points_for_frame(
     except Exception:
         # Si los datos no son numéricos, simplemente continuamos.
         pass
+
+    landmarks_are_normalized = _landmarks_in_unit_square(frame_landmarks)
     crop_vals: Optional[tuple[float, float, float, float]] = None
     if crop_box is not None:
         try:
@@ -40,20 +65,17 @@ def _normalize_points_for_frame(
             crop_vals = None
 
     treat_as_global = False
-    if crop_vals is not None and max(crop_vals) > 1.0:
-        # Algunos modelos devuelven coordenadas absolutas cuando el recorte ya está en píxeles.
-        for lm in frame_landmarks:
-            try:
-                x = float(lm["x"])
-                y = float(lm["y"])
-            except Exception:
-                continue
-            if not (math.isfinite(x) and math.isfinite(y)):
-                continue
-            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
-                treat_as_global = True
-                break
+    if crop_vals is not None:
+        if max(crop_vals) > 1.0:
+            # Algunos modelos devuelven coordenadas absolutas cuando el recorte ya está en píxeles.
+            treat_as_global = landmarks_are_normalized
+        elif landmarks_are_normalized:
+            # Si tanto el recorte como las coordenadas están normalizados en [0, 1],
+            # no aplicamos el recorte para evitar duplicar transformaciones.
+            treat_as_global = True
 
+    proc_w = max(1, int(proc_w)) if math.isfinite(proc_w) else orig_w
+    proc_h = max(1, int(proc_h)) if math.isfinite(proc_h) else orig_h
     sx, sy = (orig_w / float(proc_w)), (orig_h / float(proc_h))
     for idx, lm in enumerate(frame_landmarks):
         try:
