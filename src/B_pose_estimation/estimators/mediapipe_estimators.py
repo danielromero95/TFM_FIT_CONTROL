@@ -195,6 +195,8 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.pose_crop = None
         self._key_full: Optional[Tuple[bool, int, float, float]] = None
         self._key_crop: Optional[Tuple[bool, int, float, float]] = None
+        self.prev_landmarks: Optional[list[Landmark]] = None
+        self.landmark_smooth = 0.65
 
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
@@ -211,6 +213,27 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
             )
+
+    def _smooth_landmarks(self, current: list[Landmark]) -> list[Landmark]:
+        if not current:
+            return current
+        if self.prev_landmarks is None or len(self.prev_landmarks) != len(current):
+            self.prev_landmarks = current
+            return current
+
+        alpha = float(min(0.99, max(0.0, self.landmark_smooth)))
+        smoothed: list[Landmark] = []
+        for prev, cur in zip(self.prev_landmarks, current):
+            smoothed.append(
+                Landmark(
+                    x=float(prev.x * alpha + cur.x * (1.0 - alpha)),
+                    y=float(prev.y * alpha + cur.y * (1.0 - alpha)),
+                    z=float(prev.z * alpha + cur.z * (1.0 - alpha)),
+                    visibility=float(prev.visibility * alpha + cur.visibility * (1.0 - alpha)),
+                )
+            )
+        self.prev_landmarks = smoothed
+        return smoothed
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
         self._ensure_graphs()
@@ -278,7 +301,6 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     scale_x = x2 - x1
                     scale_y = y2 - y1
                     landmarks_full: list[Landmark] = []
-                    mp_landmarks = []
                     for lm in results_crop.pose_landmarks.landmark:
                         if scale_x > 0:
                             x_full = (lm.x * scale_x + x1) / width
@@ -297,19 +319,19 @@ class RoiPoseEstimator(PoseEstimatorBase):
                             visibility=float(lm.visibility),
                         )
                         landmarks_full.append(landmark)
-                        mp_landmarks.append(
-                            self.landmark_pb2.NormalizedLandmark(
-                                x=x_clipped,
-                                y=y_clipped,
-                                z=float(lm.z),
-                                visibility=float(lm.visibility),
-                            )
-                        )
 
+                    smoothed = self._smooth_landmarks(landmarks_full)
                     annotated_image = image_bgr.copy()
-                    landmark_list = self.landmark_pb2.NormalizedLandmarkList(landmark=mp_landmarks)
+                    landmark_list = self.landmark_pb2.NormalizedLandmarkList(
+                        landmark=[
+                            self.landmark_pb2.NormalizedLandmark(
+                                x=float(lm.x), y=float(lm.y), z=float(lm.z), visibility=float(lm.visibility)
+                            )
+                            for lm in smoothed
+                        ]
+                    )
                     self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
-                    bbox = bounding_box_from_landmarks(landmarks_full, width, height)
+                    bbox = bounding_box_from_landmarks(smoothed, width, height)
                     if bbox is None:
                         self.last_box = None
                         self._smoothed_bbox = None
@@ -324,7 +346,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                         self._smoothed_bbox = smoothed_bbox
                         self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
                     self.misses = 0
-                    output = PoseResult(landmarks=landmarks_full, annotated_image=annotated_image, crop_box=self.last_box)
+                    output = PoseResult(landmarks=smoothed, annotated_image=annotated_image, crop_box=self.last_box)
 
         self.frame_idx += 1
         return output
@@ -337,6 +359,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
             PoseGraphPool.release(self.pose_crop, self._key_crop)
             self.pose_crop, self._key_crop = None, None
         self._smoothed_bbox = None
+        self.prev_landmarks = None
 
 
 __all__ = ["PoseEstimator", "CroppedPoseEstimator", "RoiPoseEstimator"]
