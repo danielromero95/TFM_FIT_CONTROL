@@ -75,6 +75,22 @@ def test_mapping_with_crop_scales_correctly():
     assert points[0] == (320, 180)
 
 
+def test_normalized_crop_is_ignored_when_points_are_global():
+    """Los recortes normalizados no deben distorsionar puntos ya globales."""
+
+    landmarks = [{"x": 0.5, "y": 0.5}]
+    crop_box = [0.25, 0.25, 0.75, 0.75]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=320,
+        proc_h=180,
+    )
+    assert points[0] == (320, 180)
+
+
 def _make_test_frames(count: int, width: int = 640, height: int = 360):
     for i in range(count):
         frame = np.full((height, width, 3), i * 40, dtype=np.uint8)
