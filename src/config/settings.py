@@ -36,7 +36,9 @@ DEFAULT_TARGET_WIDTH = 256
 DEFAULT_TARGET_HEIGHT = 256
 DETECTION_SAMPLE_FPS = 4.0
 DEFAULT_PREVIEW_FPS = 10.0
-DEFAULT_LANDMARK_MIN_VISIBILITY = 0.5
+# Bajamos el umbral de visibilidad para no descartar landmarks útiles en vistas
+# laterales o con oclusiones parciales.
+DEFAULT_LANDMARK_MIN_VISIBILITY = 0.2
 
 # --- PARÁMETROS DE CONTEO (LEGADO) ---
 SQUAT_HIGH_THRESH = 160.0
