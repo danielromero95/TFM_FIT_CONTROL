@@ -11,13 +11,13 @@ from .constants import (
     BENCH_BAR_HORIZONTAL_STD_MAX,
     BENCH_BAR_RANGE_MIN_NORM,
     BENCH_BAR_RANGE_WEIGHT,
+    BENCH_ELBOW_ROM_GATE_FACTOR,
     BENCH_ELBOW_ROM_MIN_DEG,
     BENCH_ELBOW_ROM_WEIGHT,
-    BENCH_ELBOW_ROM_GATE_FACTOR,
+    BENCH_GATE_BONUS,
     BENCH_HIP_RANGE_MAX_NORM,
     BENCH_HIP_ROM_MAX_DEG,
     BENCH_KNEE_ROM_MAX_DEG,
-    BENCH_GATE_BONUS,
     BENCH_POSTURE_WEIGHT,
     BENCH_ROM_PENALTY_WEIGHT,
     BENCH_TORSO_HORIZONTAL_DEG,
@@ -28,6 +28,8 @@ from .constants import (
     DEADLIFT_BAR_HORIZONTAL_WEIGHT,
     DEADLIFT_BAR_RANGE_MIN_NORM,
     DEADLIFT_BAR_RANGE_WEIGHT,
+    DEADLIFT_BAR_SHOULDER_MIN_NORM,
+    DEADLIFT_BAR_SHOULDER_PENALTY_WEIGHT,
     DEADLIFT_BENCH_PENALTY_WEIGHT,
     DEADLIFT_ELBOW_MIN_DEG,
     DEADLIFT_ELBOW_WEIGHT,
@@ -47,6 +49,8 @@ from .constants import (
     MIN_CONFIDENCE_SCORE,
     SQUAT_ARM_BONUS_WEIGHT,
     SQUAT_ARM_PENALTY_FACTOR,
+    SQUAT_BAR_HIGH_BONUS_WEIGHT,
+    SQUAT_BAR_SHOULDER_MAX_NORM,
     SQUAT_DEPTH_WEIGHT,
     SQUAT_ELBOW_BOTTOM_MAX_DEG,
     SQUAT_ELBOW_BOTTOM_MIN_DEG,
@@ -146,11 +150,21 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
 
+    squat_posture_ok = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom <= (
+        SQUAT_TORSO_TILT_MAX_DEG + 5.0
+    )
+    bar_high_bonus = 0.0
+    if squat_posture_ok and np.isfinite(agg.wrist_shoulder_diff_norm):
+        bar_high_bonus = _margin_below(
+            np.abs(agg.wrist_shoulder_diff_norm), SQUAT_BAR_SHOULDER_MAX_NORM
+        )
+
     score = 0.0
     score += SQUAT_DEPTH_WEIGHT * depth
     score += SQUAT_TORSO_WEIGHT * torso_upright
     score += SQUAT_KNEE_FORWARD_WEIGHT * knee_forward
     score += SQUAT_ROM_WEIGHT * knee_rom_margin
+    score += SQUAT_BAR_HIGH_BONUS_WEIGHT * bar_high_bonus
 
     if arm_ok:
         score += SQUAT_ARM_BONUS_WEIGHT
@@ -180,6 +194,9 @@ def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
     bar_vertical = _margin_above(agg.bar_range_norm, DEADLIFT_BAR_RANGE_MIN_NORM)
     hip_rom_margin = _margin_above(agg.hip_rom, DEADLIFT_HIP_ROM_MIN_DEG)
     bar_horizontal_penalty = _margin_above(agg.bar_horizontal_std_norm, DEADLIFT_BAR_HORIZONTAL_STD_MAX)
+    bar_shoulder_penalty = _margin_below(
+        np.abs(agg.wrist_shoulder_diff_norm), DEADLIFT_BAR_SHOULDER_MIN_NORM
+    )
 
     score = 0.0
     score += DEADLIFT_TORSO_WEIGHT * hinge_posture
@@ -199,6 +216,7 @@ def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
     penalty = 0.0
     penalty += DEADLIFT_KNEE_PENALTY_WEIGHT * max(0.0, knee_penalty)
     penalty += DEADLIFT_BAR_HORIZONTAL_WEIGHT * max(0.0, bar_horizontal_penalty)
+    penalty += DEADLIFT_BAR_SHOULDER_PENALTY_WEIGHT * max(0.0, bar_shoulder_penalty)
 
     if _bench_gate(agg):
         penalty += DEADLIFT_BENCH_PENALTY_WEIGHT

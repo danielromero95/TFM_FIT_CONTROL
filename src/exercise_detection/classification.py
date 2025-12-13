@@ -76,6 +76,13 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         ankle_width=get_series("ankle_width_norm"),
     )
 
+    view_cues_present = any(
+        np.isfinite(get_series(name)).any()
+        for name in ("shoulder_yaw_deg", "shoulder_z_delta_abs", "shoulder_width_norm", "ankle_width_norm")
+    )
+    if view_result.label == "unknown" and not view_cues_present:
+        return "unknown", "unknown", 0.0
+
     visibility = _compute_side_visibility(series)
     side = _select_visible_side(series, visibility=visibility)
     both_sides_visible = _both_sides_visible(visibility)
