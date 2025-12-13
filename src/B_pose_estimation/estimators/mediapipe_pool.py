@@ -6,6 +6,8 @@ import atexit
 import threading
 from typing import Dict, List, Tuple
 
+from src.config.settings import build_pose_kwargs
+
 
 class PoseGraphPool:
     """Agrupa instancias de ``Pose`` de Mediapipe indexadas por configuración."""
@@ -50,13 +52,13 @@ class PoseGraphPool:
                     return bucket.pop(), key
                 except IndexError:
                     pass
-        inst = cls.mp_pose.Pose(  # type: ignore[call-arg]
+        pose_kwargs = build_pose_kwargs(
             static_image_mode=static_image_mode,
             model_complexity=model_complexity,
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
-            smooth_landmarks=True,
         )
+        inst = cls.mp_pose.Pose(**pose_kwargs)  # type: ignore[arg-type]
         with cls._lock:
             cls._all.append(inst)
         return inst, key

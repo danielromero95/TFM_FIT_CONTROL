@@ -73,10 +73,43 @@ def _rescale_landmarks_from_crop(
     )
 
 
+def _process_with_recovery(
+    pose_graph: object,
+    rgb_image: np.ndarray,
+    *,
+    static_image_mode: bool,
+    model_complexity: int,
+    min_detection_confidence: float,
+    min_tracking_confidence: float,
+):
+    """Ejecuta el grafo de pose con un segundo intento para casos difíciles.
+
+    Cuando el rastreador pierde el esqueleto en vídeo, relanzamos una pasada en
+    modo estático con el modelo más completo disponible. Esto mejora la
+    recuperación tras oclusiones o cambios bruscos de cámara sin depender de
+    heurísticas externas.
+    """
+
+    results = pose_graph.process(rgb_image)
+    if results.pose_landmarks or static_image_mode:
+        return results
+
+    fallback_pose, key = PoseGraphPool.acquire(
+        static_image_mode=True,
+        model_complexity=max(model_complexity, 2),
+        min_detection_confidence=min_detection_confidence,
+        min_tracking_confidence=min_tracking_confidence,
+    )
+    try:
+        return fallback_pose.process(rgb_image)
+    finally:
+        PoseGraphPool.release(fallback_pose, key)
+
+
 class PoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -102,7 +135,15 @@ class PoseEstimator(PoseEstimatorBase):
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
         self._ensure_pose()
-        results = self.pose.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+        rgb_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        results = _process_with_recovery(
+            self.pose,
+            rgb_image,
+            static_image_mode=self.static_image_mode,
+            model_complexity=self.model_complexity,
+            min_detection_confidence=self.min_detection_confidence,
+            min_tracking_confidence=self.min_tracking_confidence,
+        )
         if not results.pose_landmarks:
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
         landmarks = landmarks_from_proto(results.pose_landmarks.landmark)
@@ -119,7 +160,7 @@ class PoseEstimator(PoseEstimatorBase):
 class CroppedPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -167,7 +208,15 @@ class CroppedPoseEstimator(PoseEstimatorBase):
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
         self._ensure_graphs()
         height, width = image_bgr.shape[:2]
-        results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+        rgb_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        results_full = _process_with_recovery(
+            self.pose_full,
+            rgb_image,
+            static_image_mode=self.static_image_mode,
+            model_complexity=self.model_complexity,
+            min_detection_confidence=self.min_detection_confidence,
+            min_tracking_confidence=self.min_tracking_confidence,
+        )
         if not results_full.pose_landmarks:
             self._smoothed_bbox = None
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
@@ -194,7 +243,15 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
 
         crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
-        results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
+        crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
+        results_crop = _process_with_recovery(
+            self.pose_crop,
+            crop_rgb,
+            static_image_mode=self.static_image_mode,
+            model_complexity=self.model_complexity,
+            min_detection_confidence=self.min_detection_confidence,
+            min_tracking_confidence=self.min_tracking_confidence,
+        )
         annotated_image = image_bgr.copy()
 
         if results_crop.pose_landmarks:
@@ -229,7 +286,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
 class RoiPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
-        static_image_mode: bool = True,
+        static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
@@ -285,6 +342,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
         self._ensure_graphs()
         height, width = image_bgr.shape[:2]
+        rgb_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         run_full = (
             self.last_box is None
             or (self.frame_idx % self.refresh_period == 0)
@@ -297,7 +355,14 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 run_full = True
 
         if run_full:
-            results_full = self.pose_full.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+            results_full = _process_with_recovery(
+                self.pose_full,
+                rgb_image,
+                static_image_mode=self.static_image_mode,
+                model_complexity=self.model_complexity,
+                min_detection_confidence=self.min_detection_confidence,
+                min_tracking_confidence=self.min_tracking_confidence,
+            )
             if not results_full.pose_landmarks:
                 self.misses += 1
                 self.last_box = None
@@ -333,7 +398,15 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
             else:
                 crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
-                results_crop = self.pose_crop.process(cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB))
+                crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
+                results_crop = _process_with_recovery(
+                    self.pose_crop,
+                    crop_rgb,
+                    static_image_mode=self.static_image_mode,
+                    model_complexity=self.model_complexity,
+                    min_detection_confidence=self.min_detection_confidence,
+                    min_tracking_confidence=self.min_tracking_confidence,
+                )
                 if not results_crop.pose_landmarks:
                     self.misses += 1
                     if self.misses >= self.max_misses:

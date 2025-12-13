@@ -13,5 +13,8 @@ DEFAULT_COUNTS_DIR = DEFAULT_OUTPUT_DIR / "counts"
 DEFAULT_POSES_DIR = DEFAULT_OUTPUT_DIR / "poses"
 
 # --- CONSTANTES DEL PIPELINE ---
-MIN_DETECTION_CONFIDENCE = 0.7
-MIN_TRACKING_CONFIDENCE = 0.7
+# Apostamos por umbrales ligeramente más permisivos para maximizar la detección
+# en vídeos con iluminación pobre u oclusiones parciales sin sacrificar la
+# estabilidad de MediaPipe.
+MIN_DETECTION_CONFIDENCE = 0.6
+MIN_TRACKING_CONFIDENCE = 0.6
