@@ -216,6 +216,7 @@ def stream_pose_and_detection(
 
     try:
         with estimator_cls(
+            static_image_mode=False,
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:

@@ -18,6 +18,7 @@ from src.A_preprocessing.frame_extraction import extract_frames_stream
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.D_visualization import render_landmarks_video
 from src.D_visualization.landmark_video_io import make_web_safe_h264
+from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY
 
 
 @dataclass(slots=True)
@@ -151,6 +152,7 @@ def generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
+        min_visibility=DEFAULT_LANDMARK_MIN_VISIBILITY,
         output_rotate=output_rotate,
         tighten_to_subject=False,
         subject_margin=0.15,
