@@ -14,7 +14,6 @@ import pandas as pd
 
 from src import config
 from src.A_preprocessing.frame_extraction import extract_processed_frames_stream
-from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from .errors import NoFramesExtracted
@@ -34,10 +33,7 @@ from .sampling import (
     open_video_cap,
     read_info_and_initial_sampling,
 )
-from .streaming import (
-    infer_upright_quadrant_from_sequence,
-    stream_pose_and_detection,
-)
+from .streaming import stream_pose_and_detection
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +47,12 @@ def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> N
         cb(progress, message)
     except TypeError:
         cb(progress)
+
+
+def infer_upright_quadrant_from_sequence(_sequence: Any) -> int:
+    """Mantener compatibilidad devolviendo siempre una rotación nula."""
+
+    return 0
 
 
 def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> OutputPaths:
@@ -95,11 +97,10 @@ def run_pipeline(
     )
 
     t0 = time.perf_counter()
-    notify(5, "STAGE 1: Extracting and rotating frames...")
+    notify(5, "STAGE 1: Extracting frames...")
 
     cap = open_video_cap(video_path)
-    manual_rotate = cfg.pose.rotate
-    processing_rotate = normalize_rotation_deg(int(manual_rotate)) if manual_rotate is not None else 0
+    processing_rotate = 0
     warnings: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -161,12 +162,6 @@ def run_pipeline(
         )
 
         initial_sample_rate = compute_sample_rate(fps_original, cfg) if fps_original > 0 else 1
-
-        metadata_rotation = normalize_rotation_deg(int(info.rotation or 0))
-        if manual_rotate is None:
-            processing_rotate = metadata_rotation
-        else:
-            processing_rotate = normalize_rotation_deg(int(manual_rotate))
 
         plan = make_sampling_plan(
             fps_metadata=fps_original,
@@ -306,14 +301,6 @@ def run_pipeline(
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes = filter_landmarks(df_raw_landmarks)
-    overlay_rotate_cw = normalize_rotation_deg(
-        infer_upright_quadrant_from_sequence(filtered_sequence)
-    )
-    logger.info(
-        "Overlay rotation (clockwise) inferred from landmarks: %d°",
-        overlay_rotate_cw,
-    )
-
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
     overlay_video_stream_path: Optional[Path] = None
@@ -378,11 +365,9 @@ def run_pipeline(
                     frame_sequence=filtered_sequence,
                     crop_boxes=crop_boxes,
                     processed_size=processed_frame_size or target_size,
-                    rotate=processing_rotate,
                     sample_rate=sample_rate,
                     target_fps=target_fps_for_sampling,
                     fps_for_writer=fps_for_overlay,
-                    output_rotate=overlay_rotate_cw,
                     progress_cb=_overlay_progress,
                     overlay_max_long_side=overlay_scale_side,
                 )
