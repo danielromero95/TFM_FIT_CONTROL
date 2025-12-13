@@ -9,6 +9,27 @@ import cv2
 
 from ..video_metadata import VideoInfo, read_video_file_info
 
+# Rotaciones soportadas por OpenCV (múltiplos de 90°).
+_ROTATE_CANDIDATES = (0, 90, 180, 270)
+
+
+def normalize_rotation_deg(value: int) -> int:
+    """Ajusta ``value`` al múltiplo de 90° más cercano admitido por OpenCV.
+
+    Los metadatos de rotación pueden contener valores inesperados (por ejemplo,
+    450 o 89). Para garantizar que los fotogramas y los *landmarks* se dibujen
+    siempre con la misma orientación, reducimos el ángulo a uno de los
+    cuadrantes compatibles.
+    """
+
+    value = int(value) % 360
+    if value in _ROTATE_CANDIDATES:
+        return value
+    return min(
+        _ROTATE_CANDIDATES,
+        key=lambda cand: min((value - cand) % 360, (cand - value) % 360),
+    )
+
 
 def _seek_to_msec(cap: cv2.VideoCapture, msec: float) -> None:
     """Intenta desplazar el cursor del vídeo hasta el instante indicado en ms."""
@@ -47,5 +68,5 @@ def _load_video_info(
 def _resolve_rotation(rotate: int | str | None, info: VideoInfo) -> int:
     """Determina la rotación final a aplicar según la configuración y el vídeo."""
     if rotate == "auto" or rotate is None:
-        return int(info.rotation or 0)
-    return int(rotate)
+        return normalize_rotation_deg(int(info.rotation or 0))
+    return normalize_rotation_deg(int(rotate))

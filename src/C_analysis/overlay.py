@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from src.A_preprocessing.frame_extraction import extract_frames_stream
+from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.D_visualization import render_landmarks_video
 from src.D_visualization.landmark_video_io import make_web_safe_h264
 
@@ -42,10 +43,12 @@ def iter_original_frames_for_overlay(
     target = float(target_fps) if target_fps and target_fps > 0 else None
     sampling_mode = "time" if target is not None else "index"
 
+    normalized_rotate = normalize_rotation_deg(rotate)
+
     kwargs: dict[str, object] = {
         "video_path": str(video_path),
         "sampling": sampling_mode,
-        "rotate": int(rotate),
+        "rotate": int(normalized_rotate),
         "resize_to": None,
     }
     if sampling_mode == "time":
@@ -130,6 +133,8 @@ def generate_overlay_video(
     overlay_path = session_dir / f"{session_dir.name}_overlay.mp4"
     fps_value = float(fps_for_writer if fps_for_writer and fps_for_writer > 0 else 1.0)
 
+    output_rotate = normalize_rotation_deg(output_rotate)
+
     frames_iter = iter_original_frames_for_overlay(
         video_path,
         rotate=rotate,
@@ -146,7 +151,7 @@ def generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
-        output_rotate=int(output_rotate) % 360,
+        output_rotate=output_rotate,
         tighten_to_subject=False,
         subject_margin=0.15,
         progress_cb=progress_cb,
