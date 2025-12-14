@@ -26,7 +26,7 @@ from src.core.types import ExerciseType, ViewType
 
 from .classification import classify_features
 from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, MIN_VALID_FRAMES
-from .extraction import _append_nan, _process_frame
+from .extraction import _append_nan, _append_reliability, _evaluate_view_reliability, _process_frame
 from .features import build_features_from_landmark_array
 from .types import DetectionResult, FeatureSeries, make_detection_result
 
@@ -91,6 +91,13 @@ class IncrementalExerciseFeatureExtractor:
         self._valid_samples = 0
         self._frames_considered = 0
         self._frames_accepted = 0
+        self._reliability_flags: list[bool] = []
+        self._shoulder_vis_left: list[float] = []
+        self._shoulder_vis_right: list[float] = []
+        self._hip_vis_left: list[float] = []
+        self._hip_vis_right: list[float] = []
+        self._shoulder_z_sign: list[float] = []
+        self._hip_z_sign: list[float] = []
         self._initialised = False
         self._done = False
 
@@ -150,7 +157,7 @@ class IncrementalExerciseFeatureExtractor:
         assert self._pose is not None and self._pose_landmark is not None
 
         feature_lists: Dict[str, _FeatureBuffer] = self._feature_buffers
-        valid = _process_frame(
+        valid, reliable, vis_meta = _process_frame(
             frame,
             self._pose,
             self._pose_landmark,
@@ -161,6 +168,16 @@ class IncrementalExerciseFeatureExtractor:
         if valid:
             self._valid_samples += 1
             self._frames_accepted += 1
+        self._reliability_flags.append(bool(reliable))
+        _append_reliability(
+            vis_meta,
+            self._shoulder_vis_left,
+            self._shoulder_vis_right,
+            self._hip_vis_left,
+            self._hip_vis_right,
+            self._shoulder_z_sign,
+            self._hip_z_sign,
+        )
 
     def add_landmarks(
         self,
@@ -221,7 +238,28 @@ class IncrementalExerciseFeatureExtractor:
         except ValueError:
             _append_nan(feature_lists)
             self._samples += 1
+            self._reliability_flags.append(False)
+            _append_reliability(
+                None,
+                self._shoulder_vis_left,
+                self._shoulder_vis_right,
+                self._hip_vis_left,
+                self._hip_vis_right,
+                self._shoulder_z_sign,
+                self._hip_z_sign,
+            )
             return
+
+        landmark_dicts = [
+            {
+                "x": float(arr[i, 0]) if i < arr.shape[0] else float("nan"),
+                "y": float(arr[i, 1]) if i < arr.shape[0] else float("nan"),
+                "z": float(arr[i, 2]) if i < arr.shape[0] else float("nan"),
+                "visibility": float(arr[i, 3]) if i < arr.shape[0] else float("nan"),
+            }
+            for i in range(33)
+        ]
+        reliable, vis_meta = _evaluate_view_reliability(landmark_dicts)
 
         for name in FEATURE_NAMES:
             feature_lists[name].append(float(feature_values.get(name, float("nan"))))
@@ -231,6 +269,16 @@ class IncrementalExerciseFeatureExtractor:
         if has_finite:
             self._valid_samples += 1
             self._frames_accepted += 1
+        self._reliability_flags.append(bool(reliable))
+        _append_reliability(
+            vis_meta,
+            self._shoulder_vis_left,
+            self._shoulder_vis_right,
+            self._hip_vis_left,
+            self._hip_vis_right,
+            self._shoulder_z_sign,
+            self._hip_z_sign,
+        )
 
     def finalize(self) -> DetectionResult:
         """Cerrar recursos y clasificar la serie agregada de características."""
@@ -252,6 +300,17 @@ class IncrementalExerciseFeatureExtractor:
                 sampling_rate=float(sampling_rate),
                 valid_frames=int(self._valid_samples),
                 total_frames=int(self._samples),
+                view_reliability={
+                    "frame_reliability": np.asarray(self._reliability_flags, dtype=bool),
+                    "shoulder_vis_left": np.asarray(self._shoulder_vis_left, dtype=float),
+                    "shoulder_vis_right": np.asarray(self._shoulder_vis_right, dtype=float),
+                    "hip_vis_left": np.asarray(self._hip_vis_left, dtype=float),
+                    "hip_vis_right": np.asarray(self._hip_vis_right, dtype=float),
+                    "shoulder_z_sign": np.asarray(self._shoulder_z_sign, dtype=float),
+                    "hip_z_sign": np.asarray(self._hip_z_sign, dtype=float),
+                    "total_frames_sampled": int(self._samples),
+                    "reliable_frames_used": int(sum(self._reliability_flags)),
+                },
             )
             label, view, confidence = classify_features(features)
             return make_detection_result(label, view, confidence)

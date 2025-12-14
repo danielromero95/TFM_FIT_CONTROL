@@ -120,6 +120,71 @@ def test_view_classifier_front_vs_side():
     assert bench_view.label == "front"
 
 
+def test_view_resists_outlier_and_infers_side():
+    reliability = {
+        "frame_reliability": np.array([True] * 6),
+        "shoulder_vis_left": np.full(6, 0.9),
+        "shoulder_vis_right": np.full(6, 0.6),
+        "shoulder_z_sign": np.array([-0.12, -0.15, -0.14, -0.13, -0.14, -0.50]),
+        "hip_z_sign": np.array([-0.05, -0.06, -0.05, -0.04, -0.05, -0.10]),
+        "total_frames_sampled": 6,
+        "reliable_frames_used": 6,
+    }
+    z = np.array([0.14, 0.15, 0.15, 0.16, 0.15, 0.01])
+    width = np.array([0.44, 0.45, 0.43, 0.44, 0.45, 0.80])
+    view = classify_view(None, z, width, None, reliability=reliability)
+    assert view.label == "side"
+    assert view.side == "left"
+    assert view.confidence > 0.5
+
+
+def test_low_visibility_frames_are_ignored_for_view():
+    reliability = {
+        "frame_reliability": np.array([False, False, True, True, True, True]),
+        "shoulder_vis_left": np.array([0.1, 0.1, 0.9, 0.9, 0.95, 0.96]),
+        "shoulder_vis_right": np.array([0.1, 0.1, 0.5, 0.6, 0.65, 0.7]),
+        "shoulder_z_sign": np.array([-0.14, -0.13, -0.12, -0.12, -0.13, -0.12]),
+        "hip_z_sign": np.array([-0.08, -0.08, -0.07, -0.07, -0.08, -0.07]),
+        "total_frames_sampled": 6,
+        "reliable_frames_used": 4,
+    }
+    z = np.array([0.02, 0.03, 0.16, 0.15, 0.14, 0.15])
+    width = np.array([0.62, 0.63, 0.42, 0.43, 0.44, 0.42])
+    view = classify_view(None, z, width, None, reliability=reliability)
+    assert view.label == "side"
+    assert view.confidence > 0.4
+
+
+def test_confidence_drops_with_too_few_reliable_frames():
+    reliability = {
+        "frame_reliability": np.array([True, False, True]),
+        "shoulder_vis_left": np.array([0.9, 0.2, 0.9]),
+        "shoulder_vis_right": np.array([0.7, 0.2, 0.7]),
+        "shoulder_z_sign": np.array([0.2, 0.0, 0.2]),
+        "hip_z_sign": np.array([0.1, 0.0, 0.1]),
+        "total_frames_sampled": 3,
+        "reliable_frames_used": 2,
+    }
+    z = np.array([0.18, 0.01, 0.19])
+    width = np.array([0.40, 0.80, 0.39])
+    view = classify_view(None, z, width, None, reliability=reliability)
+    assert view.label == "unknown"
+    assert view.confidence == 0.0
+
+
+def test_mask_padding_keeps_invalid_frames_false():
+    from exercise_detection.view import _mask_invalid
+
+    arr = np.array([1.0, 2.0, 3.0])
+    mask = np.array([True])
+
+    masked = _mask_invalid(arr, mask)
+
+    assert np.isfinite(masked[0])
+    assert np.isnan(masked[1])
+    assert np.isnan(masked[2])
+
+
 def _internal_metrics(features: FeatureSeries):
     series = _prepare_series(features)
     sr = float(features.sampling_rate or DEFAULT_SAMPLING_RATE)
