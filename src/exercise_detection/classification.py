@@ -12,7 +12,7 @@ from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, MIN_VALID_FRAMES
 from .metrics import compute_metrics
 from .segmentation import segment_reps
 from .smoothing import smooth
-from .types import AggregateMetrics, ClassificationScores, FeatureSeries
+from .types import AggregateMetrics, ClassificationScores, FeatureSeries, ViewResult
 from .view import classify_view
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         shoulder_z_delta=get_series("shoulder_z_delta_abs"),
         shoulder_width=get_series("shoulder_width_norm"),
         ankle_width=get_series("ankle_width_norm"),
+        reliability=getattr(features, "view_reliability", None),
     )
 
     view_cues_present = any(
@@ -145,7 +146,10 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         view_label = "unknown"
         confidence = 0.0
 
-    _log_summary(side, view_label, metrics, scores)
+    if np.isfinite(view_result.confidence):
+        confidence = float(min(confidence, view_result.confidence))
+
+    _log_summary(side, view_label, metrics, scores, view_result)
     return label, view_label, float(confidence)
 
 
@@ -247,12 +251,21 @@ def _nanmean_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return result
 
 
-def _log_summary(side: str, view_label: str, metrics: AggregateMetrics, scores: ClassificationScores) -> None:
+def _log_summary(
+    side: str, view_label: str, metrics: AggregateMetrics, scores: ClassificationScores, view_result: ViewResult
+) -> None:
+    stats = getattr(view_result, "stats", {}) or {}
+    rel_used = int(stats.get("reliable_frames", 0))
+    rel_total = int(stats.get("total_frames_sampled", 0))
+    width_med = stats.get("width_med", float("nan"))
+    z_med = stats.get("z_med", float("nan"))
+    lateral_score = stats.get("lateral_score", float("nan"))
+    side_hint = getattr(view_result, "side", None)
     logger.info(
         "side=%s view=%s knee_min=%.1f hip_min=%.1f elbow_bottom=%.1f torso_tilt_bottom=%.1f "
         "wrist_shoulder_diff=%.3f wrist_hip_diff=%.3f knee_rom=%.1f hip_rom=%.1f elbow_rom=%.1f "
         "knee_forward=%.3f tibia_angle=%.1f bar_range=%.3f bar_ankle_diff=%.3f hip_range=%.3f bar_horizontal_std=%.3f "
-        "duration=%.2f scores_raw=%s scores_adj=%s veto=%s",
+        "duration=%.2f scores_raw=%s scores_adj=%s veto=%s view_rel=%d/%d width_med=%.3f z_med=%.3f lateral=%.3f view_side=%s",
         side,
         view_label,
         metrics.knee_min,
@@ -274,6 +287,12 @@ def _log_summary(side: str, view_label: str, metrics: AggregateMetrics, scores: 
         {k: round(v, 3) for k, v in scores.raw.items()},
         {k: round(v, 3) for k, v in scores.adjusted.items()},
         scores.deadlift_veto,
+        rel_used,
+        rel_total,
+        width_med,
+        z_med,
+        lateral_score,
+        side_hint,
     )
 
     for idx, rep in enumerate(metrics.per_rep):

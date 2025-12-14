@@ -10,7 +10,7 @@ consumen los clasificadores posteriores.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, MutableMapping
+from typing import Any, Dict, Iterable, MutableMapping, Tuple
 
 import cv2
 import numpy as np
@@ -27,7 +27,7 @@ from src.config.settings import (
     build_pose_kwargs,
 )
 
-from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES
+from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, RELIABILITY_VIS_THRESHOLD
 from .features import build_features_from_landmarks
 from .types import FeatureSeries
 
@@ -57,6 +57,13 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         stride = 1
 
     feature_lists: Dict[str, list[float]] = {name: [] for name in FEATURE_NAMES}
+    reliability_flags: list[bool] = []
+    shoulder_vis_left: list[float] = []
+    shoulder_vis_right: list[float] = []
+    hip_vis_left: list[float] = []
+    hip_vis_right: list[float] = []
+    shoulder_z_sign: list[float] = []
+    hip_z_sign: list[float] = []
 
     total_processed = 0
     valid_frames = 0
@@ -84,15 +91,37 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
             prefetched_info=info,
         ):
             total_processed += 1
-            valid = _process_frame(frame_info.array, pose, pose_landmark, feature_lists)
+            valid, reliable, vis_meta = _process_frame(
+                frame_info.array, pose, pose_landmark, feature_lists
+            )
             if valid:
                 valid_frames += 1
+            reliability_flags.append(bool(reliable))
+            _append_reliability(
+                vis_meta,
+                shoulder_vis_left,
+                shoulder_vis_right,
+                hip_vis_left,
+                hip_vis_right,
+                shoulder_z_sign,
+                hip_z_sign,
+            )
 
     while total_processed < sample_count:
         # Cuando el vídeo termina antes de la cuota prevista completamos con NaN
         # para conservar la longitud y no sesgar el filtrado estadístico.
         _append_nan(feature_lists)
         total_processed += 1
+        reliability_flags.append(False)
+        _append_reliability(
+            None,
+            shoulder_vis_left,
+            shoulder_vis_right,
+            hip_vis_left,
+            hip_vis_right,
+            shoulder_z_sign,
+            hip_z_sign,
+        )
 
     data = {key: np.asarray(values, dtype=float) for key, values in feature_lists.items()}
 
@@ -112,6 +141,17 @@ def extract_features(video_path: str, max_frames: int = 300) -> FeatureSeries:
         sampling_rate=float(sampling_rate),
         valid_frames=int(valid_frames),
         total_frames=int(total_processed),
+        view_reliability={
+            "frame_reliability": np.asarray(reliability_flags, dtype=bool),
+            "shoulder_vis_left": np.asarray(shoulder_vis_left, dtype=float),
+            "shoulder_vis_right": np.asarray(shoulder_vis_right, dtype=float),
+            "hip_vis_left": np.asarray(hip_vis_left, dtype=float),
+            "hip_vis_right": np.asarray(hip_vis_right, dtype=float),
+            "shoulder_z_sign": np.asarray(shoulder_z_sign, dtype=float),
+            "hip_z_sign": np.asarray(hip_z_sign, dtype=float),
+            "total_frames_sampled": int(total_processed),
+            "reliable_frames_used": int(sum(reliability_flags)),
+        },
     )
 
 
@@ -142,15 +182,32 @@ def extract_features_from_frames(
 
     total_processed = 0
     valid_frames = 0
+    reliability_flags: list[bool] = []
+    shoulder_vis_left: list[float] = []
+    shoulder_vis_right: list[float] = []
+    hip_vis_left: list[float] = []
+    hip_vis_right: list[float] = []
+    shoulder_z_sign: list[float] = []
+    hip_z_sign: list[float] = []
 
     with mp_pose_module.Pose(**pose_kwargs) as pose:
         for frame in frames:
             if total_processed >= max_frames:
                 break
             total_processed += 1
-            valid = _process_frame(frame, pose, pose_landmark, feature_lists)
+            valid, reliable, vis_meta = _process_frame(frame, pose, pose_landmark, feature_lists)
             if valid:
                 valid_frames += 1
+            reliability_flags.append(bool(reliable))
+            _append_reliability(
+                vis_meta,
+                shoulder_vis_left,
+                shoulder_vis_right,
+                hip_vis_left,
+                hip_vis_right,
+                shoulder_z_sign,
+                hip_z_sign,
+            )
 
     data = {key: np.asarray(values, dtype=float) for key, values in feature_lists.items()}
 
@@ -169,6 +226,17 @@ def extract_features_from_frames(
         sampling_rate=sampling_rate,
         valid_frames=int(valid_frames),
         total_frames=int(total_processed),
+        view_reliability={
+            "frame_reliability": np.asarray(reliability_flags, dtype=bool),
+            "shoulder_vis_left": np.asarray(shoulder_vis_left, dtype=float),
+            "shoulder_vis_right": np.asarray(shoulder_vis_right, dtype=float),
+            "hip_vis_left": np.asarray(hip_vis_left, dtype=float),
+            "hip_vis_right": np.asarray(hip_vis_right, dtype=float),
+            "shoulder_z_sign": np.asarray(shoulder_z_sign, dtype=float),
+            "hip_z_sign": np.asarray(hip_z_sign, dtype=float),
+            "total_frames_sampled": int(total_processed),
+            "reliable_frames_used": int(sum(reliability_flags)),
+        },
     )
 
 
@@ -179,7 +247,7 @@ def _process_frame(
     feature_lists: MutableMapping[str, Any],
     *,
     min_visibility: float = DEFAULT_LANDMARK_MIN_VISIBILITY,
-) -> bool:
+) -> Tuple[bool, bool, Dict[str, float]]:
     """Ejecutar MediaPipe sobre un fotograma y acumular las mediciones resultantes.
 
     El resultado booleano indica si al menos una métrica salió finita; esto nos
@@ -192,7 +260,7 @@ def _process_frame(
 
     if not results.pose_landmarks:
         _append_nan(feature_lists)
-        return False
+        return False, False, {}
 
     del pose_landmark
 
@@ -238,6 +306,7 @@ def _process_frame(
             world_landmark_dicts.append({"x": x_val, "y": y_val, "z": z_val})
 
     feature_values = build_features_from_landmarks(landmark_dicts, world_landmarks=world_landmark_dicts)
+    reliable, vis_meta = _evaluate_view_reliability(landmark_dicts)
 
     has_finite = False
     for name in FEATURE_NAMES:
@@ -246,12 +315,70 @@ def _process_frame(
         if not has_finite and np.isfinite(value):
             has_finite = True
 
-    return has_finite
+    return has_finite, reliable, vis_meta
 
 
 def _append_nan(feature_lists: MutableMapping[str, Any]) -> None:
     for key in FEATURE_NAMES:
         feature_lists[key].append(float("nan"))
+
+
+def _evaluate_view_reliability(landmarks: list[dict[str, float]]) -> Tuple[bool, Dict[str, float]]:
+    def _get(idx: int) -> dict[str, float]:
+        if 0 <= idx < len(landmarks):
+            return landmarks[idx]
+        return {"x": float("nan"), "y": float("nan"), "z": float("nan"), "visibility": float("nan")}
+
+    left_shoulder = _get(11)
+    right_shoulder = _get(12)
+    left_hip = _get(23)
+    right_hip = _get(24)
+
+    def _joint_ok(joint: dict[str, float]) -> bool:
+        vis = float(joint.get("visibility", float("nan")))
+        coords_ok = (
+            np.isfinite(joint.get("x", float("nan")))
+            and np.isfinite(joint.get("y", float("nan")))
+            and np.isfinite(joint.get("z", float("nan")))
+        )
+        return coords_ok and np.isfinite(vis) and vis >= RELIABILITY_VIS_THRESHOLD
+
+    required_ok = _joint_ok(left_shoulder) and _joint_ok(right_shoulder) and _joint_ok(left_hip) and _joint_ok(right_hip)
+
+    vis_meta = {
+        "shoulder_vis_left": float(left_shoulder.get("visibility", float("nan"))),
+        "shoulder_vis_right": float(right_shoulder.get("visibility", float("nan"))),
+        "hip_vis_left": float(left_hip.get("visibility", float("nan"))),
+        "hip_vis_right": float(right_hip.get("visibility", float("nan"))),
+        "shoulder_z_sign": float(left_shoulder.get("z", float("nan")))
+        - float(right_shoulder.get("z", float("nan"))),
+        "hip_z_sign": float(left_hip.get("z", float("nan"))) - float(right_hip.get("z", float("nan"))),
+    }
+
+    # También exigimos que las coordenadas sean finitas para la fiabilidad.
+    for key in ("shoulder_z_sign", "hip_z_sign"):
+        if not np.isfinite(vis_meta[key]):
+            vis_meta[key] = float("nan")
+
+    return required_ok, vis_meta
+
+
+def _append_reliability(
+    meta: Dict[str, float] | None,
+    shoulder_vis_left: list[float],
+    shoulder_vis_right: list[float],
+    hip_vis_left: list[float],
+    hip_vis_right: list[float],
+    shoulder_z_sign: list[float],
+    hip_z_sign: list[float],
+) -> None:
+    meta = meta or {}
+    shoulder_vis_left.append(float(meta.get("shoulder_vis_left", float("nan"))))
+    shoulder_vis_right.append(float(meta.get("shoulder_vis_right", float("nan"))))
+    hip_vis_left.append(float(meta.get("hip_vis_left", float("nan"))))
+    hip_vis_right.append(float(meta.get("hip_vis_right", float("nan"))))
+    shoulder_z_sign.append(float(meta.get("shoulder_z_sign", float("nan"))))
+    hip_z_sign.append(float(meta.get("hip_z_sign", float("nan"))))
 
 
 def _estimate_sampling_rate(fps: float, frame_count: int, samples: int) -> float:

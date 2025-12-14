@@ -17,6 +17,7 @@ class DetectionResult:
     label: ExerciseType
     view: ViewType
     confidence: float
+    side: str | None = None
 
 
 def make_detection_result(label: str, view: str, confidence: float) -> "DetectionResult":
@@ -33,6 +34,7 @@ class FeatureSeries:
     sampling_rate: float
     valid_frames: int
     total_frames: int
+    view_reliability: Dict[str, np.ndarray | float | int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -114,4 +116,8 @@ class ViewResult:
     label: str
     scores: Mapping[str, float]
     votes: Mapping[str, int]
+    confidence: float = 0.0
+    lateral_score: float = float("nan")
+    stats: Mapping[str, float] = field(default_factory=dict)
+    side: str | None = None
 
