@@ -9,9 +9,14 @@ import pytest
 
 from src.B_pose_estimation.estimators.mediapipe_estimators import (
     CroppedPoseEstimator,
+    LandmarkSmoother,
+    PoseEstimator,
     _rescale_landmarks_from_crop,
+    pose_reliable,
+    reliability_score,
 )
 from src.B_pose_estimation.estimators.mediapipe_pool import PoseGraphPool
+from src.B_pose_estimation.types import Landmark
 
 
 class _FakeNormalizedLandmark:
@@ -157,3 +162,145 @@ def test_cropped_estimator_draws_full_frame_landmarks(monkeypatch):
     assert isinstance(drawn_landmarks, _FakeNormalizedLandmarkList)
     assert pytest.approx(drawn_landmarks.landmark[0].x) == pytest.approx(0.5)
     assert pytest.approx(drawn_landmarks.landmark[0].y) == pytest.approx(0.375)
+
+
+def test_pose_estimator_reuses_pose_instance(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+    drawing = _FakeDrawing()
+    calls: list[dict[str, object]] = []
+
+    class _FakePose:
+        def __init__(self):
+            self.calls = 0
+
+        def process(self, _image):
+            self.calls += 1
+
+            return types.SimpleNamespace(
+                pose_landmarks=_FakeNormalizedLandmarkList(
+                    [_FakeNormalizedLandmark(0.1, 0.2, visibility=0.9)]
+                )
+            )
+
+    def _fake_acquire(**kwargs):
+        calls.append(kwargs)
+        return _FakePose(), (False, 2, 0.6, 0.6, True, False)
+
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs)))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
+
+    estimator = PoseEstimator()
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    estimator.estimate(image)
+    estimator.estimate(image)
+    estimator.close()
+
+    assert len(calls) == 1
+
+
+def test_pose_estimator_resets_smoother_on_miss(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+    drawing = _FakeDrawing()
+
+    sequences = [
+        [_FakeNormalizedLandmark(0.1, 0.2, visibility=1.0)],
+        [],
+    ]
+
+    class _FakePose:
+        def process(self, _image):
+            landmarks = sequences.pop(0)
+            return types.SimpleNamespace(
+                pose_landmarks=
+                _FakeNormalizedLandmarkList(landmarks) if landmarks else None
+            )
+
+    def _fake_acquire(**kwargs):
+        return _FakePose(), (False, 2, 0.6, 0.6, True, False)
+
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs)))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
+
+    estimator = PoseEstimator(landmark_smoothing_alpha=0.5)
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    estimator.estimate(image)
+    assert estimator._smoother is not None
+    assert estimator._smoother._state is not None
+
+    result = estimator.estimate(image)
+    assert result.pose_ok is False
+    assert estimator._smoother._state is None
+
+
+def test_pose_reliable_requires_visible_core_landmarks():
+    landmarks = [Landmark(x=0.0, y=0.0, z=0.0, visibility=1.0) for _ in range(33)]
+
+    assert pose_reliable(landmarks, visibility_threshold=0.5)
+
+    landmarks[11] = Landmark(x=0.0, y=0.0, z=0.0, visibility=0.1)
+    assert not pose_reliable(landmarks, visibility_threshold=0.5)
+    assert not pose_reliable(landmarks[:4], visibility_threshold=0.5)
+
+
+def test_reliability_score_returns_mean_visibility():
+    landmarks = [Landmark(x=0.0, y=0.0, z=0.0, visibility=1.0) for _ in range(33)]
+
+    assert reliability_score(landmarks) == pytest.approx(1.0)
+
+    landmarks[12] = Landmark(x=0.0, y=0.0, z=0.0, visibility=0.2)
+    assert reliability_score(landmarks) == pytest.approx(0.8)
+
+    landmarks[24] = Landmark(x=0.0, y=0.0, z=0.0, visibility=float("nan"))
+    assert np.isnan(reliability_score(landmarks))
+
+
+def test_landmark_smoother_is_deterministic(monkeypatch):
+    smoother = LandmarkSmoother(alpha=0.5, visibility_threshold=0.5)
+    frame1 = [Landmark(0.0, 0.0, 0.0, visibility=1.0)]
+    frame2 = [Landmark(1.0, 1.0, 1.0, visibility=1.0)]
+    low_vis = [Landmark(10.0, 10.0, 10.0, visibility=0.0)]
+
+    first = smoother(frame1)
+    assert first is not None
+    assert first[0].x == pytest.approx(0.0)
+
+    second = smoother(frame2)
+    assert second is not None
+    assert second[0].x == pytest.approx(0.5)
+    assert second[0].y == pytest.approx(0.5)
+    assert second[0].z == pytest.approx(0.5)
+
+    third = smoother(low_vis)
+    assert third is not None
+    assert third[0].x == pytest.approx(second[0].x)
+    assert third[0].y == pytest.approx(second[0].y)
+    assert third[0].z == pytest.approx(second[0].z)
+
+    fourth = smoother(low_vis)
+    assert fourth is not None
+    assert fourth[0].x == pytest.approx(second[0].x)
+
+
+def test_landmark_smoother_skips_non_finite_values():
+    smoother = LandmarkSmoother(alpha=0.3, visibility_threshold=0.5)
+    baseline = [Landmark(0.0, 0.0, 0.0, visibility=1.0)]
+    noisy = [Landmark(float("nan"), 5.0, 5.0, visibility=float("nan"))]
+
+    first = smoother(baseline)
+    assert first is not None
+    assert first[0].x == pytest.approx(0.0)
+
+    second = smoother(noisy)
+    assert second is not None
+    assert second[0].x == pytest.approx(first[0].x)
+    assert second[0].y == pytest.approx(first[0].y)
+    assert second[0].z == pytest.approx(first[0].z)

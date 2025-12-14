@@ -67,6 +67,7 @@ class PoseResult:
     landmarks: PoseFrame
     annotated_image: Optional[np.ndarray]
     crop_box: Optional[Sequence[int]]
+    pose_ok: Optional[bool] = None
 
     def as_tuple(self) -> Tuple[PoseFrame, Optional[np.ndarray], Optional[Sequence[int]]]:
         return self.landmarks, self.annotated_image, self.crop_box

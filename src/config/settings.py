@@ -70,6 +70,8 @@ def build_pose_kwargs(
     model_complexity: int | None = None,
     min_detection_confidence: float | None = None,
     min_tracking_confidence: float | None = None,
+    smooth_landmarks: bool | None = None,
+    enable_segmentation: bool | None = None,
 ) -> dict[str, object]:
     """Configuración estándar para el grafo ``Pose`` de MediaPipe.
 
@@ -82,8 +84,10 @@ def build_pose_kwargs(
     return {
         "static_image_mode": POSE_STATIC_IMAGE_MODE if static_image_mode is None else static_image_mode,
         "model_complexity": POSE_MODEL_COMPLEXITY if model_complexity is None else model_complexity,
-        "smooth_landmarks": POSE_SMOOTH_LANDMARKS,
-        "enable_segmentation": POSE_ENABLE_SEGMENTATION,
+        "smooth_landmarks": POSE_SMOOTH_LANDMARKS if smooth_landmarks is None else bool(smooth_landmarks),
+        "enable_segmentation": POSE_ENABLE_SEGMENTATION
+        if enable_segmentation is None
+        else bool(enable_segmentation),
         "smooth_segmentation": POSE_SMOOTH_SEGMENTATION,
         "min_detection_confidence": (
             MIN_DETECTION_CONFIDENCE if min_detection_confidence is None else float(min_detection_confidence)
