@@ -79,7 +79,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(
         "src.C_analysis.pipeline.filter_landmarks",
-        lambda df: (df.copy(), []),
+        lambda df: (df.copy(), [], pd.Series([True] * len(df))),
     )
 
     monkeypatch.setattr(

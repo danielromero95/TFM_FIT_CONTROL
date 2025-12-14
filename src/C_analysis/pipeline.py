@@ -305,7 +305,7 @@ def run_pipeline(
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
-    filtered_sequence, crop_boxes = filter_landmarks(df_raw_landmarks)
+    filtered_sequence, crop_boxes, quality_mask = filter_landmarks(df_raw_landmarks)
     overlay_rotate_cw = normalize_rotation_deg(
         infer_upright_quadrant_from_sequence(filtered_sequence)
     )
@@ -414,6 +414,7 @@ def run_pipeline(
         fps_effective,
         exercise=detected_label,
         view=detected_view,
+        quality_mask=quality_mask,
     )
     warnings.extend(metrics_warnings)
     if skip_reason is None and metrics_skip_reason is not None:

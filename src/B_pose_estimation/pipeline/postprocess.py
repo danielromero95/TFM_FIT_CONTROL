@@ -21,7 +21,7 @@ def filter_and_interpolate_landmarks(
     vis_hysteresis_low: float = 0.35,
     vis_hysteresis_high: float = 0.55,
     vis_hang: int = 3,
-) -> Tuple[np.ndarray, np.ndarray | None]:
+) -> Tuple[np.ndarray, np.ndarray | None, np.ndarray]:
     """Filtra marcadores por debajo de ``min_confidence`` e interpola los huecos resultantes."""
 
     logger.info("Filtering and interpolating %d landmark frames.", len(df_raw))
@@ -32,7 +32,7 @@ def filter_and_interpolate_landmarks(
         else None
     )
     if n_frames == 0:
-        return np.array([], dtype=object), crop_coords
+        return np.array([], dtype=object), crop_coords, np.zeros((0,), dtype=bool)
 
     n_points = LANDMARK_COUNT
     cols_x = [f"x{idx}" for idx in range(n_points)]
@@ -89,6 +89,20 @@ def filter_and_interpolate_landmarks(
     ys[~visibility_mask] = np.nan
     zs[~visibility_mask] = np.nan
 
+    visibility_fraction = visibility_mask.mean(axis=1)
+    pose_ok = (
+        df_raw["pose_ok"].astype(float).to_numpy(copy=False)
+        if "pose_ok" in df_raw.columns
+        else None
+    )
+    if pose_ok is not None:
+        pose_quality = np.isfinite(pose_ok) & (pose_ok >= 0.5)
+        quality_mask = pose_quality & (visibility_fraction >= 0.35)
+    else:
+        quality_mask = visibility_fraction >= 0.35
+
+    quality_mask &= np.isfinite(xs).any(axis=1) & np.isfinite(ys).any(axis=1)
+
     def _interp_columns(arr: np.ndarray) -> np.ndarray:
         out = arr.copy()
         if out.size == 0:
@@ -119,7 +133,7 @@ def filter_and_interpolate_landmarks(
     frames_list = landmarks_array.tolist()
     filtered_sequence = np.empty(n_frames, dtype=object)
     filtered_sequence[:] = frames_list
-    return filtered_sequence, crop_coords
+    return filtered_sequence, crop_coords, quality_mask.astype(bool)
 
 
 __all__ = ["filter_and_interpolate_landmarks"]

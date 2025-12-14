@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import numpy as np
 
 from src import config
 from src.C_analysis.repetition_counter import count_repetitions_with_config
@@ -84,3 +85,42 @@ def test_refractory_filter_keeps_most_prominent_valley() -> None:
     assert reps == 1
     assert debug.valley_indices == [3]
     assert len(debug.prominences) == 1
+
+
+def test_state_machine_counts_clean_sine() -> None:
+    cfg = _make_cfg(primary_angle="left_knee")
+    fps = 30.0
+    t = np.linspace(0, 4 * np.pi, 120)
+    angles = 150 + 30 * np.cos(t)
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=fps)
+
+    assert reps == 2
+    assert len(debug.valley_indices) == reps
+
+
+def test_state_machine_handles_noise_and_short_nans() -> None:
+    rng = np.random.default_rng(123)
+    t = np.linspace(0, 2 * np.pi, 90)
+    clean = 140 + 25 * np.cos(t)
+    noisy = clean + rng.normal(0, 2, size=clean.shape)
+    noisy[20:22] = np.nan  # gap dentro del límite
+    df = pd.DataFrame({"left_knee": noisy, "pose_ok": 1.0})
+    cfg = _make_cfg(primary_angle="left_knee")
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0)
+
+    assert reps == 1
+
+
+def test_state_machine_ignores_long_gaps() -> None:
+    t = np.linspace(0, 2 * np.pi, 90)
+    signal = 150 + 20 * np.cos(t)
+    signal[30:40] = np.nan  # mayor que el hueco permitido
+    df = pd.DataFrame({"left_knee": signal, "pose_ok": 1.0})
+    cfg = _make_cfg(primary_angle="left_knee")
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0)
+
+    assert reps == 0

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,7 +24,13 @@ from ..constants import (
     RIGHT_WRIST,
 )
 from ..geometry import angle_abc_deg, sequence_to_coordinate_arrays
-from ..metrics.timeseries import angular_velocity
+from ..signal import derivative, interpolate_small_gaps, smooth_series
+from src.config.constants import (
+    ANALYSIS_MAX_GAP_FRAMES,
+    ANALYSIS_SAVGOL_POLYORDER,
+    ANALYSIS_SAVGOL_WINDOW_SEC,
+    ANALYSIS_SMOOTH_METHOD,
+)
 from ..types import PoseSequence
 
 logger = logging.getLogger(__name__)
@@ -47,6 +53,7 @@ def calculate_metrics_from_sequence(
     smooth_window: int = 7,
     sg_poly: int = 2,
     vel_method: str = "forward",
+    quality_mask: Optional[Iterable[bool]] = None,
 ) -> pd.DataFrame:
     """Calcula métricas biomecánicas para la secuencia de marcadores proporcionada."""
 
@@ -138,80 +145,47 @@ def calculate_metrics_from_sequence(
         }
     )
 
+    valid_mask = np.ones(len(dfm), dtype=bool)
+    if hasattr(sequence, "__len__") and len(dfm) != len(sequence):
+        valid_mask[:] = False
+
+    def _normalize_mask(mask: Optional[Iterable[bool]]) -> np.ndarray:
+        if mask is None:
+            return valid_mask
+        try:
+            arr = np.asarray(list(mask), dtype=bool)
+        except Exception:
+            return valid_mask
+        if arr.size != len(dfm):
+            return valid_mask
+        return arr
+
+    preferred_mask = quality_mask if quality_mask is not None else getattr(sequence, "quality_mask", None)
+    valid_mask = _normalize_mask(preferred_mask)
+
     raw_angles = dfm[ANGLE_COLUMNS].copy()
     for column in ANGLE_COLUMNS:
-        dfm[f"raw_{column}"] = raw_angles[column]
+        dfm[f"raw_{column}"] = np.where(valid_mask, raw_angles[column], np.nan)
 
     smoothing_meta: Dict[str, float | int | str | None] = {
-        "method": "none",
-        "window": None,
-        "poly": None,
+        "method": ANALYSIS_SMOOTH_METHOD,
+        "window": int(max(3, round(fps * ANALYSIS_SAVGOL_WINDOW_SEC))) if fps > 0 else None,
+        "poly": ANALYSIS_SAVGOL_POLYORDER,
     }
 
-    savgol_available = False
-    savgol_filter = None
-    if smooth_window >= 5:
-        try:
-            from scipy.signal import savgol_filter as _savgol_filter
-
-            savgol_filter = _savgol_filter
-            savgol_available = True
-        except Exception:  # pragma: no cover
-            savgol_available = False
-
-    def _maybe_apply_savgol(series: pd.Series) -> tuple[pd.Series, tuple[str, int, int] | None]:
-        if not savgol_available or savgol_filter is None:
-            return series, None
-
-        values = series.to_numpy(dtype=float)
-        n = values.size
-        if n < 5:
-            return series, None
-
-        window = min(smooth_window, n if n % 2 == 1 else n - 1)
-        if window < 5:
-            return series, None
-        if window % 2 == 0:
-            window = max(5, window - 1)
-        if window > n:
-            window = n if n % 2 == 1 else n - 1
-        if window < 5:
-            return series, None
-
-        poly = min(max(1, sg_poly), window - 1)
-        if poly >= window:
-            poly = window - 1
-        if poly < 1:
-            return series, None
-
-        try:
-            filtered = savgol_filter(values, window_length=window, polyorder=poly, mode="interp")
-        except ValueError:
-            return series, None
-
-        return pd.Series(filtered, index=series.index), ("savgol", int(window), int(poly))
-
-    def _apply_smoothing(series: pd.Series) -> tuple[pd.Series, tuple[str, int, int] | None]:
-        if smooth_window >= 5:
-            smoothed, desc = _maybe_apply_savgol(series)
-            if desc is not None:
-                return smoothed, desc
-        if smooth_window >= 3:
-            rolled = series.rolling(smooth_window, center=True, min_periods=1).mean()
-            return rolled, ("rolling_mean", int(smooth_window), 0)
-        return series, None
-
     for column in ANGLE_COLUMNS:
-        interpolated = dfm[column].interpolate(method="linear", limit_direction="both")
-        smoothed_series, desc = _apply_smoothing(interpolated)
-        dfm[column] = smoothed_series
-        if desc is not None:
-            smoothing_meta = {
-                "method": desc[0],
-                "window": desc[1],
-                "poly": desc[2] if desc[0] == "savgol" else None,
-            }
-        dfm[f"ang_vel_{column}"] = angular_velocity(dfm[column].to_numpy(), fps, method=vel_method)
+        series = pd.Series(np.where(valid_mask, dfm[column], np.nan), index=dfm.index)
+        interpolated = interpolate_small_gaps(series, ANALYSIS_MAX_GAP_FRAMES)
+        smoothed = smooth_series(
+            interpolated,
+            fps,
+            method=ANALYSIS_SMOOTH_METHOD,
+            window_seconds=ANALYSIS_SAVGOL_WINDOW_SEC,
+            polyorder=ANALYSIS_SAVGOL_POLYORDER,
+        )
+        smoothed = np.where(valid_mask, smoothed, np.nan)
+        dfm[column] = smoothed
+        dfm[f"ang_vel_{column}"] = derivative(smoothed, fps)
 
     dfm.attrs["smoothing"] = smoothing_meta
 
@@ -229,6 +203,10 @@ def calculate_metrics_from_sequence(
 
     dfm["knee_symmetry"] = _symmetry("left_knee", "right_knee")
     dfm["elbow_symmetry"] = _symmetry("left_elbow", "right_elbow")
+
+    dfm["pose_ok"] = valid_mask.astype(float)
+
+    dfm.loc[~valid_mask, ["trunk_inclination_deg", "shoulder_width", "foot_separation"]] = np.nan
 
     return dfm
 
