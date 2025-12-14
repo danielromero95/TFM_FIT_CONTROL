@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
 
 from src import config
+from src.B_pose_estimation.signal import derivative, interpolate_small_gaps, smooth_series
+from src.config.constants import (
+    ANALYSIS_MAX_GAP_FRAMES,
+    ANALYSIS_SAVGOL_POLYORDER,
+    ANALYSIS_SAVGOL_WINDOW_SEC,
+    ANALYSIS_SMOOTH_METHOD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,61 +28,95 @@ class CountingDebugInfo:
     prominences: List[float]
 
 
-def _count_reps_by_valleys(
-    angle_sequence: Sequence[float],
+def _quality_mask_from_df(df_metrics: pd.DataFrame, column: str) -> np.ndarray:
+    mask = np.isfinite(pd.to_numeric(df_metrics[column], errors="coerce"))
+    if "pose_ok" in df_metrics.columns:
+        pose_ok = pd.to_numeric(df_metrics["pose_ok"], errors="coerce") >= 0.5
+        mask &= pose_ok.to_numpy(dtype=bool, na_value=False)
+    return mask.to_numpy(dtype=bool) if hasattr(mask, "to_numpy") else np.asarray(mask, dtype=bool)
+
+
+def _prepare_primary_series(df_metrics: pd.DataFrame, column: str, fps: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    series = pd.to_numeric(df_metrics[column], errors="coerce")
+    quality_mask = _quality_mask_from_df(df_metrics, column)
+    gated = series.where(quality_mask, np.nan)
+    interpolated = interpolate_small_gaps(gated, ANALYSIS_MAX_GAP_FRAMES)
+    smoothed = smooth_series(
+        interpolated,
+        fps,
+        method=ANALYSIS_SMOOTH_METHOD,
+        window_seconds=ANALYSIS_SAVGOL_WINDOW_SEC,
+        polyorder=ANALYSIS_SAVGOL_POLYORDER,
+    )
+    smoothed = np.where(quality_mask, smoothed, np.nan)
+    velocity = derivative(smoothed, fps)
+    return smoothed, velocity, quality_mask
+
+
+def _state_machine_reps(
+    angles: np.ndarray,
+    velocities: np.ndarray,
     *,
-    prominence: float,
-    distance: int,
+    refractory_frames: int,
+    min_excursion: float,
 ) -> Tuple[int, CountingDebugInfo]:
-    """Detecta valles en la secuencia de ángulos buscando picos en la señal invertida."""
-    if not angle_sequence:
+    finite_angles = angles[np.isfinite(angles)]
+    if finite_angles.size == 0:
         return 0, CountingDebugInfo([], [])
 
-    inverted = -np.asarray(angle_sequence, dtype=float)
-    valleys, properties = find_peaks(
-        inverted,
-        prominence=float(prominence),
-        distance=int(max(1, distance)),
-    )
+    angle_range = float(np.nanmax(finite_angles) - np.nanmin(finite_angles))
+    if not np.isfinite(angle_range) or angle_range < min_excursion:
+        return 0, CountingDebugInfo([], [])
 
-    prominences = properties.get("prominences", np.array([], dtype=float))
-    debug = CountingDebugInfo(
-        valley_indices=[int(i) for i in valleys.tolist()],
-        prominences=[float(p) for p in prominences.tolist()],
-    )
-    logger.debug("Valley detection found %d candidates.", len(debug.valley_indices))
-    return len(debug.valley_indices), debug
+    top_thr = float(np.nanpercentile(finite_angles, 70))
+    bottom_thr = float(np.nanpercentile(finite_angles, 30))
+    vel_valid = np.abs(velocities[np.isfinite(velocities)])
+    vel_thr = max(5.0, float(np.nanpercentile(vel_valid, 65))) if vel_valid.size else 5.0
 
+    state = "IDLE"
+    last_rep_frame = -10 * refractory_frames
+    rep_indices: list[int] = []
+    prominences: list[float] = []
+    bottom_value = np.nan
+    invalid_run = 0
 
-def _apply_refractory_filter(
-    indices: List[int],
-    prominences: List[float],
-    refractory_frames: int,
-) -> Tuple[List[int], List[float]]:
-    """Agrupa valles separados por menos de ``refractory_frames`` y conserva el más prominente de cada grupo."""
-    if refractory_frames <= 0 or len(indices) <= 1:
-        return indices, prominences
+    for idx, (angle, vel) in enumerate(zip(angles, velocities)):
+        if not np.isfinite(angle):
+            invalid_run += 1
+            if invalid_run > ANALYSIS_MAX_GAP_FRAMES:
+                state = "IDLE"
+            continue
 
-    # Trabajamos con arreglos de NumPy; se espera que los índices lleguen en orden ascendente.
-    idx = np.asarray(indices, dtype=np.int64)
-    prom = np.asarray(prominences, dtype=np.float64)
+        invalid_run = 0
+        descending = np.isfinite(vel) and vel < -vel_thr
+        ascending = np.isfinite(vel) and vel > vel_thr
 
-    # Identifica el inicio de cada grupo cuando la separación es >= ``refractory_frames``
-    diffs = np.diff(idx)
-    starts = np.r_[0, np.flatnonzero(diffs >= int(refractory_frames)) + 1]
-    ends = np.r_[starts[1:], idx.size]
+        if state == "IDLE":
+            if angle >= top_thr:
+                state = "TOP"
+            elif angle <= bottom_thr:
+                state = "BOTTOM"
+        elif state == "TOP":
+            if descending:
+                state = "ECCENTRIC"
+        elif state == "ECCENTRIC":
+            if angle <= bottom_thr:
+                bottom_value = angle
+                state = "BOTTOM"
+        elif state == "BOTTOM":
+            if ascending:
+                state = "CONCENTRIC"
+        elif state == "CONCENTRIC":
+            if angle >= top_thr:
+                if idx - last_rep_frame >= refractory_frames:
+                    rep_indices.append(idx)
+                    prominence = float(np.nanmax([top_thr - bottom_value, angle_range]))
+                    prominences.append(prominence)
+                    last_rep_frame = idx
+                state = "TOP"
 
-    kept_idx: list[int] = []
-    kept_prom: list[float] = []
-
-    # Itera por grupo (el número de grupos suele ser mucho menor que el número de puntos)
-    for s, e in zip(starts, ends):
-        # ``argmax`` devuelve la primera ocurrencia en empates → índice determinista más temprano del grupo
-        local = s + int(np.argmax(prom[s:e]))
-        kept_idx.append(int(idx[local]))
-        kept_prom.append(float(prom[local]))
-
-    return kept_idx, kept_prom
+    debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
+    return len(rep_indices), debug
 
 
 def count_repetitions_with_config(
@@ -98,8 +138,8 @@ def count_repetitions_with_config(
         Tupla ``(repetition_count, CountingDebugInfo)`` con el total y la información de depuración.
 
     Keyword Args:
-        overrides: diccionario opcional con claves ``min_prominence``, ``min_distance_sec`` y
-            ``refractory_sec`` para ajustar temporalmente los umbrales sin mutar la configuración original.
+        overrides: diccionario opcional con claves ``min_angle_excursion_deg`` y ``refractory_sec`` para
+            ajustar temporalmente los umbrales sin mutar la configuración original.
     """
     angle_column = counting_cfg.primary_angle
 
@@ -110,43 +150,31 @@ def count_repetitions_with_config(
         )
         return 0, CountingDebugInfo([], [])
 
-    # Rellena hacia adelante y hacia atrás para mitigar periodos breves de NaN y elimina los restantes
-    angles = df_metrics[angle_column].ffill().bfill().dropna().tolist()
-    if not angles:
-        return 0, CountingDebugInfo([], [])
-
     overrides = overrides or {}
 
     fps_safe = float(fps) if fps and fps > 0 else 1.0
-    min_distance_sec = float(
-        overrides.get("min_distance_sec", counting_cfg.min_distance_sec)
-    )
-    prominence_thr = float(overrides.get("min_prominence", counting_cfg.min_prominence))
-
-    distance_frames = max(1, int(round(min_distance_sec * fps_safe)))
-
-    reps, debug = _count_reps_by_valleys(
-        angle_sequence=angles,
-        prominence=prominence_thr,
-        distance=distance_frames,
-    )
-
     refractory_sec = float(overrides.get("refractory_sec", counting_cfg.refractory_sec))
-    refractory_frames = max(0, int(round(refractory_sec * fps_safe)))
-    if refractory_frames > 0 and debug.valley_indices:
-        filtered_idx, filtered_prom = _apply_refractory_filter(
-            debug.valley_indices, debug.prominences, refractory_frames
-        )
-        debug = CountingDebugInfo(valley_indices=filtered_idx, prominences=filtered_prom)
-        reps = len(filtered_idx)
+    refractory_frames = max(1, int(round(refractory_sec * fps_safe)))
+    min_excursion = float(overrides.get("min_angle_excursion_deg", counting_cfg.min_angle_excursion_deg))
+
+    angles, velocities, _ = _prepare_primary_series(df_metrics, angle_column, fps_safe)
+    if np.isfinite(angles).sum() < 3:
+        return 0, CountingDebugInfo([], [])
+
+    reps, debug = _state_machine_reps(
+        angles,
+        velocities,
+        refractory_frames=refractory_frames,
+        min_excursion=min_excursion,
+    )
 
     logger.debug(
-        "Repetition count=%d (distance=%d frames ≈ %.2fs, prominence>=%.3f, refractory=%d frames ≈ %.2fs).",
+        "Repetition count=%d (refractory=%d frames ≈ %.2fs, min_excursion=%.1f). Valid frames=%d/%d",
         reps,
-        distance_frames,
-        distance_frames / fps_safe,
-        prominence_thr,
         refractory_frames,
         refractory_frames / fps_safe,
+        min_excursion,
+        int(np.isfinite(angles).sum()),
+        len(angles),
     )
     return reps, debug

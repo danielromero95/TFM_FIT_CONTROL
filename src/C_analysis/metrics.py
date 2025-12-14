@@ -29,10 +29,11 @@ class AutoTuneResult:
     multipliers: Dict[str, float] = field(default_factory=dict)
 
 
-def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, object]:
+def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, object, pd.Series]:
     """Aplicar filtrado e interpolación a los *landmarks* detectados."""
 
-    return filter_and_interpolate_landmarks(df_raw)
+    sequence, crops, quality = filter_and_interpolate_landmarks(df_raw)
+    return sequence, crops, pd.Series(quality)
 
 
 def choose_primary_angle(
@@ -271,13 +272,14 @@ def compute_metrics_and_angle(
     *,
     exercise: ExerciseType | str = ExerciseType.UNKNOWN,
     view: ViewType | str = ViewType.UNKNOWN,
+    quality_mask: Optional[pd.Series] = None,
 ) -> tuple[pd.DataFrame, float, list[str], Optional[str], Optional[str]]:
     """Calcular métricas biomecánicas y derivar la excursión del ángulo principal."""
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
 
-    df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective)
+    df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective, quality_mask=quality_mask)
     angle_range = 0.0
 
     chosen_primary = primary_angle
