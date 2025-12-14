@@ -11,6 +11,7 @@ from src.config import POSE_CONNECTIONS
 from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import MODEL_COMPLEXITY
 
+from ..constants import LEFT_HIP, LEFT_SHOULDER, RIGHT_HIP, RIGHT_SHOULDER
 from ..geometry import (
     bounding_box_from_landmarks,
     expand_and_clip_box,
@@ -20,6 +21,95 @@ from ..geometry import (
 from ..types import Landmark, PoseResult
 from .base import PoseEstimatorBase
 from .mediapipe_pool import PoseGraphPool
+
+
+REQUIRED_RELIABILITY_LANDMARKS: Tuple[int, ...] = (
+    LEFT_SHOULDER,
+    RIGHT_SHOULDER,
+    LEFT_HIP,
+    RIGHT_HIP,
+)
+
+
+def pose_reliable(
+    landmarks: Optional[Sequence[Landmark]],
+    *,
+    visibility_threshold: float = 0.5,
+    required_indices: Sequence[int] = REQUIRED_RELIABILITY_LANDMARKS,
+) -> bool:
+    """Comprueba que existan *landmarks* clave con visibilidad suficiente."""
+
+    if not landmarks:
+        return False
+    if max(required_indices, default=-1) >= len(landmarks):
+        return False
+
+    for idx in required_indices:
+        lm = landmarks[idx]
+        visibility = float(getattr(lm, "visibility", np.nan))
+        if not np.isfinite(visibility) or visibility < visibility_threshold:
+            return False
+    return True
+
+
+def reliability_score(
+    landmarks: Optional[Sequence[Landmark]],
+    *,
+    required_indices: Sequence[int] = REQUIRED_RELIABILITY_LANDMARKS,
+) -> float:
+    """Media de visibilidad para los marcadores requeridos."""
+
+    if not landmarks or max(required_indices, default=-1) >= len(landmarks):
+        return float("nan")
+
+    visibilities = [
+        float(getattr(landmarks[idx], "visibility", np.nan)) for idx in required_indices
+    ]
+    if not all(np.isfinite(v) for v in visibilities):
+        return float("nan")
+    return float(np.mean(visibilities))
+
+
+class LandmarkSmoother:
+    """Suaviza marcadores con una media exponencial simple por fotograma."""
+
+    def __init__(self, alpha: float = 0.5, visibility_threshold: float = 0.5) -> None:
+        self.alpha = float(np.clip(alpha, 0.0, 1.0))
+        self.visibility_threshold = float(visibility_threshold)
+        self._state: Optional[List[Landmark]] = None
+
+    def reset(self) -> None:
+        self._state = None
+
+    def __call__(self, landmarks: Optional[List[Landmark]]) -> Optional[List[Landmark]]:
+        if not landmarks:
+            self._state = None
+            return landmarks
+
+        if self._state is None or len(self._state) != len(landmarks):
+            self._state = [Landmark(**lm.to_dict()) for lm in landmarks]
+            return self._state
+
+        smoothed: List[Landmark] = []
+        for previous, current in zip(self._state, landmarks):
+            visibility = float(current.visibility)
+            if not np.isfinite(visibility) or visibility < self.visibility_threshold:
+                blended = previous
+            else:
+                coords = (float(current.x), float(current.y), float(current.z))
+                if not all(np.isfinite(value) for value in coords):
+                    blended = previous
+                else:
+                    blended = Landmark(
+                        x=self.alpha * coords[0] + (1.0 - self.alpha) * float(previous.x),
+                        y=self.alpha * coords[1] + (1.0 - self.alpha) * float(previous.y),
+                        z=self.alpha * coords[2] + (1.0 - self.alpha) * float(previous.z),
+                        visibility=visibility,
+                    )
+            smoothed.append(blended)
+
+        self._state = smoothed
+        return smoothed
 
 
 def _rescale_landmarks_from_crop(
@@ -81,6 +171,11 @@ def _process_with_recovery(
     model_complexity: int,
     min_detection_confidence: float,
     min_tracking_confidence: float,
+    smooth_landmarks: bool | None,
+    enable_segmentation: bool | None,
+    enable_recovery_pass: bool,
+    recovery_miss_threshold: int,
+    consecutive_misses: int,
 ):
     """Ejecuta el grafo de pose con un segundo intento para casos difíciles.
 
@@ -91,7 +186,12 @@ def _process_with_recovery(
     """
 
     results = pose_graph.process(rgb_image)
-    if results.pose_landmarks or static_image_mode:
+    if (
+        results.pose_landmarks
+        or static_image_mode
+        or not enable_recovery_pass
+        or (consecutive_misses + 1) < recovery_miss_threshold
+    ):
         return results
 
     fallback_pose, key = PoseGraphPool.acquire(
@@ -99,6 +199,8 @@ def _process_with_recovery(
         model_complexity=max(model_complexity, 2),
         min_detection_confidence=min_detection_confidence,
         min_tracking_confidence=min_tracking_confidence,
+        smooth_landmarks=smooth_landmarks,
+        enable_segmentation=enable_segmentation,
     )
     try:
         return fallback_pose.process(rgb_image)
@@ -113,13 +215,30 @@ class PoseEstimator(PoseEstimatorBase):
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
+        smooth_landmarks: bool | None = None,
+        enable_segmentation: bool | None = None,
+        reliability_min_visibility: float = 0.5,
+        landmark_smoothing_alpha: float | None = None,
+        enable_recovery_pass: bool = False,
+        recovery_miss_threshold: int = 2,
     ) -> None:
         self.static_image_mode = static_image_mode
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
         self.min_tracking_confidence = min_tracking_confidence
+        self.smooth_landmarks = smooth_landmarks
+        self.enable_segmentation = enable_segmentation
+        self.enable_recovery_pass = enable_recovery_pass
+        self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
+        self.reliability_min_visibility = reliability_min_visibility
+        self._smoother = (
+            LandmarkSmoother(landmark_smoothing_alpha, visibility_threshold=reliability_min_visibility)
+            if landmark_smoothing_alpha is not None
+            else None
+        )
         self.pose = None
-        self._key: Optional[Tuple[bool, int, float, float]] = None
+        self._key: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._misses = 0
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
@@ -131,6 +250,8 @@ class PoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
@@ -143,13 +264,32 @@ class PoseEstimator(PoseEstimatorBase):
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
             min_tracking_confidence=self.min_tracking_confidence,
+            smooth_landmarks=self.smooth_landmarks,
+            enable_segmentation=self.enable_segmentation,
+            enable_recovery_pass=self.enable_recovery_pass,
+            recovery_miss_threshold=self.recovery_miss_threshold,
+            consecutive_misses=self._misses,
         )
-        if not results.pose_landmarks:
-            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
-        landmarks = landmarks_from_proto(results.pose_landmarks.landmark)
+        if results.pose_landmarks:
+            self._misses = 0
+        else:
+            self._misses += 1
+            if self._smoother is not None:
+                self._smoother.reset()
+            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
+        raw_landmarks = landmarks_from_proto(results.pose_landmarks.landmark)
+        pose_ok = pose_reliable(raw_landmarks, visibility_threshold=self.reliability_min_visibility)
+        landmarks = (
+            self._smoother(raw_landmarks) if self._smoother is not None else raw_landmarks
+        )
         annotated_image = image_bgr.copy()
         self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, POSE_CONNECTIONS)
-        return PoseResult(landmarks=landmarks, annotated_image=annotated_image, crop_box=None)
+        return PoseResult(
+            landmarks=landmarks,
+            annotated_image=annotated_image,
+            crop_box=None,
+            pose_ok=pose_ok,
+        )
 
     def close(self) -> None:
         if self.pose is not None and self._key is not None:
@@ -166,6 +306,12 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
         crop_margin: float = 0.15,
         target_size: Tuple[int, int] = (256, 256),
+        smooth_landmarks: bool | None = None,
+        enable_segmentation: bool | None = None,
+        reliability_min_visibility: float = 0.5,
+        landmark_smoothing_alpha: float | None = None,
+        enable_recovery_pass: bool = False,
+        recovery_miss_threshold: int = 2,
     ) -> None:
         self.crop_margin = crop_margin
         self.target_size = target_size
@@ -173,12 +319,24 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
         self.min_tracking_confidence = min_tracking_confidence
+        self.smooth_landmarks = smooth_landmarks
+        self.enable_segmentation = enable_segmentation
+        self.enable_recovery_pass = enable_recovery_pass
+        self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
+        self.reliability_min_visibility = reliability_min_visibility
+        self._smoother = (
+            LandmarkSmoother(landmark_smoothing_alpha, visibility_threshold=reliability_min_visibility)
+            if landmark_smoothing_alpha is not None
+            else None
+        )
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float, float]] = None
-        self._key_crop: Optional[Tuple[bool, int, float, float]] = None
+        self._key_full: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._key_crop: Optional[Tuple[bool, int, float, float, bool, bool]] = None
         self.smooth_factor = 0.65
         self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
+        self._misses_full = 0
+        self._misses_crop = 0
         PoseGraphPool._ensure_imports()
         self.mp_pose = PoseGraphPool.mp_pose
         self.mp_drawing = PoseGraphPool.mp_drawing
@@ -196,6 +354,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
@@ -203,6 +363,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
@@ -216,16 +378,27 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
             min_tracking_confidence=self.min_tracking_confidence,
+            smooth_landmarks=self.smooth_landmarks,
+            enable_segmentation=self.enable_segmentation,
+            enable_recovery_pass=self.enable_recovery_pass,
+            recovery_miss_threshold=self.recovery_miss_threshold,
+            consecutive_misses=self._misses_full,
         )
         if not results_full.pose_landmarks:
+            self._misses_full += 1
             self._smoothed_bbox = None
-            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+            if self._smoother is not None:
+                self._smoother.reset()
+            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
 
+        self._misses_full = 0
         landmarks_full = landmarks_from_proto(results_full.pose_landmarks.landmark)
         bbox = bounding_box_from_landmarks(landmarks_full, width, height)
         if bbox is None:
             self._smoothed_bbox = None
-            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+            if self._smoother is not None:
+                self._smoother.reset()
+            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
 
         smoothed_bbox = smooth_bounding_box(
             self._smoothed_bbox,
@@ -240,7 +413,9 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         crop = image_bgr[y1:y2, x1:x2]
         if crop.size == 0:
             self._smoothed_bbox = None
-            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+            if self._smoother is not None:
+                self._smoother.reset()
+            return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
 
         crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
         crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
@@ -251,11 +426,21 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
             min_tracking_confidence=self.min_tracking_confidence,
+            smooth_landmarks=self.smooth_landmarks,
+            enable_segmentation=self.enable_segmentation,
+            enable_recovery_pass=self.enable_recovery_pass,
+            recovery_miss_threshold=self.recovery_miss_threshold,
+            consecutive_misses=self._misses_crop,
         )
         annotated_image = image_bgr.copy()
 
         if results_crop.pose_landmarks:
+            self._misses_crop = 0
             landmarks_crop = landmarks_from_proto(results_crop.pose_landmarks.landmark)
+            pose_ok = pose_reliable(landmarks_crop, visibility_threshold=self.reliability_min_visibility)
+            landmarks_crop = (
+                self._smoother(landmarks_crop) if self._smoother is not None else landmarks_crop
+            )
             landmarks_full, landmark_list = _rescale_landmarks_from_crop(
                 results_crop.pose_landmarks.landmark,
                 crop_box,
@@ -270,8 +455,17 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             # reescalada al fotograma completo para la visualización.
             del landmarks_full
         else:
+            if self._smoother is not None:
+                self._smoother.reset()
+            self._misses_crop += 1
+            pose_ok = False
             landmarks_crop = None
-        return PoseResult(landmarks=landmarks_crop, annotated_image=annotated_image, crop_box=crop_box)
+        return PoseResult(
+            landmarks=landmarks_crop,
+            annotated_image=annotated_image,
+            crop_box=crop_box,
+            pose_ok=pose_ok,
+        )
 
     def close(self) -> None:
         if self.pose_full is not None and self._key_full is not None:
@@ -294,6 +488,12 @@ class RoiPoseEstimator(PoseEstimatorBase):
         target_size: Tuple[int, int] = (256, 256),
         refresh_period: int = 10,
         max_misses: int = 2,
+        smooth_landmarks: bool | None = None,
+        enable_segmentation: bool | None = None,
+        reliability_min_visibility: float = 0.5,
+        landmark_smoothing_alpha: float | None = None,
+        enable_recovery_pass: bool = False,
+        recovery_miss_threshold: int = 2,
     ) -> None:
         self.crop_margin = crop_margin
         self.target_size = target_size
@@ -306,6 +506,16 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.model_complexity = model_complexity
         self.min_detection_confidence = min_detection_confidence
         self.min_tracking_confidence = min_tracking_confidence
+        self.smooth_landmarks = smooth_landmarks
+        self.enable_segmentation = enable_segmentation
+        self.enable_recovery_pass = enable_recovery_pass
+        self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
+        self.reliability_min_visibility = reliability_min_visibility
+        self._smoother = (
+            LandmarkSmoother(landmark_smoothing_alpha, visibility_threshold=reliability_min_visibility)
+            if landmark_smoothing_alpha is not None
+            else None
+        )
         self.smooth_factor = 0.65
         self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
 
@@ -320,8 +530,10 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.landmark_pb2 = landmark_pb2
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float, float]] = None
-        self._key_crop: Optional[Tuple[bool, int, float, float]] = None
+        self._key_full: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._key_crop: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._recovery_misses_full = 0
+        self._recovery_misses_crop = 0
 
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
@@ -330,6 +542,8 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
@@ -337,6 +551,8 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
             )
 
     def estimate(self, image_bgr: np.ndarray) -> PoseResult:
@@ -362,14 +578,27 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
                 min_tracking_confidence=self.min_tracking_confidence,
+                smooth_landmarks=self.smooth_landmarks,
+                enable_segmentation=self.enable_segmentation,
+                enable_recovery_pass=self.enable_recovery_pass,
+                recovery_miss_threshold=self.recovery_miss_threshold,
+                consecutive_misses=self._recovery_misses_full,
             )
             if not results_full.pose_landmarks:
+                self._recovery_misses_full += 1
                 self.misses += 1
                 self.last_box = None
                 self._smoothed_bbox = None
-                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+                if self._smoother is not None:
+                    self._smoother.reset()
+                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
             else:
-                landmarks = landmarks_from_proto(results_full.pose_landmarks.landmark)
+                self._recovery_misses_full = 0
+                landmarks_raw = landmarks_from_proto(results_full.pose_landmarks.landmark)
+                pose_ok = pose_reliable(landmarks_raw, visibility_threshold=self.reliability_min_visibility)
+                landmarks = (
+                    self._smoother(landmarks_raw) if self._smoother is not None else landmarks_raw
+                )
                 annotated_image = image_bgr.copy()
                 self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
                 bbox = bounding_box_from_landmarks(landmarks, width, height)
@@ -387,7 +616,12 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     self._smoothed_bbox = smoothed_bbox
                     self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
                 self.misses = 0
-                output = PoseResult(landmarks=landmarks, annotated_image=annotated_image, crop_box=self.last_box)
+                output = PoseResult(
+                    landmarks=landmarks,
+                    annotated_image=annotated_image,
+                    crop_box=self.last_box,
+                    pose_ok=pose_ok,
+                )
         else:
             x1, y1, x2, y2 = self.last_box  # type: ignore[misc]
             crop = image_bgr[y1:y2, x1:x2]
@@ -395,7 +629,9 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 self.misses += 1
                 self.last_box = None
                 self._smoothed_bbox = None
-                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+                if self._smoother is not None:
+                    self._smoother.reset()
+                output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
             else:
                 crop_resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
                 crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
@@ -406,20 +642,34 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     model_complexity=self.model_complexity,
                     min_detection_confidence=self.min_detection_confidence,
                     min_tracking_confidence=self.min_tracking_confidence,
+                    smooth_landmarks=self.smooth_landmarks,
+                    enable_segmentation=self.enable_segmentation,
+                    enable_recovery_pass=self.enable_recovery_pass,
+                    recovery_miss_threshold=self.recovery_miss_threshold,
+                    consecutive_misses=self._recovery_misses_crop,
                 )
                 if not results_crop.pose_landmarks:
+                    self._recovery_misses_crop += 1
                     self.misses += 1
                     if self.misses >= self.max_misses:
                         self.last_box = None
                         self._smoothed_bbox = None
-                    output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None)
+                    if self._smoother is not None:
+                        self._smoother.reset()
+                    output = PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
                 else:
+                    self._recovery_misses_crop = 0
                     landmarks_full, landmark_list = _rescale_landmarks_from_crop(
                         results_crop.pose_landmarks.landmark,
                         (x1, y1, x2, y2),
                         width,
                         height,
                         self.landmark_pb2,
+                    )
+
+                    pose_ok = pose_reliable(landmarks_full, visibility_threshold=self.reliability_min_visibility)
+                    landmarks_full = (
+                        self._smoother(landmarks_full) if self._smoother is not None else landmarks_full
                     )
 
                     annotated_image = image_bgr.copy()
@@ -439,7 +689,12 @@ class RoiPoseEstimator(PoseEstimatorBase):
                         self._smoothed_bbox = smoothed_bbox
                         self.last_box = expand_and_clip_box(smoothed_bbox, width, height, self.crop_margin)
                     self.misses = 0
-                    output = PoseResult(landmarks=landmarks_full, annotated_image=annotated_image, crop_box=self.last_box)
+                    output = PoseResult(
+                        landmarks=landmarks_full,
+                        annotated_image=annotated_image,
+                        crop_box=self.last_box,
+                        pose_ok=pose_ok,
+                    )
 
         self.frame_idx += 1
         return output
@@ -454,4 +709,11 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self._smoothed_bbox = None
 
 
-__all__ = ["PoseEstimator", "CroppedPoseEstimator", "RoiPoseEstimator"]
+__all__ = [
+    "PoseEstimator",
+    "CroppedPoseEstimator",
+    "RoiPoseEstimator",
+    "LandmarkSmoother",
+    "pose_reliable",
+    "reliability_score",
+]

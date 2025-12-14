@@ -11,12 +11,15 @@ import json
 from .constants import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_COUNTS_DIR,
-    DEFAULT_POSES_DIR
+    DEFAULT_POSES_DIR,
+    MIN_DETECTION_CONFIDENCE,
+    MIN_TRACKING_CONFIDENCE,
 )
 from .settings import (
     DEFAULT_USE_CROP,
     DEFAULT_TARGET_WIDTH,
     DEFAULT_TARGET_HEIGHT,
+    MODEL_COMPLEXITY,
     PEAK_PROMINENCE,
     SQUAT_LOW_THRESH,
     SQUAT_HIGH_THRESH,
@@ -24,6 +27,8 @@ from .settings import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_PREVIEW_FPS,
     DEFAULT_LANDMARK_MIN_VISIBILITY,
+    POSE_ENABLE_SEGMENTATION,
+    POSE_SMOOTH_LANDMARKS,
     OVERLAY_MAX_LONG_SIDE,
     OVERLAY_DISABLE_OVER_BYTES,
     PREVIEW_DISABLE_OVER_MP,
@@ -39,6 +44,11 @@ class PoseConfig:
     use_crop: bool = DEFAULT_USE_CROP
     target_width: int = DEFAULT_TARGET_WIDTH
     target_height: int = DEFAULT_TARGET_HEIGHT
+    model_complexity: int = MODEL_COMPLEXITY
+    min_detection_confidence: float = float(MIN_DETECTION_CONFIDENCE)
+    min_tracking_confidence: float = float(MIN_TRACKING_CONFIDENCE)
+    smooth_landmarks: bool = POSE_SMOOTH_LANDMARKS
+    enable_segmentation: bool = POSE_ENABLE_SEGMENTATION
 
 
 @dataclass

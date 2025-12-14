@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Sequence, Type
+from typing import Iterable, Optional, Sequence, Type
 
 import numpy as np
 import pandas as pd
 
 from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
+from src.config.settings import MODEL_COMPLEXITY
 
 from ..constants import LANDMARK_COUNT
 from ..estimators import CroppedPoseEstimator, PoseEstimator, PoseEstimatorBase, RoiPoseEstimator
@@ -25,6 +26,12 @@ def extract_landmarks_from_frames(
     min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
     min_tracking_confidence: float = MIN_TRACKING_CONFIDENCE,
     min_visibility: float = 0.5,
+    model_complexity: int = MODEL_COMPLEXITY,
+    smooth_landmarks: bool | None = None,
+    enable_segmentation: bool | None = None,
+    landmark_smoothing_alpha: float | None = None,
+    reliability_min_visibility: Optional[float] = None,
+    include_pose_ok: bool = False,
 ) -> pd.DataFrame:
     """Extrae marcadores de pose fotograma a fotograma y devuelve un DataFrame sin procesar."""
 
@@ -38,10 +45,16 @@ def extract_landmarks_from_frames(
         estimator_cls = PoseEstimator
 
     rows: list[dict[str, float]] = []
+    reliability_threshold = min_visibility if reliability_min_visibility is None else reliability_min_visibility
     with estimator_cls(
         static_image_mode=False,
+        model_complexity=model_complexity,
         min_detection_confidence=min_detection_confidence,
         min_tracking_confidence=min_tracking_confidence,
+        smooth_landmarks=smooth_landmarks,
+        enable_segmentation=enable_segmentation,
+        reliability_min_visibility=reliability_threshold,
+        landmark_smoothing_alpha=landmark_smoothing_alpha,
     ) as estimator:
         for index, image in enumerate(frames):
             height, width = image.shape[:2]
@@ -52,6 +65,10 @@ def extract_landmarks_from_frames(
                 crop_box = (0, 0, width, height)
 
             row: dict[str, float] = {"frame_idx": int(index)}
+            if include_pose_ok:
+                row["pose_ok"] = (
+                    float(result.pose_ok) if result.pose_ok is not None else np.nan
+                )
             if landmarks:
                 crop_values: Sequence[float]
                 if crop_box is None:
