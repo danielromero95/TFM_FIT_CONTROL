@@ -50,8 +50,8 @@ def calculate_metrics_from_sequence(
     sequence: PoseSequence,
     fps: float,
     *,
-    smooth_window: int = 7,
-    sg_poly: int = 2,
+    smooth_window: int | None = None,
+    sg_poly: int | None = None,
     vel_method: str = "forward",
     quality_mask: Optional[Iterable[bool]] = None,
 ) -> pd.DataFrame:
@@ -167,10 +167,13 @@ def calculate_metrics_from_sequence(
     for column in ANGLE_COLUMNS:
         dfm[f"raw_{column}"] = np.where(valid_mask, raw_angles[column], np.nan)
 
+    window_seconds = ANALYSIS_SAVGOL_WINDOW_SEC if smooth_window is None else max(smooth_window / max(fps, 1e-6), 0.0)
+    polyorder = ANALYSIS_SAVGOL_POLYORDER if sg_poly is None else sg_poly
     smoothing_meta: Dict[str, float | int | str | None] = {
         "method": ANALYSIS_SMOOTH_METHOD,
-        "window": int(max(3, round(fps * ANALYSIS_SAVGOL_WINDOW_SEC))) if fps > 0 else None,
-        "poly": ANALYSIS_SAVGOL_POLYORDER,
+        "window": int(max(3, round(fps * window_seconds))) if fps > 0 else None,
+        "poly": polyorder,
+        "vel_method": vel_method,
     }
 
     for column in ANGLE_COLUMNS:
@@ -180,12 +183,16 @@ def calculate_metrics_from_sequence(
             interpolated,
             fps,
             method=ANALYSIS_SMOOTH_METHOD,
-            window_seconds=ANALYSIS_SAVGOL_WINDOW_SEC,
-            polyorder=ANALYSIS_SAVGOL_POLYORDER,
+            window_seconds=window_seconds,
+            polyorder=int(polyorder),
         )
         smoothed = np.where(valid_mask, smoothed, np.nan)
         dfm[column] = smoothed
-        dfm[f"ang_vel_{column}"] = derivative(smoothed, fps)
+        if vel_method == "diff":
+            diffs = np.diff(smoothed, prepend=np.nan)
+            dfm[f"ang_vel_{column}"] = diffs * float(fps)
+        else:
+            dfm[f"ang_vel_{column}"] = derivative(smoothed, fps)
 
     dfm.attrs["smoothing"] = smoothing_meta
 

@@ -53,7 +53,8 @@ def classify_view(
     label, base_confidence = _decide_view(lateral_score, reliable_frames)
     dispersion = float(np.nanmean([width_mad, z_mad, vis_mad])) if not np.isnan(width_mad) else z_mad
     stability_factor = 1.0 / (1.0 + max(dispersion, 0.0)) if np.isfinite(dispersion) else 1.0
-    confidence = float(np.clip(base_confidence * reliability_ratio * stability_factor, 0.0, 1.0))
+    effective_ratio = max(reliability_ratio, 0.7 if reliable_frames >= VIEW_MIN_RELIABLE_FRAMES else 0.0)
+    confidence = float(np.clip(base_confidence * effective_ratio * stability_factor, 0.0, 1.0))
 
     side = None
     if label == "side":
@@ -159,7 +160,7 @@ def _decide_view(lateral_score: float, reliable_frames: int) -> tuple[str, float
         return "front", float(np.clip(confidence, 0.0, 1.0))
 
     margin = (min(lateral_score - VIEW_TH_LO, VIEW_TH_HI - lateral_score)) / max(VIEW_TH_HI - VIEW_TH_LO, EPS)
-    confidence = 0.35 * np.clip(1.0 - margin, 0.0, 1.0)
+    confidence = 0.5 * np.clip(1.0 - margin, 0.0, 1.0)
     label = "side" if lateral_score >= 0.5 else "front"
     return label, float(confidence)
 
@@ -205,11 +206,13 @@ def _to_array(series: np.ndarray | None) -> np.ndarray:
 
 
 def _reliable_mask(reliability: Mapping[str, Any] | None, length: int, *, fallback: np.ndarray | None = None) -> np.ndarray:
-    if reliability is None:
+    frame_reliability = None if reliability is None else reliability.get("frame_reliability")
+    if reliability is None or frame_reliability is None:
         if fallback is not None and fallback.size:
             return np.isfinite(_resize(fallback, length))
         return np.zeros(length, dtype=bool)
-    mask = np.asarray(reliability.get("frame_reliability", []), dtype=bool)
+
+    mask = np.asarray(frame_reliability, dtype=bool)
     if mask.size < length:
         pad = np.zeros(length - mask.size, dtype=bool)
         return np.concatenate([mask, pad])

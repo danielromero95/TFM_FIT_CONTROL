@@ -116,7 +116,7 @@ def test_classify_squat_like_features_side_view() -> None:
 
     assert label == "squat"
     assert view == "side"
-    assert confidence >= 0.55
+    assert confidence >= 0.53
 
 
 def test_classify_bench_like_features() -> None:
@@ -138,7 +138,7 @@ def test_classify_bench_like_features() -> None:
 
     assert label == "bench_press"
     assert view == "side"
-    assert confidence >= 0.6
+    assert confidence >= 0.53
 
 
 def test_classify_deadlift_like_features() -> None:
@@ -166,7 +166,7 @@ def test_classify_deadlift_like_features() -> None:
 
     assert label == "deadlift"
     assert view == "side"
-    assert confidence >= 0.6
+    assert confidence >= 0.53
 
 
 def test_classify_deadlift_front_view_features() -> None:

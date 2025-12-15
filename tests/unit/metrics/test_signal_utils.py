@@ -9,11 +9,11 @@ from src.B_pose_estimation.signal import derivative, interpolate_small_gaps, smo
 def test_interpolate_small_gaps_respects_limit():
     series = [1.0, np.nan, 3.0, np.nan, np.nan, 7.0]
     filled_short = interpolate_small_gaps(series, max_gap_frames=1)
-    assert np.isnan(filled_short[1]) is False
-    assert np.isnan(filled_short[3]) is True and np.isnan(filled_short[4]) is True
+    assert not np.isnan(filled_short[1])
+    assert np.isnan(filled_short[3]) and np.isnan(filled_short[4])
 
     filled_longer = interpolate_small_gaps(series, max_gap_frames=3)
-    assert np.allclose(filled_longer[[1, 3, 4]], [2.0, 5.0, 6.0], equal_nan=False)
+    assert np.allclose(filled_longer[[1, 3, 4]], [2.0, 4.3333333, 5.6666667], equal_nan=False)
 
 
 def test_smooth_series_preserves_nans_and_shape():

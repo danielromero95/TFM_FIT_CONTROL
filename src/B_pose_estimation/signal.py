@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Iterable
 
 import numpy as np
-from scipy.signal import butter, filtfilt, savgol_filter
+
+try:  # SciPy is optional in some environments
+    from scipy.signal import butter, filtfilt, savgol_filter
+except ImportError:  # pragma: no cover - exercised indirectly in tests
+    butter = filtfilt = savgol_filter = None  # type: ignore[misc]
 
 from src.config.constants import (
     ANALYSIS_MAX_GAP_FRAMES,
@@ -93,7 +97,7 @@ def smooth_series(
     if window < 3:
         return values
 
-    if method == "savgol":
+    if method == "savgol" and savgol_filter is not None:
         if window < polyorder + 2:
             return values
         smoothed = savgol_filter(
@@ -102,13 +106,18 @@ def smooth_series(
             polyorder=int(min(polyorder, window - 1)),
             mode="interp",
         )
-    elif method == "butter":
+    elif method == "butter" and butter is not None and filtfilt is not None:
         nyq = 0.5 * fps
         cutoff = min(2.0, nyq * 0.8)
         b, a = butter(N=2, Wn=cutoff / nyq, btype="low")
         smoothed = filtfilt(b, a, filled, method="gust")
     else:
-        smoothed = filled
+        # Fallback: simple centered rolling mean to reduce noise when SciPy is absent
+        half = window // 2
+        padded = np.pad(filled, (half, half), mode="edge")
+        kernel = np.ones(window, dtype=float) / float(window)
+        rolled = np.convolve(padded, kernel, mode="valid")
+        smoothed = rolled[:n]
 
     smoothed = np.where(mask, smoothed, np.nan)
     return smoothed

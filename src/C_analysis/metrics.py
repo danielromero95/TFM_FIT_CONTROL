@@ -29,8 +29,14 @@ class AutoTuneResult:
     multipliers: Dict[str, float] = field(default_factory=dict)
 
 
-def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, object, pd.Series]:
-    """Aplicar filtrado e interpolación a los *landmarks* detectados."""
+def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame | np.ndarray, object, pd.Series]:
+    """Aplicar filtrado e interpolación a los *landmarks* detectados.
+
+    Returns:
+        tuple: ``(sequence, crop_boxes, quality_mask)`` donde ``sequence`` es la secuencia
+        filtrada de pose (``PoseSequence`` o ``ndarray`` por compatibilidad), ``crop_boxes``
+        son las cajas de recorte asociadas y ``quality_mask`` es una serie booleana.
+    """
 
     sequence, crops, quality = filter_and_interpolate_landmarks(df_raw)
     return sequence, crops, pd.Series(quality)
