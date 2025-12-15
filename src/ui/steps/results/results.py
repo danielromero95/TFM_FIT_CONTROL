@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -16,6 +15,7 @@ except Exception:
     find_peaks = None  # pragma: no cover
 
 from src.C_analysis.repetition_counter import count_repetitions_with_config
+from src.debug_report import build_debug_report_bundle
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_sync import render_video_with_metrics_sync
 from src.ui.state import get_state
@@ -664,20 +664,6 @@ def _results_panel() -> Dict[str, bool]:
             if stats.skip_reason:
                 st.error(f"Repetition counting skipped: {stats.skip_reason}")
 
-            eff_path = getattr(report, "effective_config_path", None)
-            if eff_path:
-                try:
-                    eff_bytes = Path(eff_path).read_bytes()
-                except Exception:
-                    pass
-                else:
-                    st.download_button(
-                        "Download effective config",
-                        data=eff_bytes,
-                        file_name=Path(eff_path).name,
-                        mime="application/json",
-                    )
-
             with st.expander("Run statistics (optional)", expanded=False):
                 try:
                     st.dataframe(stats_df, width="stretch")
@@ -706,40 +692,29 @@ def _results_panel() -> Dict[str, bool]:
                         mime="video/mp4",
                     )
 
-            if state.metrics_path is not None:
-                metrics_data = None
-                try:
-                    metrics_data = Path(state.metrics_path).read_text(
-                        encoding="utf-8"
-                    )
-                except FileNotFoundError:
-                    st.error("The metrics file for download was not found.")
-                except OSError as exc:
-                    st.error(f"Could not read metrics: {exc}")
-                else:
-                    st.download_button(
-                        "Download metrics",
-                        data=metrics_data,
-                        file_name=f"{Path(state.video_path).stem}_metrics.csv",
-                        mime="text/csv",
-                    )
+            bundle_video_path = state.video_path
+            if not bundle_video_path and report.debug_summary:
+                bundle_video_path = report.debug_summary.get("input_video", {}).get("name")
+            bundle_video_path = bundle_video_path or "analysis"
+            try:
+                bundle_bytes, bundle_name = build_debug_report_bundle(
+                    report,
+                    video_path=bundle_video_path,
+                    cfg=report.config_used,
+                    df_metrics=metrics_df,
+                )
+            except Exception as exc:  # pragma: no cover - error surfacing
+                st.error(f"Could not build debug report: {exc}")
+            else:
+                st.download_button(
+                    "Download debug report",
+                    data=bundle_bytes,
+                    file_name=bundle_name,
+                    mime="application/zip",
+                )
 
         else:
             st.info("No results found to display.")
-
-        adjust_col, reset_col = st.columns(2)
-        with adjust_col:
-            st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
-            adjust_clicked = st.button("Adjust configuration and re-run", key="results_adjust")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if adjust_clicked:
-                actions["adjust"] = True
-        with reset_col:
-            st.markdown('<div class="btn--back">', unsafe_allow_html=True)
-            reset_clicked = st.button("Back to start", key="results_reset")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if reset_clicked:
-                actions["reset"] = True
 
         st.markdown("</div>", unsafe_allow_html=True)
 
