@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
@@ -177,12 +178,83 @@ def classify_features(
         return value
 
     view_stats = {key: _jsonable(value) for key, value in view_stats_raw.items()}
+    def _feature_summary(values: np.ndarray) -> Dict[str, Any]:
+        total = int(values.size)
+        finite_mask = np.isfinite(values)
+        finite_values = values[finite_mask]
+        valid_count = int(finite_mask.sum())
+        valid_fraction = (valid_count / total) if total > 0 else None
+        if valid_count == 0:
+            return {"valid_fraction": valid_fraction, "count": total}
+
+        stats = {
+            "min": float(np.min(finite_values)),
+            "max": float(np.max(finite_values)),
+            "mean": float(np.mean(finite_values)),
+            "std": float(np.std(finite_values)),
+        }
+        stats["range"] = stats["max"] - stats["min"]
+        try:
+            percentiles = np.percentile(finite_values, [10, 50, 90])
+            stats.update(
+                {
+                    "p10": float(percentiles[0]),
+                    "p50": float(percentiles[1]),
+                    "p90": float(percentiles[2]),
+                }
+            )
+        except Exception:
+            pass
+
+        stats["valid_fraction"] = valid_fraction
+        stats["count"] = total
+        return stats
+
+    SUMMARY_FEATURES = (
+        "pelvis_y",
+        "torso_tilt_deg",
+        "knee_angle_left",
+        "knee_angle_right",
+        "hip_angle_left",
+        "hip_angle_right",
+        "elbow_angle_left",
+        "elbow_angle_right",
+        "shoulder_width_norm",
+        "shoulder_yaw_deg",
+        "shoulder_z_delta_abs",
+    )
+
+    features_summary: Dict[str, Any] = {}
+    for name in SUMMARY_FEATURES:
+        values = get_series(name)
+        if values.size:
+            features_summary[name] = _feature_summary(values)
+
+    if is_dataclass(scores):
+        classification_scores: Dict[str, Any] = asdict(scores)
+    elif hasattr(scores, "__dict__"):
+        classification_scores = dict(getattr(scores, "__dict__", {}))
+    else:
+        classification_scores = {"value": scores}
+
+    vetoes = {
+        key: bool(value)
+        for key, value in classification_scores.items()
+        if isinstance(value, bool) or str(key).endswith("_veto")
+    }
+
     metadata: Dict[str, Any] = {
         "view_label": view_label,
         "view_confidence": float(view_result.confidence),
         "view_side": getattr(view_result, "side", None),
         "view_stats": view_stats,
         "both_sides_visible": bool(both_sides_visible),
+        "view_cues_present": bool(view_cues_present),
+        "features_summary_source": "mixed",
+        "features_summary": features_summary,
+        "classification_scores": classification_scores,
+        "vetoes": vetoes,
+        "rep_count": int(metrics.rep_count),
     }
     return label, view_label, float(confidence), metadata
 

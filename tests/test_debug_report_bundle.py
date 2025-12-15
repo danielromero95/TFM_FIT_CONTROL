@@ -51,6 +51,15 @@ def test_build_debug_report_bundle_serializes_strict_json(tmp_path) -> None:
     debug_summary = {
         "quality": {"pose_ok_fraction": np.nan},
         "counting_params": {"multipliers": {"pose_ok": np.float32(1.5)}},
+        "detection": {
+            "source": "incremental",
+            "exercise_detection_debug": {
+                "classification_scores": {"deadlift_veto": np.bool_(False)},
+                "features_summary": {
+                    "torso_tilt_deg": {"min": np.float64(1.0), "valid_fraction": np.float32(0.5)}
+                },
+            },
+        },
     }
 
     report = Report(
@@ -89,4 +98,8 @@ def test_build_debug_report_bundle_serializes_strict_json(tmp_path) -> None:
     assert payload["counting_params"]["multipliers"]["pose_ok"] == 1.5
     assert payload["quality"]["pose_ok_fraction"] is None
     assert payload["warnings"] == ["sample warning"]
+    detection_block = payload["detection"]
+    assert detection_block["source"] == "incremental"
+    assert detection_block["exercise_detection_debug"]["classification_scores"]["deadlift_veto"] is False
+    assert detection_block["exercise_detection_debug"]["features_summary"]["torso_tilt_deg"]["min"] == 1.0
 
