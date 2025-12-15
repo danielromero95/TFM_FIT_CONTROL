@@ -7,13 +7,14 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from queue import Empty, SimpleQueue
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import numpy as np
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from src.C_analysis import run_pipeline
+from src.exercise_detection.types import DetectionResult
 
 from .progress import make_progress_callback, phase_for
 
@@ -46,7 +47,8 @@ def start_run(
     *,
     video_path: str,
     cfg,
-    prefetched_detection: Optional[Tuple[str, str, float]],
+    prefetched_detection: Optional[DetectionResult],
+    selected_view: Optional[str],
     debug_enabled: bool,
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
@@ -74,6 +76,7 @@ def start_run(
             cfg,
             progress_callback=cb,
             prefetched_detection=prefetched_detection,
+            selected_view=selected_view,
             preview_callback=preview_callback,
             preview_fps=preview_fps,
         )

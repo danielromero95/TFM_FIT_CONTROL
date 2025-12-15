@@ -150,6 +150,7 @@ def _running_step() -> None:
                 video_path=video_path,
                 cfg=cfg,
                 prefetched_detection=prefetched_detection,
+                selected_view=state.view,
                 debug_enabled=debug_enabled,
                 # No enviar callback si el preview está desactivado
                 preview_callback=(_preview_callback if SHOW_LIVE_PREVIEW else None),

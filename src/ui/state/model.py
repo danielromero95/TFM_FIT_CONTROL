@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
+from src.exercise_detection.types import DetectionResult
+
 from src.config.settings import (
     DEFAULT_GENERATE_VIDEO,
     DEFAULT_PREVIEW_FPS,
@@ -50,7 +52,7 @@ class AppState:
     exercise_pending_update: Optional[str] = None
     view: str = ""  # "", "front", "side"
     view_pending_update: Optional[str] = None
-    detect_result: Optional[Dict[str, Any]] = None
+    detect_result: Optional[DetectionResult] = None
     configure_values: Dict[str, float | str | bool] = field(
         default_factory=lambda: CONFIG_DEFAULTS.copy()
     )
