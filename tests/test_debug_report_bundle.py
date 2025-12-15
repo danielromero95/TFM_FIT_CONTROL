@@ -103,3 +103,68 @@ def test_build_debug_report_bundle_serializes_strict_json(tmp_path) -> None:
     assert detection_block["exercise_detection_debug"]["classification_scores"]["deadlift_veto"] is False
     assert detection_block["exercise_detection_debug"]["features_summary"]["torso_tilt_deg"]["min"] == 1.0
 
+
+def test_debug_bundle_includes_prefetched_detection(tmp_path) -> None:
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"binary video content")
+
+    cfg = config.load_default()
+
+    config_used_path = tmp_path / "config_used.json"
+    config_used_path.write_text("{}", encoding="utf-8")
+    effective_config_path = tmp_path / "config_effective.json"
+    effective_config_path.write_text("{}", encoding="utf-8")
+
+    stats = RunStats(
+        config_sha1="cafebabe",
+        fps_original=30.0,
+        fps_effective=30.0,
+        frames=3,
+        exercise_selected="squat",
+        exercise_detected="squat",
+        view_detected="front",
+        detection_confidence=0.9,
+        primary_angle="left_knee",
+        angle_range_deg=20.0,
+        min_prominence=1.0,
+        min_distance_sec=1.0,
+        refractory_sec=0.5,
+        config_path=config_used_path,
+    )
+
+    debug_summary = {
+        "detection": {
+            "source": "prefetched",
+            "view_stats": {"shoulder_width": 0.5},
+            "exercise_detection_debug": {
+                "classification_scores": {"deadlift_veto": False},
+                "features_summary": {"torso_tilt_deg": {"min": 1.0}},
+            },
+        },
+        "selection": {"selected_exercise": "squat", "user_confirmed_detection": True},
+    }
+
+    report = Report(
+        repetitions=1,
+        metrics=None,
+        stats=stats,
+        config_used=cfg,
+        effective_config_path=effective_config_path,
+        debug_summary=debug_summary,
+    )
+
+    bundle_bytes, _ = build_debug_report_bundle(
+        report,
+        video_path=str(video_path),
+        cfg=cfg,
+        df_metrics=None,
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as archive:
+        payload = json.loads(archive.read("debug_report.json"))
+
+    detection_block = payload["detection"]
+    assert detection_block["source"] == "prefetched"
+    assert detection_block["exercise_detection_debug"] is not None
+    assert detection_block["exercise_detection_debug"]["classification_scores"]["deadlift_veto"] is False
+

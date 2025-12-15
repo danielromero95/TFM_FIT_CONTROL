@@ -78,6 +78,7 @@ def run_pipeline(
     progress_callback: Optional[Callable[..., None]] = None,
     *,
     prefetched_detection: Optional[Union[Tuple[str, str, float], 'DetectionResult']] = None,
+    selected_view: Optional[Union[str, ViewType]] = None,
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
 ) -> Report:
@@ -432,6 +433,35 @@ def run_pipeline(
     elif cfg.debug.generate_debug_video:
         logger.info("Overlay omitido por heurísticas de medio pesado.")
 
+    selected_exercise_type = None
+    try:
+        selected_exercise_type = as_exercise(cfg.counting.exercise)
+        if selected_exercise_type == ExerciseType.UNKNOWN or str(cfg.counting.exercise).lower() == "auto":
+            selected_exercise_type = None
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Failed to normalize selected exercise %r", cfg.counting.exercise, exc_info=True
+        )
+
+    selected_view_value: str | None = None
+    selected_view_type: ViewType | None = None
+    if selected_view is not None:
+        try:
+            selected_view_type = as_view(selected_view)
+            if selected_view_type == ViewType.UNKNOWN:
+                selected_view_type = None
+            selected_view_value = getattr(selected_view_type, "value", str(selected_view))
+            if selected_view_type is None:
+                selected_view_value = None
+        except Exception:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "Failed to normalize selected view %r", selected_view, exc_info=True
+            )
+            selected_view_value = str(selected_view)
+
+        if selected_view_value is not None and not str(selected_view_value).strip():
+            selected_view_value = None
+
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
     (
@@ -444,8 +474,8 @@ def run_pipeline(
         filtered_sequence,
         cfg.counting.primary_angle,
         fps_effective,
-        exercise=detected_label,
-        view=detected_view,
+        exercise=(selected_exercise_type or detected_label),
+        view=(selected_view_type or detected_view),
         quality_mask=quality_mask,
     )
     warnings.extend(metrics_warnings)
@@ -456,12 +486,12 @@ def run_pipeline(
     primary_angle = chosen_primary or cfg.counting.primary_angle
 
     auto_params = auto_counting_params(
-        detected_label,
+        (selected_exercise_type or detected_label),
         df_metrics,
         chosen_primary,
         fps_effective,
         cfg.counting,
-        view=detected_view,
+        view=(selected_view_type or detected_view),
     )
     cfg.counting.min_prominence = float(auto_params.min_prominence)
     cfg.counting.min_distance_sec = float(auto_params.min_distance_sec)
@@ -596,18 +626,52 @@ def run_pipeline(
     rotation_metadata = normalize_rotation_deg(int(info.rotation or 0)) if info else None
     video_path_obj = Path(video_path)
 
-    try:
+    if selected_exercise_type is not None:
         selected_exercise_value = getattr(
-            as_exercise(cfg.counting.exercise), "value", cfg.counting.exercise
+            selected_exercise_type, "value", str(selected_exercise_type)
         )
-    except Exception:  # pragma: no cover - defensive fallback
-        logger.warning(
-            "Failed to normalize selected exercise %r", cfg.counting.exercise, exc_info=True
-        )
-        selected_exercise_value = cfg.counting.exercise
+    else:
+        try:
+            selected_exercise_value = getattr(
+                as_exercise(cfg.counting.exercise), "value", cfg.counting.exercise
+            )
+        except Exception:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "Failed to normalize selected exercise %r", cfg.counting.exercise, exc_info=True
+            )
+            selected_exercise_value = cfg.counting.exercise
 
     exercise_label = getattr(as_exercise(detected_label), "value", str(detected_label))
     exercise_view = getattr(as_view(detected_view), "value", str(detected_view))
+    exercise_used_for_metrics = getattr(
+        as_exercise(selected_exercise_type or detected_label),
+        "value",
+        str(selected_exercise_type or detected_label),
+    )
+    view_used_for_metrics = getattr(
+        as_view(selected_view_type or detected_view),
+        "value",
+        str(selected_view_type or detected_view),
+    )
+
+    if detection_debug is not None:
+        detection_debug = json_safe(detection_debug)
+    if detected_view_stats is not None:
+        detected_view_stats = json_safe(detected_view_stats)
+
+    user_confirmed_detection = detection_source == "prefetched" and (
+        selected_exercise_value == exercise_label
+        and (not selected_view_value or selected_view_value == exercise_view)
+    )
+    selection_info = {
+        "selected_exercise": selected_exercise_value,
+        "selected_view": selected_view_value,
+        "detected_exercise": exercise_label,
+        "detected_view": exercise_view,
+        "detection_source": detection_source,
+        "user_confirmed_detection": bool(user_confirmed_detection),
+        "overrode_detection": bool(detection_source == "prefetched" and not user_confirmed_detection),
+    }
 
     quality_section: dict[str, Any] | None = None
     if df_metrics is not None:
@@ -681,8 +745,13 @@ def run_pipeline(
         },
         "exercise": {
             "selected": selected_exercise_value,
-            "label": exercise_label,
-            "view": exercise_view,
+            "selected_view": selected_view_value,
+            "label": exercise_used_for_metrics,
+            "view": view_used_for_metrics,
+            "exercise_used_for_metrics": exercise_used_for_metrics,
+            "view_used_for_metrics": view_used_for_metrics,
+            "detected_exercise": exercise_label,
+            "detected_view": exercise_view,
             "confidence": float(detected_confidence),
             "view_side": detected_side,
         },
@@ -695,6 +764,7 @@ def run_pipeline(
             "source": detection_source,
             "exercise_detection_debug": detection_debug,
         },
+        "selection": selection_info,
         "counting": {
             "primary_angle_config": cfg.counting.primary_angle,
             "primary_angle_used": primary_angle,

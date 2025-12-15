@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import streamlit as st
 
 from src.core.types import ExerciseType
 from src.exercise_detection.exercise_detector import detect_exercise
+from src.exercise_detection.types import DetectionResult
 from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, safe_rerun
 from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 
@@ -140,21 +141,19 @@ def _render_autodetect_button(
 
     with st.spinner("Detecting exercise…"):
         try:
-            label_key, detected_view, confidence = detect_exercise(str(video_path))
+            detection_result: DetectionResult = detect_exercise(str(video_path))
         except Exception as exc:
             st.error(f"Automatic exercise detection failed: {exc}")
             return current_ex_label, current_view_label
 
+    label_key = getattr(detection_result.label, "value", detection_result.label)
+    view_key = getattr(detection_result.view, "value", detection_result.view)
     detected_label = next((lbl for (lbl, key) in EXERCISE_ITEMS if key == label_key), "")
-    view_label = {"front": "Front", "side": "Lateral"}.get(detected_view, "")
+    view_label = {"front": "Front", "side": "Lateral"}.get(view_key, "")
 
     state.exercise = detected_label or DEFAULT_EXERCISE_LABEL
-    state.view = detected_view if view_label else ""
-    state.detect_result = {
-        "label": label_key,
-        "view": detected_view or "",
-        "confidence": float(confidence),
-    }
+    state.view = view_key if view_label else ""
+    state.detect_result = detection_result
     state.ui_rev += 1
 
     if detected_label and view_label:
@@ -205,12 +204,6 @@ def _persist_manual_selection(state, *, selected_exercise: str, selected_view: s
 
     state.exercise = selected_exercise or DEFAULT_EXERCISE_LABEL
     state.view = {"Front": "front", "Lateral": "side"}.get(selected_view or "", "")
-    if state.detect_result:
-        new_label_key = EX_TO_KEY.get(selected_exercise)
-        if new_label_key:
-            state.detect_result["label"] = new_label_key
-        if state.view:
-            state.detect_result["view"] = state.view
 
 
 def _render_navigation(selected_exercise: str, selected_view: str) -> None:

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 from src import config
+from src.exercise_detection.types import DetectionResult, make_detection_result
 from src.ui.state import (
     AppState,
     CONFIG_DEFAULTS,
@@ -48,7 +49,7 @@ def ensure_video_path() -> None:
 
 def prepare_pipeline_inputs(
     state: AppState,
-) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
+) -> tuple[str, config.Config, Optional[DetectionResult]]:
     """Prepara video, configuración y detecciones previas para ``run_pipeline``."""
 
     from src.ui.steps.detect import EXERCISE_TO_CONFIG
@@ -74,12 +75,17 @@ def prepare_pipeline_inputs(
     )
 
     det = state.detect_result
-    prefetched_detection: Optional[Tuple[str, str, float]] = None
-    if det:
-        prefetched_detection = (
+    prefetched_detection: Optional[DetectionResult] = None
+    if isinstance(det, DetectionResult):
+        prefetched_detection = det
+    elif isinstance(det, dict):
+        prefetched_detection = make_detection_result(
             det.get("label", "unknown"),
             det.get("view", "unknown"),
             float(det.get("confidence", 0.0)),
+            side=det.get("side"),
+            view_stats=det.get("view_stats"),
+            debug=det.get("debug"),
         )
 
     return str(video_path), cfg, prefetched_detection
