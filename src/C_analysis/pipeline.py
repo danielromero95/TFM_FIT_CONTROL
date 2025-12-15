@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.metadata as importlib_metadata
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import cv2
@@ -17,6 +20,7 @@ from src.A_preprocessing.frame_extraction import extract_processed_frames_stream
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
+from src.utils.json_safety import json_safe
 from .errors import NoFramesExtracted
 
 from .config_bridge import apply_settings
@@ -40,29 +44,6 @@ from .streaming import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _json_safe(value: Any) -> Any:
-    """Convertir valores potencialmente NumPy a equivalentes JSON-serializables."""
-
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-
-    if isinstance(value, np.generic):
-        return value.item()
-
-    if isinstance(value, np.ndarray):
-        return [_json_safe(v) for v in value.tolist()]
-
-    if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
-
-    if isinstance(value, (list, tuple, set)):
-        return [_json_safe(v) for v in value]
-
-    return value
-
-
 def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> None:
     """Invocar *callbacks* compatibles con firmas antiguas y nuevas."""
 
@@ -120,12 +101,14 @@ def run_pipeline(
         encoding="utf-8",
     )
 
+    run_started_at = datetime.now(timezone.utc)
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
 
     cap = open_video_cap(video_path)
     manual_rotate = cfg.pose.rotate
     processing_rotate = normalize_rotation_deg(int(manual_rotate)) if manual_rotate is not None else 0
+    metadata_rotation: Optional[int] = None
     warnings: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -135,6 +118,8 @@ def run_pipeline(
     df_raw_landmarks: Optional[pd.DataFrame] = None
     fps_original = 0.0
     t1 = t0
+    info = None
+    overlay_quadrant: Optional[int] = None
 
     detected_label = ExerciseType.UNKNOWN
     detected_view = ViewType.UNKNOWN
@@ -336,13 +321,19 @@ def run_pipeline(
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
     filtered_sequence, crop_boxes, quality_mask = filter_landmarks(df_raw_landmarks)
-    overlay_rotate_cw = normalize_rotation_deg(
-        infer_upright_quadrant_from_sequence(filtered_sequence)
-    )
+    overlay_quadrant = infer_upright_quadrant_from_sequence(filtered_sequence)
+    overlay_rotate_cw = normalize_rotation_deg(overlay_quadrant)
     logger.info(
         "Overlay rotation (clockwise) inferred from landmarks: %d°",
         overlay_rotate_cw,
     )
+
+    quality_mask_fraction = None
+    if quality_mask is not None:
+        try:
+            quality_mask_fraction = float(pd.Series(quality_mask).mean())
+        except Exception:  # pragma: no cover - fallback defensivo
+            quality_mask_fraction = None
 
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
@@ -586,12 +577,116 @@ def run_pipeline(
         total_ms,
     )
 
+    try:
+        app_version = importlib_metadata.version("tfm-fit-control")
+    except importlib_metadata.PackageNotFoundError:
+        app_version = None
+
+    rotation_metadata = normalize_rotation_deg(int(info.rotation or 0)) if info else None
+    video_path_obj = Path(video_path)
+
+    try:
+        selected_exercise_value = getattr(
+            as_exercise(cfg.counting.exercise), "value", cfg.counting.exercise
+        )
+    except Exception:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "Failed to normalize selected exercise %r", cfg.counting.exercise, exc_info=True
+        )
+        selected_exercise_value = cfg.counting.exercise
+
+    exercise_label = getattr(as_exercise(detected_label), "value", str(detected_label))
+    exercise_view = getattr(as_view(detected_view), "value", str(detected_view))
+
+    quality_section: dict[str, Any] | None = None
+    if df_metrics is not None:
+        total_frames = len(df_metrics)
+        pose_ok_fraction = None
+        if "pose_ok" in df_metrics.columns and total_frames:
+            pose_ok_series = pd.to_numeric(df_metrics["pose_ok"], errors="coerce")
+            pose_ok_fraction = float((pose_ok_series >= 0.5).mean())
+
+        primary_fraction = None
+        if primary_angle and primary_angle in df_metrics.columns and total_frames:
+            col = pd.to_numeric(df_metrics[primary_angle], errors="coerce")
+            primary_fraction = float(np.isfinite(col).mean())
+
+        quality_section = {
+            "frames": int(total_frames),
+            "pose_ok_fraction": pose_ok_fraction,
+            "primary_valid_fraction": primary_fraction,
+            "primary_angle": primary_angle,
+            "quality_mask_fraction": quality_mask_fraction,
+        }
+
     debug_summary_raw: dict[str, Any] | None = {
+        "run_info": {
+            "timestamp_utc": run_started_at.isoformat(),
+            "app_version": app_version,
+            "python_version": sys.version.split()[0],
+        },
+        "config_sha1": config_sha1,
+        "input_video": {
+            "name": video_path_obj.name,
+            "extension": video_path_obj.suffix,
+            "size_bytes": int(file_size_bytes) if file_size_bytes else None,
+        },
+        "video_metadata": {
+            "width": int(width) if width else None,
+            "height": int(height) if height else None,
+            "fps_original": float(fps_original) if fps_original else None,
+            "fps_effective": float(fps_effective) if fps_effective else None,
+            "duration_sec": float(info.duration_sec) if info and info.duration_sec else None,
+            "frame_count": int(info.frame_count) if info and info.frame_count else None,
+            "codec": getattr(info, "codec", None),
+            "fps_source": getattr(info, "fps_source", None),
+            "rotation_metadata": rotation_metadata,
+        },
+        "rotation": {
+            "manual_rotate": manual_rotate,
+            "processing_rotate": processing_rotate,
+            "metadata_rotation": rotation_metadata,
+            "overlay_rotate_cw": overlay_rotate_cw,
+            "overlay_quadrant_raw": overlay_quadrant,
+        },
+        "sampling": {
+            "sample_rate": sample_rate,
+            "fps_original": float(fps_original) if fps_original else None,
+            "fps_effective": float(fps_effective) if fps_effective else None,
+            "fps_reader": fps_from_reader,
+            "target_fps": target_fps_for_sampling,
+            "target_size": target_size,
+            "processed_frame_size": processed_frame_size,
+            "frames_processed": frames_processed,
+            "min_frames_required": cfg.video.min_frames,
+            "min_fps_required": cfg.video.min_fps,
+            "heavy_media": {
+                "is_heavy": is_heavy_media,
+                "by_size": is_heavy_by_size,
+                "by_megapixels": is_heavy_by_mp,
+                "overlay_disabled": overlay_disabled,
+                "overlay_scale_side": overlay_scale_side,
+            },
+        },
         "exercise": {
-            "label": getattr(as_exercise(detected_label), "value", str(detected_label)),
-            "view": getattr(as_view(detected_view), "value", str(detected_view)),
+            "selected": selected_exercise_value,
+            "label": exercise_label,
+            "view": exercise_view,
             "confidence": float(detected_confidence),
             "view_side": detected_side,
+        },
+        "detection": {
+            "exercise_detected": exercise_label,
+            "view_detected": exercise_view,
+            "detection_confidence": float(detected_confidence),
+            "view_side": detected_side,
+            "view_stats": detected_view_stats,
+        },
+        "counting": {
+            "primary_angle_config": cfg.counting.primary_angle,
+            "primary_angle_used": primary_angle,
+            "angle_range_deg": float(angle_range),
+            "skip_reason": skip_reason,
         },
         "counting_params": {
             "min_prominence": float(auto_params.min_prominence),
@@ -605,31 +700,14 @@ def run_pipeline(
             "valley_indices": list(count_debug.valley_indices) if count_debug else [],
             "prominences": list(count_debug.prominences) if count_debug else [],
         },
+        "quality": quality_section,
+        "warnings": list(warnings),
     }
 
     if detected_view_stats:
         debug_summary_raw["view_stats"] = detected_view_stats
 
-    if df_metrics is not None:
-        total_frames = len(df_metrics)
-        pose_ok_fraction = None
-        if "pose_ok" in df_metrics.columns and total_frames:
-            pose_ok_series = pd.to_numeric(df_metrics["pose_ok"], errors="coerce")
-            pose_ok_fraction = float((pose_ok_series >= 0.5).mean())
-
-        primary_fraction = None
-        if primary_angle and primary_angle in df_metrics.columns and total_frames:
-            col = pd.to_numeric(df_metrics[primary_angle], errors="coerce")
-            primary_fraction = float(np.isfinite(col).mean())
-
-        debug_summary_raw["quality"] = {
-            "frames": int(total_frames),
-            "pose_ok_fraction": pose_ok_fraction,
-            "primary_valid_fraction": primary_fraction,
-            "primary_angle": primary_angle,
-        }
-
-    debug_summary = _json_safe(debug_summary_raw)
+    debug_summary = json_safe(debug_summary_raw)
 
     return Report(
         repetitions=reps if skip_reason is None else 0,
