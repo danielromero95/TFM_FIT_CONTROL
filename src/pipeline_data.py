@@ -55,7 +55,13 @@ class RunStats:
 
 @dataclass
 class Report:
-    """Resultado completo de una ejecución del pipeline."""
+    """Resultado completo de una ejecución del pipeline.
+
+    Attributes:
+        debug_summary: contenedor opcional y serializable con información de
+            depuración, incluyendo etiqueta/vista detectada, parámetros de
+            conteo ajustados y métricas de calidad básicas.
+    """
 
     repetitions: int
     metrics: Optional["pd.DataFrame"]
@@ -65,6 +71,7 @@ class Report:
     overlay_video_path: Optional[Path] = None
     overlay_video_stream_path: Optional[Path] = None
     effective_config_path: Optional[Path] = None
+    debug_summary: Dict[str, Any] | None = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Convierte el reporte en el diccionario esperado por los clientes heredados."""

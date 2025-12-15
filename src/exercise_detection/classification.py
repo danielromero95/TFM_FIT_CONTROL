@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -51,8 +51,16 @@ _SIDE_VISIBILITY_KEYS = (
 _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 
 
-def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
-    """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose."""
+def classify_features(
+    features: FeatureSeries, *, return_metadata: bool = False
+) -> Tuple[str, str, float] | Tuple[str, str, float, Dict[str, Any]]:
+    """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose.
+
+    Args:
+        features: serie de características agregadas.
+        return_metadata: cuando es ``True`` devuelve un cuarto elemento con
+            detalles útiles para depuración (vista y fiabilidad).
+    """
 
     if features.valid_frames < MIN_VALID_FRAMES:
         return "unknown", "unknown", 0.0
@@ -150,7 +158,33 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         confidence = float(min(confidence, view_result.confidence))
 
     _log_summary(side, view_label, metrics, scores, view_result)
-    return label, view_label, float(confidence)
+
+    if not return_metadata:
+        return label, view_label, float(confidence)
+
+    view_stats_raw = getattr(view_result, "stats", {}) or {}
+
+    def _jsonable(value: Any) -> Any:
+        try:
+            if np.isfinite(value):
+                return float(value)
+            if isinstance(value, (int, float, np.generic)):
+                return None
+        except Exception:
+            return value
+        if isinstance(value, (int, float, np.generic)):
+            return None
+        return value
+
+    view_stats = {key: _jsonable(value) for key, value in view_stats_raw.items()}
+    metadata: Dict[str, Any] = {
+        "view_label": view_label,
+        "view_confidence": float(view_result.confidence),
+        "view_side": getattr(view_result, "side", None),
+        "view_stats": view_stats,
+        "both_sides_visible": bool(both_sides_visible),
+    }
+    return label, view_label, float(confidence), metadata
 
 
 def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:

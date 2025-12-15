@@ -42,6 +42,27 @@ from .streaming import (
 logger = logging.getLogger(__name__)
 
 
+def _json_safe(value: Any) -> Any:
+    """Convertir valores potencialmente NumPy a equivalentes JSON-serializables."""
+
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, np.ndarray):
+        return [_json_safe(v) for v in value.tolist()]
+
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+
+    return value
+
+
 def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> None:
     """Invocar *callbacks* compatibles con firmas antiguas y nuevas."""
 
@@ -78,7 +99,12 @@ def run_pipeline(
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
 ) -> Report:
-    """Ejecutar la pipeline completa utilizando `cfg` como fuente de verdad."""
+    """Ejecutar la pipeline completa utilizando `cfg` como fuente de verdad.
+
+    El ``Report`` devuelto expone un campo ``debug_summary`` listo para ser
+    serializado a JSON con detalles de detección, parámetros de conteo y
+    calidad de fotogramas.
+    """
 
     def notify(progress: int, message: str) -> None:
         logger.info(message)
@@ -113,6 +139,8 @@ def run_pipeline(
     detected_label = ExerciseType.UNKNOWN
     detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
+    detected_side: Optional[str] = None
+    detected_view_stats: dict[str, Any] | None = None
     debug_video_path_stream: Optional[Path] = None
     processed_frame_size: Optional[tuple[int, int]] = None
 
@@ -280,6 +308,8 @@ def run_pipeline(
                 detected_label = detection_output.label
                 detected_view = detection_output.view
                 detected_confidence = float(detection_output.confidence)
+                detected_side = getattr(detection_output, "side", None)
+                detected_view_stats = getattr(detection_output, "view_stats", None)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
@@ -474,19 +504,30 @@ def run_pipeline(
         "refractory_sec": float(auto_params.refractory_sec),
     }
     reps = 0
+    count_debug = None
     if chosen_primary and chosen_primary != cfg.counting.primary_angle:
         cfg.counting.primary_angle = chosen_primary
     if skip_reason is None:
         t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
-        reps, count_warnings = maybe_count_reps(
-            df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
+        reps, count_warnings, count_debug = maybe_count_reps(
+            df_metrics,
+            cfg,
+            fps_effective,
+            skip_reason,
+            overrides=count_overrides,
+            return_debug=True,
         )
         warnings.extend(count_warnings)
     else:
         notify(90, "STAGE 5: Counting skipped due to quality constraints.")
-        reps, count_warnings = maybe_count_reps(
-            df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
+        reps, count_warnings, count_debug = maybe_count_reps(
+            df_metrics,
+            cfg,
+            fps_effective,
+            skip_reason,
+            overrides=count_overrides,
+            return_debug=True,
         )
         warnings.extend(count_warnings)
 
@@ -544,6 +585,52 @@ def run_pipeline(
         count_ms,
         total_ms,
     )
+
+    debug_summary_raw: dict[str, Any] | None = {
+        "exercise": {
+            "label": getattr(as_exercise(detected_label), "value", str(detected_label)),
+            "view": getattr(as_view(detected_view), "value", str(detected_view)),
+            "confidence": float(detected_confidence),
+            "view_side": detected_side,
+        },
+        "counting_params": {
+            "min_prominence": float(auto_params.min_prominence),
+            "min_distance_sec": float(auto_params.min_distance_sec),
+            "refractory_sec": float(auto_params.refractory_sec),
+            "cadence_period_sec": auto_params.cadence_period_sec,
+            "iqr_deg": auto_params.iqr_deg,
+            "multipliers": auto_params.multipliers,
+        },
+        "counting_debug": {
+            "valley_indices": list(count_debug.valley_indices) if count_debug else [],
+            "prominences": list(count_debug.prominences) if count_debug else [],
+        },
+    }
+
+    if detected_view_stats:
+        debug_summary_raw["view_stats"] = detected_view_stats
+
+    if df_metrics is not None:
+        total_frames = len(df_metrics)
+        pose_ok_fraction = None
+        if "pose_ok" in df_metrics.columns and total_frames:
+            pose_ok_series = pd.to_numeric(df_metrics["pose_ok"], errors="coerce")
+            pose_ok_fraction = float((pose_ok_series >= 0.5).mean())
+
+        primary_fraction = None
+        if primary_angle and primary_angle in df_metrics.columns and total_frames:
+            col = pd.to_numeric(df_metrics[primary_angle], errors="coerce")
+            primary_fraction = float(np.isfinite(col).mean())
+
+        debug_summary_raw["quality"] = {
+            "frames": int(total_frames),
+            "pose_ok_fraction": pose_ok_fraction,
+            "primary_valid_fraction": primary_fraction,
+            "primary_angle": primary_angle,
+        }
+
+    debug_summary = _json_safe(debug_summary_raw)
+
     return Report(
         repetitions=reps if skip_reason is None else 0,
         metrics=df_metrics,
@@ -553,6 +640,7 @@ def run_pipeline(
         stats=stats,
         config_used=cfg,
         effective_config_path=effective_config_path,
+        debug_summary=debug_summary,
     )
 
 

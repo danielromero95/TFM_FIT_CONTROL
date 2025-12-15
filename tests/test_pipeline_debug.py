@@ -1,7 +1,6 @@
-# tests/test_pipeline_prefetch.py
-
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,10 +10,12 @@ import pandas as pd
 from src import config
 from src.A_preprocessing.video_metadata import VideoInfo
 from src.C_analysis import run_pipeline
+from src.C_analysis.repetition_counter import CountingDebugInfo
 from src.C_analysis.streaming import StreamingPoseResult
+from src.exercise_detection.types import DetectionResult
 
 
-def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
+def test_run_pipeline_exposes_debug_summary(monkeypatch, tmp_path) -> None:
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"fake video content")
 
@@ -26,7 +27,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     cfg.debug.debug_mode = False
     cfg.counting.exercise = "auto"
 
-    frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(20)]
+    frames = [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(10)]
 
     class _DummyCap:
         def release(self) -> None:  # pragma: no cover - limpieza de mejor esfuerzo
@@ -62,12 +63,24 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
         lambda **_: frames,
     )
 
+    detection = DetectionResult(
+        label="squat",
+        view="front",
+        confidence=0.85,
+        side="left",
+        view_stats={
+            "reliable_frames": np.int64(8),
+            "total_frames_sampled": np.int64(9),
+            "lateral_score": np.float64(0.2),
+        },
+    )
+
     def _fake_stream_pose_and_detection(*_args, **kwargs):
-        assert kwargs.get("detection_enabled") is False
+        assert kwargs.get("detection_enabled") is True
         return StreamingPoseResult(
             df_landmarks=pd.DataFrame({"frame_idx": range(len(frames))}),
             frames_processed=len(frames),
-            detection=None,
+            detection=detection,
             debug_video_path=None,
             processed_size=(2, 2),
         )
@@ -90,7 +103,12 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "src.C_analysis.pipeline.compute_metrics_and_angle",
         lambda *_args, **_kwargs: (
-            pd.DataFrame({cfg.counting.primary_angle: [90.0, 80.0, 105.0]}),
+            pd.DataFrame(
+                {
+                    cfg.counting.primary_angle: [90.0, 80.0, 105.0, np.nan],
+                    "pose_ok": [0.6, 0.4, 0.9, 0.2],
+                }
+            ),
             25.0,
             [],
             None,
@@ -101,26 +119,49 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "src.C_analysis.pipeline.auto_counting_params",
         lambda *_args, **_kwargs: SimpleNamespace(
-            min_prominence=1.0,
-            min_distance_sec=1.0,
-            refractory_sec=0.5,
-            cadence_period_sec=None,
-            iqr_deg=None,
-            multipliers={},
+            min_prominence=np.float64(1.0),
+            min_distance_sec=np.float64(1.0),
+            refractory_sec=np.float64(0.5),
+            cadence_period_sec=np.float64(2.0),
+            iqr_deg=np.float64(10.0),
+            multipliers={"pose_ok": np.float64(1.0)},
         ),
     )
 
+    debug_info = CountingDebugInfo(valley_indices=[1, 3], prominences=[2.0, 2.5])
+
     monkeypatch.setattr(
         "src.C_analysis.pipeline.maybe_count_reps",
-        lambda *_args, **kwargs: (2, [], None) if kwargs.get("return_debug") else (2, []),
+        lambda *_args, **kwargs: (2, [], debug_info) if kwargs.get("return_debug") else (2, []),
     )
 
     report = run_pipeline(
         str(video_path),
         cfg,
-        prefetched_detection=("squat", "front", 0.9),
     )
 
-    assert report.stats.exercise_detected == "squat"
-    assert report.stats.view_detected == "front"
-    assert report.stats.detection_confidence == 0.9
+    assert report.debug_summary is not None
+    json.dumps(report.debug_summary)  # debe ser serializable
+
+    exercise = report.debug_summary.get("exercise", {})
+    assert exercise.get("label") == "squat"
+    assert exercise.get("view") == "front"
+    assert exercise.get("confidence") == 0.85
+    assert exercise.get("view_side") == "left"
+
+    counting_debug = report.debug_summary.get("counting_debug", {})
+    assert counting_debug.get("valley_indices") == debug_info.valley_indices
+    assert counting_debug.get("prominences") == debug_info.prominences
+
+    counting_params = report.debug_summary.get("counting_params", {})
+    assert isinstance(counting_params.get("multipliers", {}).get("pose_ok"), float)
+
+    view_stats = report.debug_summary.get("view_stats", {})
+    assert isinstance(view_stats.get("lateral_score"), float)
+    assert isinstance(view_stats.get("reliable_frames"), int)
+
+    quality = report.debug_summary.get("quality", {})
+    assert quality.get("frames") == 4
+    assert quality.get("primary_angle") == cfg.counting.primary_angle
+    assert quality.get("pose_ok_fraction") == 0.5
+
