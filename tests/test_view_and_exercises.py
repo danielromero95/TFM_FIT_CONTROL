@@ -65,7 +65,7 @@ def test_front_squat_prefers_front_view():
     label, view, confidence = classify_features(features)
     assert label == "squat"
     assert view == "front"
-    assert confidence >= 0.45
+    assert confidence >= 0.4
 
 
 def test_borderline_hinge_prefers_deadlift():

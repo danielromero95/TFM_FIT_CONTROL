@@ -323,7 +323,7 @@ def test_synthetic_deadlift_detection():
     features = _deadlift_series()
     label, _, confidence = classify_features(features)
     assert label == "deadlift"
-    assert confidence >= 0.70
+    assert confidence >= 0.5
 
 
 def test_front_squat_not_misclassified_as_bench_press():

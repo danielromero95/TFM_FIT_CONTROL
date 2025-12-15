@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import logging
+from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
@@ -36,10 +38,13 @@ def _quality_mask_from_df(df_metrics: pd.DataFrame, column: str) -> np.ndarray:
     return mask.to_numpy(dtype=bool) if hasattr(mask, "to_numpy") else np.asarray(mask, dtype=bool)
 
 
-def _prepare_primary_series(df_metrics: pd.DataFrame, column: str, fps: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _prepare_primary_series(
+    df_metrics: pd.DataFrame, column: str, fps: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     series = pd.to_numeric(df_metrics[column], errors="coerce")
     quality_mask = _quality_mask_from_df(df_metrics, column)
     gated = series.where(quality_mask, np.nan)
+    reference = gated.to_numpy(dtype=float, copy=True)
     interpolated = interpolate_small_gaps(gated, ANALYSIS_MAX_GAP_FRAMES)
     smoothed = smooth_series(
         interpolated,
@@ -50,7 +55,7 @@ def _prepare_primary_series(df_metrics: pd.DataFrame, column: str, fps: float) -
     )
     smoothed = np.where(quality_mask, smoothed, np.nan)
     velocity = derivative(smoothed, fps)
-    return smoothed, velocity, quality_mask
+    return smoothed, velocity, quality_mask, reference
 
 
 def _state_machine_reps(
@@ -59,6 +64,9 @@ def _state_machine_reps(
     *,
     refractory_frames: int,
     min_excursion: float,
+    min_prominence: float,
+    min_distance_frames: int,
+    reference: np.ndarray | None = None,
 ) -> Tuple[int, CountingDebugInfo]:
     finite_angles = angles[np.isfinite(angles)]
     if finite_angles.size == 0:
@@ -71,25 +79,30 @@ def _state_machine_reps(
     top_thr = float(np.nanpercentile(finite_angles, 70))
     bottom_thr = float(np.nanpercentile(finite_angles, 30))
     vel_valid = np.abs(velocities[np.isfinite(velocities)])
-    vel_thr = max(5.0, float(np.nanpercentile(vel_valid, 65))) if vel_valid.size else 5.0
+    vel_thr = max(2.0, float(np.nanpercentile(vel_valid, 65))) if vel_valid.size else 2.0
 
     state = "IDLE"
     last_rep_frame = -10 * refractory_frames
     rep_indices: list[int] = []
     prominences: list[float] = []
     bottom_value = np.nan
+    bottom_idx = -1
     invalid_run = 0
+    long_gap_seen = False
 
     for idx, (angle, vel) in enumerate(zip(angles, velocities)):
         if not np.isfinite(angle):
             invalid_run += 1
             if invalid_run > ANALYSIS_MAX_GAP_FRAMES:
                 state = "IDLE"
+                bottom_value = np.nan
+                bottom_idx = -1
+                long_gap_seen = True
             continue
 
         invalid_run = 0
-        descending = np.isfinite(vel) and vel < -vel_thr
-        ascending = np.isfinite(vel) and vel > vel_thr
+        descending = (np.isfinite(vel) and vel < -vel_thr) or (np.isfinite(angle) and angle < top_thr)
+        ascending = (np.isfinite(vel) and vel > vel_thr) or (np.isfinite(angle) and angle > bottom_thr)
 
         if state == "IDLE":
             if angle >= top_thr:
@@ -102,20 +115,32 @@ def _state_machine_reps(
         elif state == "ECCENTRIC":
             if angle <= bottom_thr:
                 bottom_value = angle
+                bottom_idx = idx
                 state = "BOTTOM"
         elif state == "BOTTOM":
             if ascending:
                 state = "CONCENTRIC"
         elif state == "CONCENTRIC":
             if angle >= top_thr:
-                if idx - last_rep_frame >= refractory_frames:
-                    rep_indices.append(idx)
+                if idx - last_rep_frame >= max(refractory_frames, min_distance_frames):
                     prominence = float(np.nanmax([top_thr - bottom_value, angle_range]))
-                    prominences.append(prominence)
-                    last_rep_frame = idx
+                    if prominence >= min_prominence:
+                        source = reference if reference is not None else angles
+                        start = max(0, last_rep_frame + 1)
+                        bottom_window = source[start : idx + 1]
+                        if bottom_window.size:
+                            local_min = int(np.nanargmin(bottom_window))
+                            valley_idx = start + local_min
+                        else:
+                            valley_idx = bottom_idx if bottom_idx >= 0 else idx
+                        rep_indices.append(valley_idx)
+                        prominences.append(prominence)
+                        last_rep_frame = idx
                 state = "TOP"
 
     debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
+    if long_gap_seen:
+        return 0, debug
     return len(rep_indices), debug
 
 
@@ -156,8 +181,11 @@ def count_repetitions_with_config(
     refractory_sec = float(overrides.get("refractory_sec", counting_cfg.refractory_sec))
     refractory_frames = max(1, int(round(refractory_sec * fps_safe)))
     min_excursion = float(overrides.get("min_angle_excursion_deg", counting_cfg.min_angle_excursion_deg))
+    min_prominence = float(overrides.get("min_prominence", counting_cfg.min_prominence))
+    min_distance_sec = float(overrides.get("min_distance_sec", counting_cfg.min_distance_sec))
+    min_distance_frames = max(1, int(round(min_distance_sec * fps_safe)))
 
-    angles, velocities, _ = _prepare_primary_series(df_metrics, angle_column, fps_safe)
+    angles, velocities, _, reference = _prepare_primary_series(df_metrics, angle_column, fps_safe)
     if np.isfinite(angles).sum() < 3:
         return 0, CountingDebugInfo([], [])
 
@@ -166,6 +194,9 @@ def count_repetitions_with_config(
         velocities,
         refractory_frames=refractory_frames,
         min_excursion=min_excursion,
+        min_prominence=min_prominence,
+        min_distance_frames=min_distance_frames,
+        reference=reference,
     )
 
     logger.debug(
