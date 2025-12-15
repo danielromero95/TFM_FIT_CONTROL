@@ -312,12 +312,19 @@ class IncrementalExerciseFeatureExtractor:
                     "reliable_frames_used": int(sum(self._reliability_flags)),
                 },
             )
-            label, view, confidence, metadata = classify_features(features, return_metadata=True)
+            result = classify_features(features, return_metadata=True)
+            if isinstance(result, tuple) and len(result) == 4:
+                label, view, confidence, metadata = result
+            else:
+                label, view, confidence = result  # type: ignore[misc]
+                metadata = {}
             detection_side = None
             view_stats = None
+            detection_debug = None
             if isinstance(metadata, dict):
                 detection_side = metadata.get("view_side")
                 view_stats = metadata.get("view_stats")
+                detection_debug = metadata
 
             return make_detection_result(
                 label,
@@ -325,6 +332,7 @@ class IncrementalExerciseFeatureExtractor:
                 confidence,
                 side=detection_side,
                 view_stats=view_stats,
+                debug=detection_debug,
             )
         finally:
             if self._initialised and self._pose is not None:

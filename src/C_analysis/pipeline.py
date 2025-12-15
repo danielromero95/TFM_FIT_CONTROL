@@ -20,6 +20,7 @@ from src.A_preprocessing.frame_extraction import extract_processed_frames_stream
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
+from src.exercise_detection.types import DetectionResult
 from src.utils.json_safety import json_safe
 from .errors import NoFramesExtracted
 
@@ -126,6 +127,8 @@ def run_pipeline(
     detected_confidence = 0.0
     detected_side: Optional[str] = None
     detected_view_stats: dict[str, Any] | None = None
+    detection_source = "none"
+    detection_debug: dict[str, Any] | None = None
     debug_video_path_stream: Optional[Path] = None
     processed_frame_size: Optional[tuple[int, int]] = None
 
@@ -229,9 +232,9 @@ def run_pipeline(
 
         t1 = time.perf_counter()
         notify(25, "STAGE 2: Estimating pose on frames...")
-        detection_source = fps_effective if fps_effective > 0 else fps_original
-        if detection_source <= 0:
-            detection_source = fps_from_reader
+        detection_fps = fps_effective if fps_effective > 0 else fps_original
+        if detection_fps <= 0:
+            detection_fps = fps_from_reader
         preview_cb_to_use = preview_callback
         preview_fps_to_use = (
             preview_fps
@@ -261,13 +264,13 @@ def run_pipeline(
             raw_iter,
             cfg,
             detection_enabled=prefetched_detection is None,
-            detection_source_fps=detection_source,
+            detection_source_fps=detection_fps,
             debug_video_path=(
                 output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
                 if cfg.debug.generate_debug_video
                 else None
             ),
-            debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
+            debug_video_fps=fps_effective if fps_effective > 0 else detection_fps,
             preview_callback=preview_cb_to_use,
             preview_fps=(
                 preview_fps_to_use
@@ -280,21 +283,29 @@ def run_pipeline(
         debug_video_path_stream = streaming_result.debug_video_path
         processed_frame_size = streaming_result.processed_size
         if prefetched_detection is not None:
+            detection_source = "prefetched"
+            if isinstance(prefetched_detection, DetectionResult):
+                detection_debug = getattr(prefetched_detection, "debug", None)
+                detected_side = getattr(prefetched_detection, "side", None)
+                detected_view_stats = getattr(prefetched_detection, "view_stats", None)
             detected_label, detected_view, detected_confidence = normalize_detection(
                 prefetched_detection
             )
         else:
             detection_output = streaming_result.detection
             if detection_output is None:
+                detection_source = "none"
                 detected_label = ExerciseType.UNKNOWN
                 detected_view = ViewType.UNKNOWN
                 detected_confidence = 0.0
             else:
+                detection_source = "incremental"
                 detected_label = detection_output.label
                 detected_view = detection_output.view
                 detected_confidence = float(detection_output.confidence)
                 detected_side = getattr(detection_output, "side", None)
                 detected_view_stats = getattr(detection_output, "view_stats", None)
+                detection_debug = getattr(detection_output, "debug", None)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
@@ -681,6 +692,8 @@ def run_pipeline(
             "detection_confidence": float(detected_confidence),
             "view_side": detected_side,
             "view_stats": detected_view_stats,
+            "source": detection_source,
+            "exercise_detection_debug": detection_debug,
         },
         "counting": {
             "primary_angle_config": cfg.counting.primary_angle,

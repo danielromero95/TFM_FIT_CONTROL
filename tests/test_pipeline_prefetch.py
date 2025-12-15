@@ -124,3 +124,4 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     assert report.stats.exercise_detected == "squat"
     assert report.stats.view_detected == "front"
     assert report.stats.detection_confidence == 0.9
+    assert report.debug_summary["detection"]["source"] == "prefetched"

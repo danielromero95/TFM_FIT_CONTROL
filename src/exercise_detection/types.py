@@ -19,6 +19,7 @@ class DetectionResult:
     confidence: float
     side: str | None = None
     view_stats: Dict[str, Any] | None = None
+    debug: Dict[str, Any] | None = None
 
 
 def make_detection_result(
@@ -28,6 +29,7 @@ def make_detection_result(
     *,
     side: str | None = None,
     view_stats: Mapping[str, Any] | None = None,
+    debug: Mapping[str, Any] | None = None,
 ) -> "DetectionResult":
     """Convierte identificadores de texto legados en ``DetectionResult`` usando enumeraciones."""
 
@@ -37,6 +39,7 @@ def make_detection_result(
         float(confidence),
         side=side,
         view_stats=dict(view_stats) if view_stats is not None else None,
+        debug=dict(debug) if debug is not None else None,
     )
 
 
