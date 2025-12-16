@@ -27,14 +27,39 @@ def test_trunk_collapse_masks_pose_ok():
 
     df = calculate_metrics_from_sequence(sequence, fps=30.0)
 
-    assert {"trunk_len", "trunk_dx", "trunk_dy"}.issubset(df.columns)
+    assert {"trunk_len", "trunk_dx", "trunk_dy", "trunk_ok"}.issubset(df.columns)
     assert "trunk_quality" in df.attrs
 
     # Valid frames should keep stable inclination near zero
-    valid_angles = df.loc[df["pose_ok"] > 0.5, "trunk_inclination_deg"].dropna()
+    valid_angles = df.loc[df["trunk_ok"] > 0.5, "trunk_inclination_deg"].dropna()
     assert np.all(valid_angles < 5.0)
 
     # Collapsed torso frames must be masked out
-    invalid_mask = df["pose_ok"] < 0.5
+    invalid_mask = df["trunk_ok"] < 0.5
     assert invalid_mask.sum() >= 2
     assert df.loc[invalid_mask, "trunk_inclination_deg"].isna().all()
+
+    # Pose quality should stay true when only the trunk collapses
+    assert np.isclose(df["pose_ok"].sum(), len(df))
+
+
+def test_flat_trunk_does_not_mask_joint_angles():
+    sequence = []
+    for _ in range(5):
+        frame = _make_frame(0.01)
+        frame[11] = Landmark(0.5, 0.01, 0.0, 1.0)
+        frame[12] = Landmark(0.7, 0.01, 0.0, 1.0)
+        sequence.append(frame)
+
+    df = calculate_metrics_from_sequence(sequence, fps=30.0)
+
+    # Even with a flat trunk, pose_ok should reflect the quality mask only
+    assert np.isclose(df["pose_ok"].sum(), len(df))
+
+    # Joint angles must remain available
+    assert df["left_knee"].notna().sum() == len(df)
+    assert df["right_knee"].notna().sum() == len(df)
+
+    # Trunk data can be invalidated independently
+    assert (df["trunk_ok"] == 0).all()
+    assert df["trunk_inclination_deg"].isna().all()

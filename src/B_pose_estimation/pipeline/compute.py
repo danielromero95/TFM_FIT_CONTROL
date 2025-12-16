@@ -219,9 +219,17 @@ def calculate_metrics_from_sequence(
         flat_trunk |= np.abs(trunk_dy) < dy_threshold
 
     invalid_trunk = ~np.isfinite(trunk_len) | short_trunk | flat_trunk
-    if invalid_trunk.any():
-        valid_mask = valid_mask & ~invalid_trunk
-        dfm.loc[invalid_trunk, "trunk_inclination_deg"] = np.nan
+
+    if effective_warmup > 0 and len(valid_mask):
+        warmup = min(int(effective_warmup), valid_mask.size)
+        valid_mask[:warmup] = False
+
+    trunk_ok_mask = valid_mask & ~invalid_trunk
+    dfm["trunk_inclination_deg"] = np.where(trunk_ok_mask, trunk_cleaned, np.nan)
+    dfm["trunk_len"] = np.where(trunk_ok_mask, dfm["trunk_len"], np.nan)
+    dfm["trunk_dx"] = np.where(trunk_ok_mask, dfm["trunk_dx"], np.nan)
+    dfm["trunk_dy"] = np.where(trunk_ok_mask, dfm["trunk_dy"], np.nan)
+    dfm["trunk_ok"] = trunk_ok_mask.astype(float)
 
     trunk_quality.update(
         {
@@ -230,12 +238,9 @@ def calculate_metrics_from_sequence(
             "scale_threshold": scale_threshold,
             "dy_threshold": dy_threshold,
             "invalid_trunk_frames": int(invalid_trunk.sum()),
+            "trunk_ok_fraction": float(trunk_ok_mask.mean()) if len(trunk_ok_mask) else float("nan"),
         }
     )
-
-    if effective_warmup > 0 and len(valid_mask):
-        warmup = min(int(effective_warmup), valid_mask.size)
-        valid_mask[:warmup] = False
 
     raw_angles = dfm[ANGLE_COLUMNS].copy()
     for column in ANGLE_COLUMNS:
