@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, Mapping, Tuple
 
@@ -15,6 +16,7 @@ from .segmentation import segment_reps
 from .smoothing import smooth
 from .types import AggregateMetrics, ClassificationScores, FeatureSeries, ViewResult
 from .view import classify_view
+from src.utils.angles import apply_warmup_mask, maybe_convert_radians_to_degrees, suppress_spikes
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,40 @@ SMOOTH_KEYS = {
     "torso_length_world",
 }
 
+ANGLE_LIKE_KEYS = {
+    "knee_angle_left",
+    "knee_angle_right",
+    "hip_angle_left",
+    "hip_angle_right",
+    "elbow_angle_left",
+    "elbow_angle_right",
+    "torso_tilt_deg",
+    "shoulder_yaw_deg",
+}
+
+RADIAN_PRONE_KEYS = {"torso_tilt_deg", "shoulder_yaw_deg"}
+
+DETECTION_WARMUP_SECONDS = 0.5
+DETECTION_WARMUP_MAX_FRAMES = 3
+DETECTION_SPIKE_THRESHOLD_DEG = 55.0
+
+
+def _compute_warmup_frames(
+    sampling_rate: float,
+    *,
+    warmup_seconds: float | None,
+    override: int | None,
+    max_frames: int = DETECTION_WARMUP_MAX_FRAMES,
+) -> int:
+    if override is not None:
+        return max(0, int(override))
+    if warmup_seconds is None or sampling_rate <= 0:
+        return 0
+    computed = int(math.ceil(sampling_rate * warmup_seconds))
+    if max_frames > 0:
+        return max(0, min(computed, int(max_frames)))
+    return max(0, computed)
+
 _SIDE_VISIBILITY_KEYS = (
     "hip_{side}_x",
     "hip_{side}_y",
@@ -53,7 +89,11 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 
 
 def classify_features(
-    features: FeatureSeries, *, return_metadata: bool = False
+    features: FeatureSeries,
+    *,
+    return_metadata: bool = False,
+    warmup_seconds: float | None = None,
+    warmup_frames_override: int | None = None,
 ) -> Tuple[str, str, float] | Tuple[str, str, float, Dict[str, Any]]:
     """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose.
 
@@ -67,7 +107,34 @@ def classify_features(
         return "unknown", "unknown", 0.0
 
     series = _prepare_series(features)
+    cleaning_debug: Dict[str, Dict[str, float | bool]] = {}
+
     sampling_rate = float(features.sampling_rate or DEFAULT_SAMPLING_RATE)
+    warmup_frames = _compute_warmup_frames(
+        sampling_rate,
+        warmup_seconds=DETECTION_WARMUP_SECONDS if warmup_seconds is None else warmup_seconds,
+        override=warmup_frames_override,
+    )
+
+    for key in ANGLE_LIKE_KEYS:
+        if key not in series:
+            continue
+
+        converted = False
+        cleaned = series[key]
+        if key in RADIAN_PRONE_KEYS:
+            cleaned, converted = maybe_convert_radians_to_degrees(series[key])
+
+        cleaned, warmup_applied = apply_warmup_mask(cleaned, warmup_frames)
+        cleaned, spikes_removed = suppress_spikes(cleaned, DETECTION_SPIKE_THRESHOLD_DEG)
+        series[key] = cleaned
+
+        if converted or spikes_removed > 0 or warmup_applied > 0:
+            cleaning_debug[key] = {
+                "converted_from_rad": bool(converted),
+                "warmup_masked": int(warmup_applied),
+                "spikes_removed": int(spikes_removed),
+            }
 
     smoothed = {key: smooth(values, sampling_rate) for key, values in series.items() if key in SMOOTH_KEYS}
 
@@ -243,6 +310,19 @@ def classify_features(
         if isinstance(value, bool) or str(key).endswith("_veto")
     }
 
+    cleaning_summary: Dict[str, Any] = {}
+    if cleaning_debug:
+        unit_fixes = [name for name, meta in cleaning_debug.items() if meta.get("converted_from_rad")]
+        spikes = {name: meta["spikes_removed"] for name, meta in cleaning_debug.items() if meta.get("spikes_removed")}
+        warmup_applied = any(meta.get("warmup_masked") for meta in cleaning_debug.values())
+
+        if unit_fixes:
+            cleaning_summary["unit_fixes_applied"] = unit_fixes
+        if spikes:
+            cleaning_summary["outliers_masked"] = spikes
+        if warmup_applied:
+            cleaning_summary["warmup_frames_dropped"] = warmup_frames
+
     metadata: Dict[str, Any] = {
         "view_label": view_label,
         "view_confidence": float(view_result.confidence),
@@ -256,6 +336,8 @@ def classify_features(
         "vetoes": vetoes,
         "rep_count": int(metrics.rep_count),
     }
+    if cleaning_summary:
+        metadata["angle_cleaning"] = cleaning_summary
     return label, view_label, float(confidence), metadata
 
 

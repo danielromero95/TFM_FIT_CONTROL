@@ -477,7 +477,26 @@ def run_pipeline(
         exercise=(selected_exercise_type or detected_label),
         view=(selected_view_type or detected_view),
         quality_mask=quality_mask,
+        warmup_seconds=cfg.debug.warmup_seconds,
+        warmup_frames=cfg.debug.warmup_frames_override,
     )
+    data_quality_debug: dict[str, Any] = {}
+    cleaning_meta = getattr(df_metrics, "attrs", {}).get("angle_cleaning") if df_metrics is not None else None
+    warmup_applied = getattr(df_metrics, "attrs", {}).get("warmup_frames_applied") if df_metrics is not None else None
+    if cleaning_meta:
+        unit_fixes = [name for name, meta in cleaning_meta.items() if meta.get("converted_from_rad")]
+        spikes = {name: int(meta.get("spikes_removed", 0)) for name, meta in cleaning_meta.items() if meta.get("spikes_removed")}
+        warmup_masked = {name: int(meta.get("warmup_masked", 0)) for name, meta in cleaning_meta.items() if meta.get("warmup_masked")}
+
+        if unit_fixes:
+            data_quality_debug["unit_fixes_applied"] = unit_fixes
+        if spikes:
+            data_quality_debug["outliers_masked"] = spikes
+        if warmup_masked:
+            data_quality_debug["warmup_masked"] = warmup_masked
+    if warmup_applied:
+        data_quality_debug["warmup_frames_dropped"] = int(warmup_applied)
+
     warnings.extend(metrics_warnings)
     if skip_reason is None and metrics_skip_reason is not None:
         skip_reason = metrics_skip_reason
@@ -789,6 +808,9 @@ def run_pipeline(
 
     if detected_view_stats:
         debug_summary_raw["view_stats"] = detected_view_stats
+
+    if data_quality_debug:
+        debug_summary_raw["data_quality"] = data_quality_debug
 
     debug_summary = json_safe(debug_summary_raw)
 

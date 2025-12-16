@@ -27,6 +27,7 @@ from .settings import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_PREVIEW_FPS,
     DEFAULT_LANDMARK_MIN_VISIBILITY,
+    DEFAULT_WARMUP_SECONDS,
     POSE_ENABLE_SEGMENTATION,
     POSE_SMOOTH_LANDMARKS,
     OVERLAY_MAX_LONG_SIDE,
@@ -91,6 +92,8 @@ class DebugConfig:
     preview_disable_over_mp: float = PREVIEW_DISABLE_OVER_MP
     preview_fps_heavy: float = PREVIEW_MAX_FPS_HEAVY
     overlay_fps_cap: float = OVERLAY_FPS_CAP
+    warmup_seconds: float = DEFAULT_WARMUP_SECONDS
+    warmup_frames_override: Optional[int] = None
 
 
 @dataclass

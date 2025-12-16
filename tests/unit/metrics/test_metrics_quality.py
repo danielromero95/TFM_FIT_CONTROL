@@ -42,7 +42,9 @@ def test_metrics_mask_outliers_and_remain_finite():
     sequence = [_frame_with_offset(0.0), _frame_with_offset(0.02), _frame_with_offset(0.5), _frame_with_offset(-0.02)]
     quality_mask = [True, True, False, True]
 
-    metrics = calculate_metrics_from_sequence(sequence, fps=30.0, quality_mask=quality_mask)
+    metrics = calculate_metrics_from_sequence(
+        sequence, fps=30.0, quality_mask=quality_mask, warmup_frames=0
+    )
 
     assert metrics["pose_ok"].sum() == 3
     assert np.isfinite(metrics.loc[metrics["pose_ok"] > 0.5, "trunk_inclination_deg"]).all()

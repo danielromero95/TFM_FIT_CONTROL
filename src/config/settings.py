@@ -55,6 +55,7 @@ PEAK_DISTANCE = 15    # Distancia mínima en fotogramas entre repeticiones
 DEFAULT_USE_CROP = True
 DEFAULT_GENERATE_VIDEO = True
 DEFAULT_DEBUG_MODE = True
+DEFAULT_WARMUP_SECONDS = 0.5
 
 # --- PROTECCIONES PARA MEDIOS PESADOS ---
 OVERLAY_MAX_LONG_SIDE = 1280          # píxeles (p.ej. 720p/1080p-lite)
