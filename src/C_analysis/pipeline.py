@@ -21,6 +21,7 @@ from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from src.exercise_detection.types import DetectionResult
+from src.config.settings import DEFAULT_LANDMARK_MIN_VISIBILITY
 from src.utils.json_safety import json_safe
 from .errors import NoFramesExtracted
 
@@ -54,6 +55,30 @@ def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> N
         cb(progress, message)
     except TypeError:
         cb(progress)
+
+
+def _pose_quality_summary(df: pd.DataFrame, *, visibility_threshold: float) -> dict[str, float | int | None]:
+    pose_ok_fraction = None
+    if "pose_ok" in df.columns and len(df):
+        pose_ok_series = pd.to_numeric(df["pose_ok"], errors="coerce")
+        pose_ok_fraction = float((pose_ok_series >= 0.5).mean())
+
+    key_visibility = None
+    low_visibility_frames = 0
+    visibility_cols = ["v11", "v12", "v23", "v24"]
+    if set(visibility_cols).issubset(df.columns) and len(df):
+        vis_vals = pd.to_numeric(df[visibility_cols].stack(), errors="coerce")
+        finite_vis = vis_vals[np.isfinite(vis_vals)]
+        if not finite_vis.empty:
+            key_visibility = float(finite_vis.median())
+        frame_vis = df[visibility_cols].apply(pd.to_numeric, errors="coerce")
+        low_visibility_frames = int(((frame_vis < visibility_threshold) | ~np.isfinite(frame_vis)).any(axis=1).sum())
+
+    return {
+        "pose_ok_fraction": pose_ok_fraction,
+        "key_visibility_median": key_visibility,
+        "low_visibility_frames": low_visibility_frames,
+    }
 
 
 def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> OutputPaths:
@@ -122,6 +147,8 @@ def run_pipeline(
     t1 = t0
     info = None
     overlay_quadrant: Optional[int] = None
+    pose_fallback_used = False
+    fallback_reason: Optional[str] = None
 
     detected_label = ExerciseType.UNKNOWN
     detected_view = ViewType.UNKNOWN
@@ -130,11 +157,15 @@ def run_pipeline(
     detected_view_stats: dict[str, Any] | None = None
     detection_source = "none"
     detection_debug: dict[str, Any] | None = None
+    detection_output: DetectionResult | None = None
     debug_video_path_stream: Optional[Path] = None
     processed_frame_size: Optional[tuple[int, int]] = None
+    quality_summary: dict[str, Any] | None = None
 
     target_size = (cfg.pose.target_width, cfg.pose.target_height)
+    fallback_size = (int(cfg.pose.target_size_fallback), int(cfg.pose.target_size_fallback))
     target_fps_for_sampling: Optional[float] = None
+    pose_quality_threshold = float(getattr(cfg.pose, "quality_fallback_threshold", 0.0) or 0.0)
 
     file_size_bytes = 0
     width = 0
@@ -198,7 +229,9 @@ def run_pipeline(
         fps_original = plan.fps_base
         warnings.extend(plan.warnings)
 
-        if cfg.video.target_fps and cfg.video.target_fps > 0:
+        if getattr(cfg.pose, "target_fps_default", None):
+            target_fps_for_sampling = float(cfg.pose.target_fps_default)
+        elif cfg.video.target_fps and cfg.video.target_fps > 0:
             target_fps_for_sampling = float(cfg.video.target_fps)
 
         if target_fps_for_sampling and target_fps_for_sampling > 0:
@@ -283,8 +316,10 @@ def run_pipeline(
         frames_processed = streaming_result.frames_processed
         debug_video_path_stream = streaming_result.debug_video_path
         processed_frame_size = streaming_result.processed_size
+        min_visibility = float(getattr(cfg.debug, "min_visibility", DEFAULT_LANDMARK_MIN_VISIBILITY))
         if prefetched_detection is not None:
             detection_source = "prefetched"
+            detection_output = prefetched_detection if isinstance(prefetched_detection, DetectionResult) else None
             if isinstance(prefetched_detection, DetectionResult):
                 detection_debug = getattr(prefetched_detection, "debug", None)
                 detected_side = getattr(prefetched_detection, "side", None)
@@ -294,19 +329,92 @@ def run_pipeline(
             )
         else:
             detection_output = streaming_result.detection
-            if detection_output is None:
+
+        quality_summary = _pose_quality_summary(df_raw_landmarks, visibility_threshold=min_visibility)
+
+        if (
+            prefetched_detection is None
+            and pose_quality_threshold > 0.0
+            and quality_summary.get("pose_ok_fraction") is not None
+            and quality_summary["pose_ok_fraction"] < pose_quality_threshold
+        ):
+            fallback_reason = "pose_ok_fraction_below_threshold"
+            pose_fallback_used = True
+            try:
+                cap.release()
+            except Exception:
+                pass
+            cap = open_video_cap(video_path)
+            target_fps_for_sampling = (
+                float(cfg.pose.target_fps_fallback)
+                if getattr(cfg.pose, "target_fps_fallback", None)
+                else target_fps_for_sampling
+            )
+            if target_fps_for_sampling and target_fps_for_sampling > 0:
+                raw_iter = extract_processed_frames_stream(
+                    video_path=video_path,
+                    rotate=processing_rotate,
+                    resize_to=fallback_size,
+                    cap=cap,
+                    prefetched_info=info,
+                    progress_callback=None,
+                    target_fps=target_fps_for_sampling,
+                )
+                fps_effective = float(target_fps_for_sampling)
+                if fps_original > 0:
+                    sample_rate = max(1, int(round(fps_original / fps_effective)))
+            else:
+                raw_iter = extract_processed_frames_stream(
+                    video_path=video_path,
+                    rotate=processing_rotate,
+                    resize_to=fallback_size,
+                    cap=cap,
+                    prefetched_info=info,
+                    progress_callback=None,
+                    every_n=sample_rate,
+                )
+            streaming_result = stream_pose_and_detection(
+                raw_iter,
+                cfg,
+                detection_enabled=prefetched_detection is None,
+                detection_source_fps=detection_fps,
+                debug_video_path=(
+                    output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
+                    if cfg.debug.generate_debug_video
+                    else None
+                ),
+                debug_video_fps=fps_effective if fps_effective > 0 else detection_fps,
+                preview_callback=preview_cb_to_use,
+                preview_fps=(
+                    preview_fps_to_use
+                    if preview_fps_to_use is not None
+                    else getattr(getattr(cfg, "debug", object()), "preview_fps", None)
+                ),
+            )
+            df_raw_landmarks = streaming_result.df_landmarks
+            frames_processed = streaming_result.frames_processed
+            debug_video_path_stream = streaming_result.debug_video_path
+            processed_frame_size = streaming_result.processed_size
+            detection_output = streaming_result.detection
+            quality_summary = _pose_quality_summary(df_raw_landmarks, visibility_threshold=min_visibility)
+
+        if detection_output is None:
+            if detection_source == "prefetched":
+                pass
+            else:
                 detection_source = "none"
                 detected_label = ExerciseType.UNKNOWN
                 detected_view = ViewType.UNKNOWN
                 detected_confidence = 0.0
-            else:
+        else:
+            if detection_source != "prefetched":
                 detection_source = "incremental"
-                detected_label = detection_output.label
-                detected_view = detection_output.view
-                detected_confidence = float(detection_output.confidence)
-                detected_side = getattr(detection_output, "side", None)
-                detected_view_stats = getattr(detection_output, "view_stats", None)
-                detection_debug = getattr(detection_output, "debug", None)
+            detected_label = detection_output.label
+            detected_view = detection_output.view
+            detected_confidence = float(detection_output.confidence)
+            detected_side = getattr(detection_output, "side", None)
+            detected_view_stats = getattr(detection_output, "view_stats", None)
+            detection_debug = getattr(detection_output, "debug", None)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
@@ -711,6 +819,10 @@ def run_pipeline(
             "primary_valid_fraction": primary_fraction,
             "primary_angle": primary_angle,
             "quality_mask_fraction": quality_mask_fraction,
+            "pose_fallback_used": pose_fallback_used,
+            "fallback_reason": fallback_reason,
+            "low_visibility_frames": (quality_summary or {}).get("low_visibility_frames"),
+            "pose_visibility_median": (quality_summary or {}).get("key_visibility_median"),
         }
 
     debug_summary_raw: dict[str, Any] | None = {

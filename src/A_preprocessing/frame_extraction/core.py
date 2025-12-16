@@ -117,7 +117,7 @@ def extract_processed_frames_stream(
     progress_callback: Optional[Callable[[int], None]] = None,
     every_n: Optional[int] = None,
     target_fps: Optional[float] = None,
-) -> Iterator[np.ndarray]:
+) -> Iterator[FrameInfo]:
     """Produce fotogramas ya rotados/escalados respetando los filtros de muestreo."""
 
     sampling_kwargs: dict[str, object]
@@ -129,7 +129,7 @@ def extract_processed_frames_stream(
         stride = int(every_n) if every_n is not None else 1
         sampling_kwargs = {"every_n": max(1, stride)}
 
-    for finfo in extract_frames_stream(
+    yield from extract_frames_stream(
         video_path=video_path,
         sampling=sampling_mode,
         rotate=rotate,
@@ -138,5 +138,4 @@ def extract_processed_frames_stream(
         cap=cap,
         prefetched_info=prefetched_info,
         **sampling_kwargs,
-    ):
-        yield finfo.array
+    )
