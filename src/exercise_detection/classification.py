@@ -76,6 +76,24 @@ def _compute_warmup_frames(
         return max(0, min(computed, int(max_frames)))
     return max(0, computed)
 
+
+def _build_frame_mask(length: int, reliability: np.ndarray | None, warmup_frames: int) -> np.ndarray:
+    frame_count = int(length or 0)
+    if frame_count <= 0:
+        return np.array([], dtype=bool)
+
+    mask = np.ones(frame_count, dtype=bool)
+    if warmup_frames > 0:
+        mask[: min(frame_count, int(warmup_frames))] = False
+
+    if reliability is not None:
+        rel_arr = np.asarray(reliability, dtype=bool)
+        if rel_arr.size:
+            limit = min(frame_count, rel_arr.size)
+            mask[:limit] &= rel_arr[:limit]
+
+    return mask
+
 _SIDE_VISIBILITY_KEYS = (
     "hip_{side}_x",
     "hip_{side}_y",
@@ -115,6 +133,11 @@ def classify_features(
         warmup_seconds=DETECTION_WARMUP_SECONDS if warmup_seconds is None else warmup_seconds,
         override=warmup_frames_override,
     )
+
+    view_reliability = getattr(features, "view_reliability", None)
+    reliability_mask = view_reliability.get("frame_reliability") if isinstance(view_reliability, dict) else None
+
+    frame_mask = _build_frame_mask(series.get("_length", 0), reliability_mask, warmup_frames)
 
     for key in ANGLE_LIKE_KEYS:
         if key not in series:
@@ -166,23 +189,23 @@ def classify_features(
 
     knee_angle = get_series(f"knee_angle_{side}")
     hip_angle = get_series(f"hip_angle_{side}")
-    elbow_angle = get_series(f"elbow_angle_{side}")
+    elbow_angle_raw = get_series(f"elbow_angle_{side}")
+    elbow_angle = _apply_frame_mask(elbow_angle_raw, frame_mask)
     torso_tilt = get_series("torso_tilt_deg")
 
-    if _is_invalid(knee_angle) or _is_invalid(hip_angle) or _is_invalid(elbow_angle):
+    if _is_invalid(knee_angle) or _is_invalid(hip_angle) or _is_invalid(elbow_angle_raw):
         return "unknown", view_result.label, 0.0
 
-    wrist_y_side = get_series(f"wrist_{side}_y")
-    wrist_x_side = get_series(f"wrist_{side}_x")
-    shoulder_y_side = get_series(f"shoulder_{side}_y")
-    hip_y_side = get_series(f"hip_{side}_y")
+    wrist_y_mean = _apply_frame_mask(_nanmean_pair(get_series("wrist_left_y"), get_series("wrist_right_y")), frame_mask)
+    wrist_x_mean = _apply_frame_mask(_nanmean_pair(get_series("wrist_left_x"), get_series("wrist_right_x")), frame_mask)
+    shoulder_y_mean = _apply_frame_mask(
+        _nanmean_pair(get_series("shoulder_left_y"), get_series("shoulder_right_y")), frame_mask
+    )
+    hip_y_mean = _apply_frame_mask(_nanmean_pair(get_series("hip_left_y"), get_series("hip_right_y")), frame_mask)
     knee_x_side = get_series(f"knee_{side}_x")
     knee_y_side = get_series(f"knee_{side}_y")
     ankle_x_side = get_series(f"ankle_{side}_x")
     ankle_y_side = get_series(f"ankle_{side}_y")
-
-    wrist_y_mean = _nanmean_pair(get_series("wrist_left_y"), get_series("wrist_right_y"))
-    wrist_x_mean = _nanmean_pair(get_series("wrist_left_x"), get_series("wrist_right_x"))
 
     rep_slices = segment_reps(knee_angle, wrist_y_mean, torso_scale, sampling_rate)
 
@@ -191,19 +214,26 @@ def classify_features(
         "hip_angle": hip_angle,
         "elbow_angle": elbow_angle,
         "torso_tilt": torso_tilt,
-        "wrist_y": wrist_y_side,
-        "wrist_x": wrist_x_side,
-        "shoulder_y": shoulder_y_side,
-        "hip_y": hip_y_side,
+        "wrist_y": wrist_y_mean,
+        "wrist_x": wrist_x_mean,
+        "shoulder_y": shoulder_y_mean,
+        "hip_y": hip_y_mean,
         "knee_x": knee_x_side,
         "knee_y": knee_y_side,
         "ankle_x": ankle_x_side,
         "ankle_y": ankle_y_side,
         "bar_y": wrist_y_mean,
         "bar_x": wrist_x_mean,
+        "pelvis_y": _apply_frame_mask(get_series("pelvis_y"), frame_mask),
     }
 
-    metrics = compute_metrics(rep_slices, metrics_series, torso_scale, sampling_rate)
+    metrics = compute_metrics(
+        rep_slices,
+        metrics_series,
+        torso_scale,
+        sampling_rate,
+        view_label=view_result.label,
+    )
     if metrics.rep_count == 0:
         return "unknown", view_result.label, 0.0
 
@@ -418,6 +448,24 @@ def _is_invalid(series: np.ndarray) -> bool:
     return series.size == 0 or np.isfinite(series).sum() < 3
 
 
+def _apply_frame_mask(series: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    arr = np.asarray(series, dtype=float)
+    if arr.size == 0:
+        return arr
+
+    if mask.size == 0:
+        return arr
+
+    applied = mask
+    if mask.size != arr.size:
+        applied = np.ones(arr.size, dtype=bool)
+        applied[: min(arr.size, mask.size)] = mask[: min(arr.size, mask.size)]
+
+    masked = arr.copy()
+    masked[~applied] = np.nan
+    return masked
+
+
 def _nanmean_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     if left.size == 0 and right.size == 0:
         return np.array([], dtype=float)
@@ -453,7 +501,8 @@ def _log_summary(
         "side=%s view=%s knee_min=%.1f hip_min=%.1f elbow_bottom=%.1f torso_tilt_bottom=%.1f "
         "wrist_shoulder_diff=%.3f wrist_hip_diff=%.3f knee_rom=%.1f hip_rom=%.1f elbow_rom=%.1f "
         "knee_forward=%.3f tibia_angle=%.1f bar_range=%.3f bar_ankle_diff=%.3f hip_range=%.3f bar_horizontal_std=%.3f "
-        "duration=%.2f scores_raw=%s scores_adj=%s veto=%s view_rel=%d/%d width_med=%.3f z_med=%.3f lateral=%.3f view_side=%s",
+        "duration=%.2f bar_high_frac=%.2f bar_low_frac=%.2f elbow_ext_frac=%.2f elbow_flex_frac=%.2f "
+        "scores_raw=%s scores_adj=%s veto=%s view_rel=%d/%d width_med=%.3f z_med=%.3f lateral=%.3f view_side=%s",
         side,
         view_label,
         metrics.knee_min,
@@ -472,6 +521,10 @@ def _log_summary(
         metrics.hip_range_norm,
         metrics.bar_horizontal_std_norm,
         metrics.duration_s,
+        metrics.bar_high_fraction,
+        metrics.bar_low_fraction,
+        metrics.elbow_extended_fraction,
+        metrics.elbow_flexed_fraction,
         {k: round(v, 3) for k, v in scores.raw.items()},
         {k: round(v, 3) for k, v in scores.adjusted.items()},
         scores.deadlift_veto,

@@ -86,6 +86,9 @@ class RepMetrics:
     knee_rom: float
     hip_rom: float
     elbow_rom: float
+    knee_iqr: float
+    knee_deep_fraction: float
+    hip_knee_rom_ratio: float
     bar_range_norm: float
     duration_s: float
     bottom_frame_count: int
@@ -108,12 +111,21 @@ class AggregateMetrics:
     knee_rom: float = np.nan
     hip_rom: float = np.nan
     elbow_rom: float = np.nan
+    knee_iqr: float = np.nan
+    knee_deep_fraction: float = np.nan
+    hip_knee_rom_ratio: float = np.nan
     bar_range_norm: float = np.nan
     hip_range_norm: float = np.nan
+    pelvis_range_norm: float = np.nan
     bar_vertical_range_norm: float = np.nan
     bar_horizontal_std_norm: float = np.nan
+    bar_high_fraction: float = np.nan
+    bar_low_fraction: float = np.nan
+    elbow_extended_fraction: float = np.nan
+    elbow_flexed_fraction: float = np.nan
     duration_s: float = np.nan
     rep_count: int = 0
+    view_label: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -124,6 +136,7 @@ class ClassificationScores:
     adjusted: Mapping[str, float]
     penalties: Mapping[str, float]
     deadlift_veto: bool
+    deadlift_blocked: bool
 
 
 @dataclass(frozen=True)
