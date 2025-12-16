@@ -40,23 +40,36 @@ from .constants import (
     DEADLIFT_LOW_MOVEMENT_CAP,
     DEADLIFT_ROM_WEIGHT,
     DEADLIFT_SQUAT_PENALTY_WEIGHT,
+    DEADLIFT_SQUAT_ROM_THRESHOLD_DEG,
     DEADLIFT_TORSO_TILT_MIN_DEG,
+    DEADLIFT_FRONT_TORSO_WEIGHT_FACTOR,
+    DEADLIFT_HIP_KNEE_RATIO_MIN,
+    DEADLIFT_KNEE_DEEP_VETO_FRACTION,
     DEADLIFT_TORSO_WEIGHT,
     DEADLIFT_VETO_MOVEMENT_MIN,
     DEADLIFT_VETO_SCORE_CLAMP,
+    DEADLIFT_FRONT_VETO_SCORE_CLAMP,
     DEADLIFT_WRIST_HIP_DIFF_MIN_NORM,
     DEADLIFT_WRIST_HIP_WEIGHT,
+    DEADLIFT_BAR_LOW_FRACTION_MIN,
+    DEADLIFT_ELBOW_EXTENDED_FRACTION_MIN,
+    DEADLIFT_FRONT_ARM_WEIGHT,
+    DEADLIFT_FRONT_BAR_BONUS_WEIGHT,
     MIN_CONFIDENCE_SCORE,
     SQUAT_ARM_BONUS_WEIGHT,
     SQUAT_ARM_PENALTY_FACTOR,
     SQUAT_BAR_HIGH_BONUS_WEIGHT,
+    SQUAT_BAR_HIGH_FRACTION_MIN,
     SQUAT_BAR_SHOULDER_MAX_NORM,
     SQUAT_DEPTH_WEIGHT,
     SQUAT_ELBOW_BOTTOM_MAX_DEG,
     SQUAT_ELBOW_BOTTOM_MIN_DEG,
+    SQUAT_ELBOW_FLEXED_FRACTION_MIN,
     SQUAT_HINGE_PENALTY_WEIGHT,
     SQUAT_HIP_BOTTOM_MAX_DEG,
+    SQUAT_DEEP_FRACTION_MIN,
     SQUAT_KNEE_BOTTOM_MAX_DEG,
+    SQUAT_KNEE_DEEP_THRESHOLD_DEG,
     SQUAT_KNEE_FORWARD_MIN_NORM,
     SQUAT_KNEE_FORWARD_WEIGHT,
     SQUAT_MIN_ROM_DEG,
@@ -88,21 +101,29 @@ def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, Classification
     penalties["squat"] = squat_penalty
     squat_adjusted = max(0.0, squat_raw - squat_penalty)
 
-    deadlift_raw, deadlift_penalty = _deadlift_score(agg)
+    view_label = getattr(agg, "view_label", "unknown")
+    deadlift_raw, deadlift_penalty = _deadlift_score(agg, view_label=view_label)
     raw_scores["deadlift"] = deadlift_raw
     penalties["deadlift"] = deadlift_penalty
     deadlift_adjusted = max(0.0, deadlift_raw - deadlift_penalty)
 
-    deadlift_veto = _apply_deadlift_veto(agg, bench_score, deadlift_adjusted)
-    if deadlift_veto:
-        squat_adjusted *= DEADLIFT_VETO_SCORE_CLAMP
+    deadlift_blocked = _apply_deadlift_veto(agg, bench_score, deadlift_adjusted, view_label=view_label)
+    if deadlift_blocked:
+        clamp = DEADLIFT_FRONT_VETO_SCORE_CLAMP if view_label == "front" else DEADLIFT_VETO_SCORE_CLAMP
+        deadlift_adjusted *= clamp
 
     adjusted["squat"] = squat_adjusted
     adjusted["deadlift"] = deadlift_adjusted
 
     label, confidence, probabilities = _pick_label(adjusted, agg)
 
-    scores = ClassificationScores(raw=raw_scores, adjusted=adjusted, penalties=penalties, deadlift_veto=deadlift_veto)
+    scores = ClassificationScores(
+        raw=raw_scores,
+        adjusted=adjusted,
+        penalties=penalties,
+        deadlift_veto=deadlift_blocked,
+        deadlift_blocked=deadlift_blocked,
+    )
     return label, confidence, scores, probabilities
 
 
@@ -149,6 +170,7 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     knee_forward = _margin_above(np.abs(agg.knee_forward_norm), SQUAT_KNEE_FORWARD_MIN_NORM)
     tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
+    knee_deep_margin = _margin_above(agg.knee_deep_fraction, SQUAT_DEEP_FRACTION_MIN)
 
     squat_posture_ok = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom <= (
         SQUAT_TORSO_TILT_MAX_DEG + 5.0
@@ -159,12 +181,18 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
             np.abs(agg.wrist_shoulder_diff_norm), SQUAT_BAR_SHOULDER_MAX_NORM
         )
 
+    bar_high_fraction = _margin_above(agg.bar_high_fraction, SQUAT_BAR_HIGH_FRACTION_MIN)
+    elbow_flexion_fraction = _margin_above(agg.elbow_flexed_fraction, SQUAT_ELBOW_FLEXED_FRACTION_MIN)
+
     score = 0.0
     score += SQUAT_DEPTH_WEIGHT * depth
     score += SQUAT_TORSO_WEIGHT * torso_upright
     score += SQUAT_KNEE_FORWARD_WEIGHT * knee_forward
     score += SQUAT_ROM_WEIGHT * knee_rom_margin
+    score += 0.25 * SQUAT_DEPTH_WEIGHT * knee_deep_margin
     score += SQUAT_BAR_HIGH_BONUS_WEIGHT * bar_high_bonus
+    score += 0.5 * SQUAT_BAR_HIGH_BONUS_WEIGHT * bar_high_fraction
+    score += 0.35 * SQUAT_ARM_BONUS_WEIGHT * elbow_flexion_fraction
 
     if arm_ok:
         score += SQUAT_ARM_BONUS_WEIGHT
@@ -184,11 +212,14 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     return score, penalty
 
 
-def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
+def _deadlift_score(agg: AggregateMetrics, *, view_label: str = "unknown") -> Tuple[float, float]:
     hinge_posture = _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG)
     wrist_drop = _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
     elbow_extension = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
     knee_penalty = _margin_below(agg.knee_min, DEADLIFT_KNEE_BOTTOM_MIN_DEG)
+
+    if view_label == "front":
+        hinge_posture *= DEADLIFT_FRONT_TORSO_WEIGHT_FACTOR
 
     bar_alignment = _margin_below(agg.bar_ankle_diff_norm, DEADLIFT_BAR_ANKLE_MAX_NORM)
     bar_vertical = _margin_above(agg.bar_range_norm, DEADLIFT_BAR_RANGE_MIN_NORM)
@@ -206,6 +237,12 @@ def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
     score += DEADLIFT_BAR_RANGE_WEIGHT * bar_vertical
     score += DEADLIFT_ROM_WEIGHT * hip_rom_margin
 
+    if view_label == "front":
+        arm_extension = _margin_above(agg.elbow_extended_fraction, DEADLIFT_ELBOW_EXTENDED_FRACTION_MIN)
+        bar_low = _margin_above(agg.bar_low_fraction, DEADLIFT_BAR_LOW_FRACTION_MIN)
+        score += DEADLIFT_FRONT_ARM_WEIGHT * arm_extension
+        score += DEADLIFT_FRONT_BAR_BONUS_WEIGHT * bar_low
+
     movement_factor = max(
         agg.hip_rom / max(DEADLIFT_HIP_ROM_MIN_DEG, 1e-6),
         agg.bar_range_norm / max(DEADLIFT_BAR_RANGE_MIN_NORM, 1e-6),
@@ -217,6 +254,13 @@ def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
     penalty += DEADLIFT_KNEE_PENALTY_WEIGHT * max(0.0, knee_penalty)
     penalty += DEADLIFT_BAR_HORIZONTAL_WEIGHT * max(0.0, bar_horizontal_penalty)
     penalty += DEADLIFT_BAR_SHOULDER_PENALTY_WEIGHT * max(0.0, bar_shoulder_penalty)
+    if np.isfinite(agg.hip_knee_rom_ratio) and agg.hip_knee_rom_ratio < DEADLIFT_HIP_KNEE_RATIO_MIN:
+        ratio_penalty = _margin_below(agg.hip_knee_rom_ratio, DEADLIFT_HIP_KNEE_RATIO_MIN)
+        penalty += DEADLIFT_SQUAT_PENALTY_WEIGHT * ratio_penalty
+
+    squat_excursion = _margin_above(agg.knee_rom, DEADLIFT_SQUAT_ROM_THRESHOLD_DEG)
+    squat_depth_fraction = _margin_above(agg.knee_deep_fraction, DEADLIFT_KNEE_DEEP_VETO_FRACTION)
+    penalty += DEADLIFT_SQUAT_PENALTY_WEIGHT * (squat_excursion + 0.5 * squat_depth_fraction)
 
     if _bench_gate(agg):
         penalty += DEADLIFT_BENCH_PENALTY_WEIGHT
@@ -225,6 +269,8 @@ def _deadlift_score(agg: AggregateMetrics) -> Tuple[float, float]:
         _margin_below(np.abs(agg.wrist_shoulder_diff_norm), SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM),
         _margin_below(agg.elbow_bottom, SQUAT_ELBOW_BOTTOM_MAX_DEG),
         _margin_below(agg.torso_tilt_bottom, SQUAT_TORSO_TILT_MAX_DEG),
+        _margin_above(agg.bar_high_fraction, SQUAT_BAR_HIGH_FRACTION_MIN),
+        _margin_above(agg.elbow_flexed_fraction, SQUAT_ELBOW_FLEXED_FRACTION_MIN),
     ]
     penalty += DEADLIFT_SQUAT_PENALTY_WEIGHT * sum(max(0.0, cue) for cue in squat_cues)
 
@@ -235,18 +281,28 @@ def _apply_deadlift_veto(
     agg: AggregateMetrics,
     bench_score: float,
     deadlift_score: float,
+    *,
+    view_label: str = "unknown",
 ) -> bool:
     if bench_score > deadlift_score:
         return False
 
-    cues = [
-        agg.torso_tilt_bottom >= DEADLIFT_TORSO_TILT_MIN_DEG,
-        agg.elbow_bottom >= DEADLIFT_ELBOW_MIN_DEG,
-        agg.knee_min >= DEADLIFT_KNEE_BOTTOM_MIN_DEG,
-        agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM,
-    ]
     movement = max(agg.hip_rom, agg.bar_range_norm)
-    if sum(cues) >= 3 and movement >= DEADLIFT_VETO_MOVEMENT_MIN and deadlift_score > 0:
+    squat_rom = np.isfinite(agg.knee_rom) and agg.knee_rom >= DEADLIFT_SQUAT_ROM_THRESHOLD_DEG
+    squat_deep = np.isfinite(agg.knee_deep_fraction) and agg.knee_deep_fraction >= DEADLIFT_KNEE_DEEP_VETO_FRACTION
+    pelvis_drop = np.isfinite(agg.pelvis_range_norm) and agg.pelvis_range_norm >= 0.08
+    hip_ratio_low = np.isfinite(agg.hip_knee_rom_ratio) and agg.hip_knee_rom_ratio < DEADLIFT_HIP_KNEE_RATIO_MIN
+    bar_high = np.isfinite(agg.bar_high_fraction) and agg.bar_high_fraction >= SQUAT_BAR_HIGH_FRACTION_MIN
+    elbows_flexed = np.isfinite(agg.elbow_flexed_fraction) and agg.elbow_flexed_fraction >= SQUAT_ELBOW_FLEXED_FRACTION_MIN
+
+    squat_like = sum([squat_rom, squat_deep, hip_ratio_low, pelvis_drop, bar_high, elbows_flexed])
+
+    if view_label == "front":
+        if squat_deep or squat_like >= 2:
+            if movement >= DEADLIFT_VETO_MOVEMENT_MIN or squat_deep:
+                return True
+
+    if squat_like >= 3 and movement >= DEADLIFT_VETO_MOVEMENT_MIN and deadlift_score > 0:
         return True
     return False
 

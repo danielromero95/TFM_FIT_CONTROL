@@ -94,8 +94,11 @@ def calculate_metrics_from_sequence(
     shoulder_mid_y = (y_norm[:, LEFT_SHOULDER] + y_norm[:, RIGHT_SHOULDER]) * 0.5
     hip_mid_x = (x_norm[:, HIP_CENTER[0]] + x_norm[:, HIP_CENTER[1]]) * 0.5
     hip_mid_y = (y_norm[:, HIP_CENTER[0]] + y_norm[:, HIP_CENTER[1]]) * 0.5
-    dx = np.abs(shoulder_mid_x - hip_mid_x)
-    dy = np.abs(shoulder_mid_y - hip_mid_y)
+    trunk_dx = shoulder_mid_x - hip_mid_x
+    trunk_dy = shoulder_mid_y - hip_mid_y
+    dx = np.abs(trunk_dx)
+    dy = np.abs(trunk_dy)
+    trunk_len = np.hypot(dx, dy)
     trunk_inclination_deg = np.degrees(np.arctan2(dx, dy + 1e-6))
 
     left_knee_angle = angle_abc_deg(
@@ -145,6 +148,9 @@ def calculate_metrics_from_sequence(
             "left_hip": left_hip_angle,
             "right_hip": right_hip_angle,
             "trunk_inclination_deg": trunk_inclination_deg,
+            "trunk_len": trunk_len,
+            "trunk_dx": trunk_dx,
+            "trunk_dy": trunk_dy,
             "shoulder_width": shoulder_width,
             "foot_separation": foot_separation,
         }
@@ -194,6 +200,39 @@ def calculate_metrics_from_sequence(
     preferred_mask = quality_mask if quality_mask is not None else getattr(sequence, "quality_mask", None)
     valid_mask = _normalize_mask(preferred_mask)
 
+    trunk_quality: Dict[str, float | int] = {}
+    finite_trunk = np.isfinite(trunk_len)
+    median_trunk = float(np.nanmedian(trunk_len[finite_trunk & valid_mask])) if np.any(finite_trunk) else float("nan")
+    median_shoulder = float(
+        np.nanmedian(shoulder_width[np.isfinite(shoulder_width) & valid_mask])
+    ) if np.isfinite(shoulder_width).any() else float("nan")
+
+    base_scale = median_trunk if np.isfinite(median_trunk) and median_trunk > 0 else median_shoulder
+    scale_threshold = float(base_scale * 0.35) if np.isfinite(base_scale) and base_scale > 0 else float("nan")
+    dy_threshold = float(base_scale * 0.1) if np.isfinite(base_scale) and base_scale > 0 else float("nan")
+
+    short_trunk = np.zeros_like(valid_mask, dtype=bool)
+    if np.isfinite(scale_threshold):
+        short_trunk |= trunk_len < scale_threshold
+    flat_trunk = np.zeros_like(valid_mask, dtype=bool)
+    if np.isfinite(dy_threshold):
+        flat_trunk |= np.abs(trunk_dy) < dy_threshold
+
+    invalid_trunk = ~np.isfinite(trunk_len) | short_trunk | flat_trunk
+    if invalid_trunk.any():
+        valid_mask = valid_mask & ~invalid_trunk
+        dfm.loc[invalid_trunk, "trunk_inclination_deg"] = np.nan
+
+    trunk_quality.update(
+        {
+            "median_trunk_len": median_trunk,
+            "median_shoulder_width": median_shoulder,
+            "scale_threshold": scale_threshold,
+            "dy_threshold": dy_threshold,
+            "invalid_trunk_frames": int(invalid_trunk.sum()),
+        }
+    )
+
     if effective_warmup > 0 and len(valid_mask):
         warmup = min(int(effective_warmup), valid_mask.size)
         valid_mask[:warmup] = False
@@ -232,6 +271,8 @@ def calculate_metrics_from_sequence(
     dfm.attrs["smoothing"] = smoothing_meta
     dfm.attrs["angle_cleaning"] = cleaning_meta
     dfm.attrs["warmup_frames_applied"] = int(max(0, effective_warmup))
+    if trunk_quality:
+        dfm.attrs["trunk_quality"] = trunk_quality
 
     def _symmetry(col_left: str, col_right: str) -> np.ndarray:
         L = raw_angles[col_left].to_numpy()
