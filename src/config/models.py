@@ -30,6 +30,10 @@ from .settings import (
     DEFAULT_WARMUP_SECONDS,
     POSE_ENABLE_SEGMENTATION,
     POSE_SMOOTH_LANDMARKS,
+    POSE_QUALITY_FALLBACK,
+    POSE_TARGET_FPS_DEFAULT,
+    POSE_TARGET_FPS_FALLBACK,
+    POSE_TARGET_SIZE_FALLBACK,
     OVERLAY_MAX_LONG_SIDE,
     OVERLAY_DISABLE_OVER_BYTES,
     PREVIEW_DISABLE_OVER_MP,
@@ -45,6 +49,10 @@ class PoseConfig:
     use_crop: bool = DEFAULT_USE_CROP
     target_width: int = DEFAULT_TARGET_WIDTH
     target_height: int = DEFAULT_TARGET_HEIGHT
+    target_fps_default: float | None = POSE_TARGET_FPS_DEFAULT
+    target_fps_fallback: float | None = POSE_TARGET_FPS_FALLBACK
+    target_size_fallback: int = POSE_TARGET_SIZE_FALLBACK
+    quality_fallback_threshold: float = POSE_QUALITY_FALLBACK
     model_complexity: int = MODEL_COMPLEXITY
     min_detection_confidence: float = float(MIN_DETECTION_CONFIDENCE)
     min_tracking_confidence: float = float(MIN_TRACKING_CONFIDENCE)

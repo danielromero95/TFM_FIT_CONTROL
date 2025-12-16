@@ -24,6 +24,14 @@ def apply_settings(cfg: config.Config, settings: Dict[str, Any]) -> None:
         cfg.pose.target_width = int(settings["target_width"])
     if "target_height" in settings:
         cfg.pose.target_height = int(settings["target_height"])
+    if "pose_target_fps_default" in settings:
+        cfg.pose.target_fps_default = float(settings["pose_target_fps_default"])
+    if "pose_target_fps_fallback" in settings:
+        cfg.pose.target_fps_fallback = float(settings["pose_target_fps_fallback"])
+    if "pose_target_size_fallback" in settings:
+        cfg.pose.target_size_fallback = int(settings["pose_target_size_fallback"])
+    if "pose_quality_fallback_threshold" in settings:
+        cfg.pose.quality_fallback_threshold = float(settings["pose_quality_fallback_threshold"])
     if "use_crop" in settings:
         cfg.pose.use_crop = bool(settings["use_crop"])
     if "generate_debug_video" in settings:

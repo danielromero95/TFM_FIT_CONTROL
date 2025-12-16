@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
+from src.A_preprocessing.frame_extraction.state import FrameInfo
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import (
@@ -139,7 +140,7 @@ def infer_upright_quadrant_from_sequence(
 
 
 def stream_pose_and_detection(
-    frames: Iterable[np.ndarray],
+    frames: Iterable[np.ndarray | FrameInfo],
     cfg: "config.Config",
     *,
     detection_enabled: bool,
@@ -206,6 +207,27 @@ def stream_pose_and_detection(
     if debug_fps <= 0:
         debug_fps = float(detection_target_fps)
 
+    def _to_source_normalized(
+        x_norm: float,
+        y_norm: float,
+        lb_info: tuple[float | None, tuple[int, int, int, int] | None, int, int],
+        dest_w: int,
+        dest_h: int,
+    ) -> tuple[float, float]:
+        scale, pads, src_w, src_h = lb_info
+        if scale is None or pads is None or not src_w or not src_h:
+            return x_norm, y_norm
+        pad_left, pad_top, _, _ = pads
+        px = x_norm * dest_w - pad_left
+        py = y_norm * dest_h - pad_top
+        if px < 0 or py < 0:
+            return float("nan"), float("nan")
+        src_x = px / float(scale)
+        src_y = py / float(scale)
+        if src_x < 0 or src_y < 0:
+            return float("nan"), float("nan")
+        return src_x / float(src_w), src_y / float(src_h)
+
     estimator_cls = (
         RoiPoseEstimator
         if (getattr(cfg.pose, "use_crop", False) and getattr(cfg.pose, "use_roi_tracking", False))
@@ -220,12 +242,27 @@ def stream_pose_and_detection(
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:
-            for frame_idx, frame in enumerate(frames):
+            for frame_idx, frame_obj in enumerate(frames):
                 frames_processed += 1
+                if isinstance(frame_obj, FrameInfo):
+                    frame = frame_obj.array
+                    source_width = frame_obj.source_width or frame.shape[1]
+                    source_height = frame_obj.source_height or frame.shape[0]
+                    letterbox_info = (
+                        frame_obj.letterbox_scale,
+                        frame_obj.letterbox_pad,
+                        source_width,
+                        source_height,
+                    )
+                else:
+                    frame = frame_obj
+                    source_width = frame.shape[1]
+                    source_height = frame.shape[0]
+                    letterbox_info = (None, None, source_width, source_height)
                 height, width = frame.shape[:2]
 
                 if processed_size is None:
-                    processed_size = (int(width), int(height))
+                    processed_size = (int(source_width), int(source_height))
 
                 ts_ms = (
                     (frame_idx / detection_ts_fps) * 1000.0
@@ -238,7 +275,10 @@ def stream_pose_and_detection(
                 result = estimator.estimate(frame)
                 landmarks = result.landmarks
                 crop_box = result.crop_box
-                row: dict[str, float] = {"frame_idx": int(frame_idx)}
+                row: dict[str, float] = {
+                    "frame_idx": int(frame_idx),
+                    "pose_ok": float(result.pose_ok) if result.pose_ok is not None else np.nan,
+                }
                 overlay_points: dict[int, tuple[int, int]] = {}
 
                 if landmarks:
@@ -251,6 +291,8 @@ def stream_pose_and_detection(
                         visibility = float(point.get("visibility", 0.0))
                         x_value = float(point.get("x", np.nan))
                         y_value = float(point.get("y", np.nan))
+                        overlay_x_norm = x_value
+                        overlay_y_norm = y_value
 
                         if getattr(cfg.pose, "use_crop", False) and not getattr(
                             cfg.pose, "use_roi_tracking", False
@@ -258,23 +300,37 @@ def stream_pose_and_detection(
                             if crop_width > 0.0 and crop_height > 0.0:
                                 x_value = (x_value * crop_width + crop_x1) / float(width)
                                 y_value = (y_value * crop_height + crop_y1) / float(height)
+                                overlay_x_norm = x_value
+                                overlay_y_norm = y_value
                             else:
                                 x_value = np.nan
                                 y_value = np.nan
+                                overlay_x_norm = np.nan
+                                overlay_y_norm = np.nan
 
                         if visibility < min_visibility:
                             # Ignoramos puntos con visibilidad baja para evitar ruido en el análisis.
                             x_value = np.nan
                             y_value = np.nan
+                            overlay_x_norm = np.nan
+                            overlay_y_norm = np.nan
+
+                        x_value, y_value = _to_source_normalized(
+                            x_value, y_value, letterbox_info, width, height
+                        )
 
                         row[f"x{landmark_index}"] = x_value
                         row[f"y{landmark_index}"] = y_value
                         row[f"z{landmark_index}"] = float(point.get("z", np.nan))
                         row[f"v{landmark_index}"] = visibility
 
-                        if overlay_points_needed and np.isfinite(x_value) and np.isfinite(y_value):
-                            px = int(round(x_value * width))
-                            py = int(round(y_value * height))
+                        if (
+                            overlay_points_needed
+                            and np.isfinite(overlay_x_norm)
+                            and np.isfinite(overlay_y_norm)
+                        ):
+                            px = int(round(overlay_x_norm * width))
+                            py = int(round(overlay_y_norm * height))
                             overlay_points[landmark_index] = (px, py)
 
                     row.update(
@@ -292,6 +348,7 @@ def stream_pose_and_detection(
                         row[f"z{landmark_index}"] = np.nan
                         row[f"v{landmark_index}"] = np.nan
                     row.update({"crop_x1": np.nan, "crop_y1": np.nan, "crop_x2": np.nan, "crop_y2": np.nan})
+                    row.setdefault("pose_ok", np.nan)
 
                 if detection_extractor is not None and not detection_error:
                     try:

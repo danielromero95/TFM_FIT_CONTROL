@@ -44,14 +44,19 @@ def _index_mode_iterator(
                 continue
 
         if idx_local % stride == 0:
-            processed = context.process_frame(frame)
+            processed, letterbox = context.process_frame(frame)
             h, w = processed.shape[:2]
+            src_w, src_h, scale, pads = (letterbox or (w, h, None, None))
             yield FrameInfo(
                 index=context.read_idx,
                 timestamp_sec=context.effective_timestamp(ts_ms, context.read_idx),
                 array=processed,
                 width=w,
                 height=h,
+                source_width=src_w,
+                source_height=src_h,
+                letterbox_scale=scale,
+                letterbox_pad=pads,
             )
             context.increment_produced()
             if context.limit_reached():

@@ -131,14 +131,19 @@ def _time_mode_iterator(
             if not ok:
                 continue
 
-            frame = context.process_frame(frame)
+            frame, letterbox = context.process_frame(frame)
             h, w = frame.shape[:2]
+            src_w, src_h, scale, pads = (letterbox or (w, h, None, None))
             yield FrameInfo(
                 index=current_idx,
                 timestamp_sec=context.effective_timestamp(ts_ms, current_idx),
                 array=frame,
                 width=w,
                 height=h,
+                source_width=src_w,
+                source_height=src_h,
+                letterbox_scale=scale,
+                letterbox_pad=pads,
             )
             context.increment_produced()
             next_target_ms = (ts_ms if ts_ms > 0 else next_target_ms) + interval_ms

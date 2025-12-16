@@ -13,13 +13,22 @@ from .utils import normalize_rotation_deg
 
 @dataclass(slots=True)
 class FrameInfo:
-    """Metadatos asociados a un fotograma extraído del vídeo."""
+    """Metadatos asociados a un fotograma extraído del vídeo.
+
+    Incluimos información de letterbox para poder reconstruir coordenadas en
+    el espacio original cuando los frames se reescalan manteniendo el aspect
+    ratio.
+    """
 
     index: int
     timestamp_sec: float
     array: np.ndarray
     width: int
     height: int
+    source_width: int | None = None
+    source_height: int | None = None
+    letterbox_scale: float | None = None
+    letterbox_pad: tuple[int, int, int, int] | None = None
 
 
 _ROTATE_MAP = {
@@ -45,22 +54,41 @@ class _FrameProcessor:
     resize_to: Optional[tuple[int, int]]
     to_gray: bool
 
-    def __call__(self, frame: np.ndarray) -> np.ndarray:
+    def __call__(self, frame: np.ndarray) -> tuple[np.ndarray, tuple[int, int, float, tuple[int, int, int, int]] | None]:
         if self.rotate_deg:
             frame = _apply_rotation(frame, self.rotate_deg)
+
+        letterbox_info: tuple[int, int, float, tuple[int, int, int, int]] | None = None
         if self.resize_to:
             target_width, target_height = self.resize_to
             height, width = frame.shape[:2]
             if width != target_width or height != target_height:
-                interpolation = (
-                    cv2.INTER_AREA
-                    if width > target_width or height > target_height
-                    else cv2.INTER_LINEAR
+                scale = min(target_width / float(width), target_height / float(height))
+                new_w = max(1, int(round(width * scale)))
+                new_h = max(1, int(round(height * scale)))
+                interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+                resized = cv2.resize(frame, (new_w, new_h), interpolation=interpolation)
+
+                pad_x = target_width - new_w
+                pad_y = target_height - new_h
+                pad_left = pad_x // 2
+                pad_right = pad_x - pad_left
+                pad_top = pad_y // 2
+                pad_bottom = pad_y - pad_top
+                frame = cv2.copyMakeBorder(
+                    resized,
+                    pad_top,
+                    pad_bottom,
+                    pad_left,
+                    pad_right,
+                    borderType=cv2.BORDER_CONSTANT,
+                    value=0,
                 )
-                frame = cv2.resize(frame, self.resize_to, interpolation=interpolation)
+                letterbox_info = (width, height, scale, (pad_left, pad_top, pad_right, pad_bottom))
+
         if self.to_gray:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        return frame
+        return frame, letterbox_info
 
 
 @dataclass(slots=True)
@@ -109,7 +137,9 @@ class _IteratorContext:
     def limit_reached(self) -> bool:
         return bool(self.max_frames and self.produced >= self.max_frames)
 
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+    def process_frame(
+        self, frame: np.ndarray
+    ) -> tuple[np.ndarray, tuple[int, int, float, tuple[int, int, int, int]] | None]:
         return self.processor(frame)
 
     def report_progress(self, index: int) -> None:
