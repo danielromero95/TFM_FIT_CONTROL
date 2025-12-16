@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Dict, Iterable, Optional
 
 import numpy as np
@@ -32,6 +33,7 @@ from src.config.constants import (
     ANALYSIS_SMOOTH_METHOD,
 )
 from ..types import PoseSequence
+from src.utils.angles import maybe_convert_radians_to_degrees, suppress_spikes
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,9 @@ def calculate_metrics_from_sequence(
     sg_poly: int | None = None,
     vel_method: str = "forward",
     quality_mask: Optional[Iterable[bool]] = None,
+    warmup_seconds: float | None = None,
+    warmup_frames: int | None = None,
+    spike_threshold_deg: float = 55.0,
 ) -> pd.DataFrame:
     """Calcula métricas biomecánicas para la secuencia de marcadores proporcionada."""
 
@@ -145,6 +150,32 @@ def calculate_metrics_from_sequence(
         }
     )
 
+    cleaning_meta: Dict[str, Dict[str, float | bool]] = {}
+    effective_warmup = 0
+    if warmup_frames is not None:
+        effective_warmup = max(0, int(warmup_frames))
+    elif warmup_seconds is not None and fps > 0:
+        effective_warmup = max(0, int(math.ceil(fps * warmup_seconds)))
+
+    for column in ANGLE_COLUMNS:
+        cleaned, spikes_removed = suppress_spikes(dfm[column], spike_threshold_deg)
+
+        dfm[column] = cleaned
+        cleaning_meta[column] = {
+            "converted_from_rad": False,
+            "warmup_masked": int(effective_warmup),
+            "spikes_removed": int(spikes_removed),
+        }
+
+    trunk_cleaned, converted = maybe_convert_radians_to_degrees(dfm["trunk_inclination_deg"])
+    trunk_cleaned, spikes_removed = suppress_spikes(trunk_cleaned, spike_threshold_deg)
+    dfm["trunk_inclination_deg"] = trunk_cleaned
+    cleaning_meta["trunk_inclination_deg"] = {
+        "converted_from_rad": bool(converted),
+        "warmup_masked": int(effective_warmup),
+        "spikes_removed": int(spikes_removed),
+    }
+
     valid_mask = np.ones(len(dfm), dtype=bool)
     if hasattr(sequence, "__len__") and len(dfm) != len(sequence):
         valid_mask[:] = False
@@ -162,6 +193,10 @@ def calculate_metrics_from_sequence(
 
     preferred_mask = quality_mask if quality_mask is not None else getattr(sequence, "quality_mask", None)
     valid_mask = _normalize_mask(preferred_mask)
+
+    if effective_warmup > 0 and len(valid_mask):
+        warmup = min(int(effective_warmup), valid_mask.size)
+        valid_mask[:warmup] = False
 
     raw_angles = dfm[ANGLE_COLUMNS].copy()
     for column in ANGLE_COLUMNS:
@@ -195,6 +230,8 @@ def calculate_metrics_from_sequence(
             dfm[f"ang_vel_{column}"] = derivative(smoothed, fps)
 
     dfm.attrs["smoothing"] = smoothing_meta
+    dfm.attrs["angle_cleaning"] = cleaning_meta
+    dfm.attrs["warmup_frames_applied"] = int(max(0, effective_warmup))
 
     def _symmetry(col_left: str, col_right: str) -> np.ndarray:
         L = raw_angles[col_left].to_numpy()

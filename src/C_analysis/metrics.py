@@ -279,13 +279,21 @@ def compute_metrics_and_angle(
     exercise: ExerciseType | str = ExerciseType.UNKNOWN,
     view: ViewType | str = ViewType.UNKNOWN,
     quality_mask: Optional[pd.Series] = None,
+    warmup_seconds: float | None = None,
+    warmup_frames: int | None = None,
 ) -> tuple[pd.DataFrame, float, list[str], Optional[str], Optional[str]]:
     """Calcular métricas biomecánicas y derivar la excursión del ángulo principal."""
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
 
-    df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective, quality_mask=quality_mask)
+    df_metrics = calculate_metrics_from_sequence(
+        df_seq,
+        fps_effective,
+        quality_mask=quality_mask,
+        warmup_seconds=warmup_seconds,
+        warmup_frames=warmup_frames,
+    )
     angle_range = 0.0
 
     chosen_primary = primary_angle
