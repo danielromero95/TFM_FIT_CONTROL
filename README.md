@@ -50,10 +50,6 @@ pip install -e .
 streamlit run src/app.py
 ~~~
 
-### (Legacy) Conda
-
-A legacy `environment.yml` exists under `OLD/`, but it’s no longer the primary path.
-
 ## Quick Start
 
 ~~~
@@ -127,7 +123,6 @@ streamlit run src/app.py
 
 - Updated README with the latest release information and reorganized change-log sections.
 - Added a high-level overview of the current project structure to accelerate onboarding.
-- Clarified the purpose of legacy assets stored under `OLD/` for historical reference.
 
 ## What’s new in 2.0
 
@@ -167,7 +162,6 @@ streamlit run src/app.py
 - One *single* resize stage (documented in config) before pose estimation.
 - Rep counting based on valleys with **prominence / min distance / refractory**.
 - Streamlit & GUI surface **run stats**, warnings and `skip_reason`.
-- Pinned OpenCV/SciPy in `environment.yml` for stability.
 
 ---
 
@@ -176,15 +170,32 @@ streamlit run src/app.py
 | Path | Description |
 | --- | --- |
 | `src/app.py` | Streamlit entry point that wires UI controls to the exercise-analysis pipeline. |
-| `src/pipeline/` | Preprocessing, pose-estimation, and repetition-analysis building blocks. |
-| `src/exercise_detection/` | Heuristics and models that infer exercise type and camera view. |
+| `src/A_preprocessing/` | Frame extraction, resizing, normalization, and filtering helpers. |
+| `src/B_pose_estimation/` | MediaPipe estimators, geometry helpers, and landmark processing. |
+| `src/C_analysis/` | Repetition counting, metric aggregation, and analysis utilities. |
+| `src/D_visualization/` | Video rendering, overlays, and debug visualization helpers. |
 | `src/config/` | Dataclasses, defaults, and validation utilities governing pipeline execution. |
+| `src/exercise_detection/` | Heuristics and models that infer exercise type and camera view. |
+| `src/ui/` | Streamlit components for synchronized metrics and playback controls. |
 | `src/utils/` | Shared helpers for I/O, logging, math utilities, and MediaPipe integrations. |
 | `tests/` | Automated tests (unit + integration) that validate the detection pipeline and utilities. |
 | `docs/` | Design notes, research references, and extended documentation. |
-| `OLD/` | Historical experiments, legacy scripts, and the deprecated `environment.yml`. |
 | `pyproject.toml` | Project metadata, dependency declarations, and entry-points for tooling. |
 | `uv.lock` | Locked dependency versions for reproducible uv-based environments. |
-| `project_tree.cmd` | Helper script to regenerate a summarized repository tree. |
 
 ---
+
+## Developer notes for exercise classifier tuning
+
+The heuristics implemented in `src/exercise_detection` expose all tunable thresholds in `constants.py`. Adjustments can be made there without touching the logic modules:
+
+* **Sampling & smoothing** – `DEFAULT_SAMPLING_RATE`, `SMOOTHING_*`.
+* **Segmentation** – knee hysteresis thresholds and bar drop margin.
+* **View classifier** – per-feature weights and decision margins.
+* **Exercise scores** – gating angles, penalties, and veto multipliers.
+
+The classification pipeline emits a compact `INFO` log per clip summarising the aggregated metrics and the raw/adjusted scores. A `DEBUG` log lists the per-repetition bottoms. These logs are the quickest way to verify which cues are dominating a prediction when calibrating the constants.
+
+Run the synthetic unit tests with `pytest -q` to confirm that refactors keep the expected qualitative behaviour across squat, deadlift, bench, and unknown scenarios.
+
+When adding new derived metrics or summary statistics, use the helpers in `exercise_detection.stats` (for example `safe_nanmedian` and `safe_nanstd`). They guard against all-NaN inputs so the pipeline remains free of NumPy `RuntimeWarning`s while preserving existing behaviour.
