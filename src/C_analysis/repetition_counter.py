@@ -87,7 +87,6 @@ def _state_machine_reps(
     bottom_value = np.nan
     bottom_idx = -1
     invalid_run = 0
-    long_gap_seen = False
 
     for idx, (angle, vel) in enumerate(zip(angles, velocities)):
         if not np.isfinite(angle):
@@ -96,7 +95,6 @@ def _state_machine_reps(
                 state = "IDLE"
                 bottom_value = np.nan
                 bottom_idx = -1
-                long_gap_seen = True
             continue
 
         invalid_run = 0
@@ -183,8 +181,6 @@ def _state_machine_reps(
         prominences = [prom for _, prom in consolidated]
 
     debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
-    if long_gap_seen:
-        return 0, debug
     return len(rep_indices), debug
 
 
