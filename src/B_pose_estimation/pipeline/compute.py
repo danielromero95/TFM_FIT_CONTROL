@@ -260,7 +260,7 @@ def calculate_metrics_from_sequence(
     }
 
     for column in ANGLE_COLUMNS:
-        series = pd.Series(np.where(valid_mask, dfm[column], np.nan), index=dfm.index)
+        series = pd.Series(dfm[column], index=dfm.index)
         interpolated = interpolate_small_gaps(series, ANALYSIS_MAX_GAP_FRAMES)
         smoothed = smooth_series(
             interpolated,
@@ -269,7 +269,6 @@ def calculate_metrics_from_sequence(
             window_seconds=window_seconds,
             polyorder=int(polyorder),
         )
-        smoothed = np.where(valid_mask, smoothed, np.nan)
         dfm[column] = smoothed
         if vel_method == "diff":
             diffs = np.diff(smoothed, prepend=np.nan)
