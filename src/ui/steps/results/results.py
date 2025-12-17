@@ -19,6 +19,7 @@ from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.debug_report import build_debug_report_bundle
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_sync import render_video_with_metrics_sync
+from src.ui.metrics_sync.descriptions import describe_primary_angle
 from src.ui.state import get_state
 from ..utils import step_container
 
@@ -139,10 +140,25 @@ def _counting_relation_text(
         "deadlift": {"left_hip", "right_hip"},
     }
     if is_primary:
+        if exercise == "deadlift":
+            return (
+                "Reps are counted from valleys in this angle when the hip hinge rises at least the"
+                " minimum prominence and the gaps between valleys satisfy the timing thresholds."
+            )
         return "Reps are counted when this angle dips below the lower threshold and then rises past the upper threshold."
     if primary_metric:
         if metric in primary_candidates.get(exercise, set()):
+            if exercise == "deadlift":
+                return (
+                    f"Not used for counting in this run; reps come from the {primary_label} meeting"
+                    " the prominence and timing thresholds."
+                )
             return f"Not used for counting in this run; reps are detected from the {primary_label} crossing the configured thresholds."
+        if exercise == "deadlift":
+            return (
+                f"Not used for counting; reps are detected from the {primary_label} using prominence"
+                " and timing thresholds."
+            )
         return f"Not used for counting; reps are detected from the {primary_label} crossing the configured thresholds."
     return "Not used for counting; the system will pick a primary angle automatically when enough data is available."
 
@@ -530,6 +546,9 @@ def _results_panel() -> Dict[str, bool]:
             metric_options = numeric_columns + raw_numeric_columns
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
+            primary_desc = describe_primary_angle(getattr(stats, "primary_angle", None))
+            if primary_desc:
+                st.caption(f"Primary counting metric: {primary_desc}")
 
             if state.preview_enabled:
                 st.info("El vídeo con landmarks se visualizó durante el análisis.")
@@ -547,6 +566,9 @@ def _results_panel() -> Dict[str, bool]:
                     # Prefer exercise-specific metrics for defaults
                     ex = getattr(stats, "exercise_detected", "")
                     ex_str = getattr(ex, "value", str(ex))
+                    if not ex_str:
+                        selected_ex = getattr(stats, "exercise_selected", "")
+                        ex_str = getattr(selected_ex, "value", str(selected_ex))
                     preferred_by_ex = {
                         "squat": ["left_knee", "right_knee", "trunk_inclination_deg"],
                         "bench_press": ["left_elbow", "right_elbow", "shoulder_width"],
@@ -594,16 +616,26 @@ def _results_panel() -> Dict[str, bool]:
                         )
                         cfg_vals = state.configure_values or {}
                         thresholds: List[float] = []
-                        for key in ("low", "high"):
-                            if key not in cfg_vals:
-                                continue
-                            try:
-                                value = float(cfg_vals[key])
-                            except (TypeError, ValueError):
-                                continue
-                            if not math.isfinite(value):
-                                continue
-                            thresholds.append(value)
+                        is_squat = ex_str == "squat"
+                        if is_squat:
+                            for key in ("low", "high"):
+                                if key not in cfg_vals:
+                                    continue
+                                try:
+                                    value = float(cfg_vals[key])
+                                except (TypeError, ValueError):
+                                    continue
+                                if not math.isfinite(value):
+                                    continue
+                                thresholds.append(value)
+                        elif ex_str == "deadlift":
+                            primary_label = _humanize_metric_name(getattr(stats, "primary_angle", None))
+                            st.caption(
+                                "Deadlift reps are tracked from hip hinge valleys with "
+                                f"≥ {stats.min_prominence:.1f}° prominence, "
+                                f"≥ {stats.min_distance_sec:.2f}s between valleys, and a "
+                                f"{stats.refractory_sec:.2f}s refractory window{f' on the {primary_label}' if primary_label else ''}."
+                            )
                         sync_channel = None
                         if getattr(stats, "config_sha1", None):
                             frames_val = getattr(stats, "frames", None)
