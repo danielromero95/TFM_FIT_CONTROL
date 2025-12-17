@@ -68,6 +68,7 @@ def _state_machine_reps(
     top_thr: float | None = None,
     bottom_thr: float | None = None,
     require_top_first: bool = False,
+    require_bottom_confirmation: bool = False,
 ) -> Tuple[int, CountingDebugInfo]:
     finite_mask = np.isfinite(angles)
     if not finite_mask.any():
@@ -93,7 +94,8 @@ def _state_machine_reps(
     bottom_value = np.nan
     bottom_idx = -1
     invalid_run = 0
-    long_gap_seen = False
+    bottom_confirmed = not require_bottom_confirmation
+    bottom_cross_margin = 0.1 * angle_range if require_bottom_confirmation else 0.0
 
     finite_indices = np.flatnonzero(finite_mask)
     start_idx = int(finite_indices[0])
@@ -108,7 +110,7 @@ def _state_machine_reps(
                 state = "IDLE"
                 bottom_value = np.nan
                 bottom_idx = -1
-                long_gap_seen = True
+                bottom_confirmed = not require_bottom_confirmation
             continue
 
         invalid_run = 0
@@ -123,6 +125,8 @@ def _state_machine_reps(
             if angle <= bottom_thr:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
                 state = "BOTTOM"
             elif angle >= top_thr:
                 state = "TOP"
@@ -135,12 +139,16 @@ def _state_machine_reps(
             if np.isnan(bottom_value) or angle < bottom_value:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
             if angle <= bottom_thr:
                 state = "BOTTOM"
         elif state == "BOTTOM":
             if np.isnan(bottom_value) or angle < bottom_value:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
             if ascending:
                 state = "CONCENTRIC"
         elif state == "CONCENTRIC":
@@ -152,6 +160,7 @@ def _state_machine_reps(
             and (not require_top_first or first_top_idx < 0 or bottom_idx >= first_top_idx)
             and bottom_idx >= 0
             and np.isfinite(bottom_value)
+            and bottom_confirmed
             and ((angle - bottom_value >= min_prominence) or (angle >= top_thr))
         )
 
@@ -181,6 +190,7 @@ def _state_machine_reps(
                     last_valley_rep = valley_idx
             bottom_value = np.nan
             bottom_idx = -1
+            bottom_confirmed = not require_bottom_confirmation
             state = "TOP"
 
     if rep_indices:
@@ -201,8 +211,6 @@ def _state_machine_reps(
         prominences = [prom for _, prom in consolidated]
 
     debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
-    if long_gap_seen:
-        return 0, debug
     return len(rep_indices), debug
 
 
@@ -264,8 +272,8 @@ def count_repetitions_with_config(
     bottom_thr = float(bottom_thr_override) if bottom_thr_override is not None else None
     if hip_based and (top_thr is None or bottom_thr is None):
         if finite_angles.size:
-            bottom_thr = float(np.nanpercentile(finite_angles, 30)) if bottom_thr is None else bottom_thr
-            top_thr = float(np.nanpercentile(finite_angles, 70)) if top_thr is None else top_thr
+            bottom_thr = float(np.nanpercentile(finite_angles, 20)) if bottom_thr is None else bottom_thr
+            top_thr = float(np.nanpercentile(finite_angles, 80)) if top_thr is None else top_thr
 
     reps, debug = _state_machine_reps(
         angles,
@@ -278,6 +286,7 @@ def count_repetitions_with_config(
         top_thr=top_thr,
         bottom_thr=bottom_thr,
         require_top_first=hip_based,
+        require_bottom_confirmation=hip_based,
     )
 
     logger.debug(
