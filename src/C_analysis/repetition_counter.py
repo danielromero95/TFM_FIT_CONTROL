@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-import logging
-from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
@@ -82,7 +80,8 @@ def _state_machine_reps(
     vel_thr = max(2.0, float(np.nanpercentile(vel_valid, 65))) if vel_valid.size else 2.0
 
     state = "IDLE"
-    last_rep_frame = -10 * refractory_frames
+    last_rep_frame = -10 * max(refractory_frames, min_distance_frames)
+    last_valley_rep = -10 * max(refractory_frames, min_distance_frames)
     rep_indices: list[int] = []
     prominences: list[float] = []
     bottom_value = np.nan
@@ -105,38 +104,83 @@ def _state_machine_reps(
         ascending = (np.isfinite(vel) and vel > vel_thr) or (np.isfinite(angle) and angle > bottom_thr)
 
         if state == "IDLE":
-            if angle >= top_thr:
-                state = "TOP"
-            elif angle <= bottom_thr:
-                state = "BOTTOM"
-        elif state == "TOP":
-            if descending:
-                state = "ECCENTRIC"
-        elif state == "ECCENTRIC":
             if angle <= bottom_thr:
                 bottom_value = angle
                 bottom_idx = idx
                 state = "BOTTOM"
+            elif angle >= top_thr:
+                state = "TOP"
+        elif state == "TOP":
+            if descending:
+                bottom_value = np.nan
+                bottom_idx = -1
+                state = "ECCENTRIC"
+        elif state == "ECCENTRIC":
+            if np.isnan(bottom_value) or angle < bottom_value:
+                bottom_value = angle
+                bottom_idx = idx
+            if angle <= bottom_thr:
+                state = "BOTTOM"
         elif state == "BOTTOM":
+            if np.isnan(bottom_value) or angle < bottom_value:
+                bottom_value = angle
+                bottom_idx = idx
             if ascending:
                 state = "CONCENTRIC"
         elif state == "CONCENTRIC":
-            if angle >= top_thr:
-                if idx - last_rep_frame >= max(refractory_frames, min_distance_frames):
-                    prominence = float(np.nanmax([top_thr - bottom_value, angle_range]))
-                    if prominence >= min_prominence:
-                        source = reference if reference is not None else angles
-                        start = max(0, last_rep_frame + 1)
-                        bottom_window = source[start : idx + 1]
-                        if bottom_window.size:
-                            local_min = int(np.nanargmin(bottom_window))
-                            valley_idx = start + local_min
-                        else:
-                            valley_idx = bottom_idx if bottom_idx >= 0 else idx
-                        rep_indices.append(valley_idx)
-                        prominences.append(prominence)
-                        last_rep_frame = idx
-                state = "TOP"
+            if descending and angle <= bottom_thr:
+                state = "BOTTOM"
+
+        recovered = (
+            bottom_idx >= 0
+            and np.isfinite(bottom_value)
+            and ((angle - bottom_value >= min_prominence) or (angle >= top_thr))
+        )
+
+        if recovered and bottom_value - bottom_thr <= angle_range:
+            prominence = float(np.nanmax([angle - bottom_value, top_thr - bottom_value, angle_range]))
+            if prominence >= min_prominence:
+                source = reference if reference is not None else angles
+                search_radius = max(min_distance_frames, refractory_frames)
+                start = max(0, bottom_idx - search_radius)
+                end = min(len(source), bottom_idx + search_radius + 1)
+                bottom_slice = source[start:end]
+                if bottom_slice.size and np.isfinite(bottom_slice).any():
+                    local_min = int(np.nanargmin(bottom_slice))
+                    valley_idx = start + local_min
+                else:
+                    valley_idx = bottom_idx
+
+                spacing_ok = (
+                    idx - last_rep_frame >= max(refractory_frames, min_distance_frames)
+                    and valley_idx - last_valley_rep >= min_distance_frames
+                )
+
+                if spacing_ok:
+                    rep_indices.append(valley_idx)
+                    prominences.append(prominence)
+                    last_rep_frame = idx
+                    last_valley_rep = valley_idx
+            bottom_value = np.nan
+            bottom_idx = -1
+            state = "TOP"
+
+    if rep_indices:
+        consolidated: list[tuple[int, float]] = []
+        for valley_idx, prom in sorted(zip(rep_indices, prominences), key=lambda x: x[0]):
+            if consolidated:
+                distance = valley_idx - consolidated[-1][0]
+                similar_prominence = (
+                    abs(prom - consolidated[-1][1])
+                    <= 0.1 * max(prom, consolidated[-1][1], 1e-6)
+                )
+                if distance < min_distance_frames or (distance < 2 * min_distance_frames and similar_prominence):
+                    if prom > consolidated[-1][1]:
+                        consolidated[-1] = (valley_idx, prom)
+                    continue
+            consolidated.append((valley_idx, prom))
+        rep_indices = [idx for idx, _ in consolidated]
+        prominences = [prom for _, prom in consolidated]
 
     debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
     if long_gap_seen:

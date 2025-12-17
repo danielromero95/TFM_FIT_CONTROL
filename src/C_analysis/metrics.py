@@ -56,7 +56,13 @@ def choose_primary_angle(
         "bench_press": ["left_elbow", "right_elbow"],
         "deadlift": ["left_hip", "right_hip"],
     }
-    candidates = [c for c in candidates_map.get(ex, []) if c in df.columns]
+
+    candidates = list(candidates_map.get(ex, []))
+    if ex == "deadlift" and vw == "front":
+        if "hips_mean" in df.columns:
+            candidates.insert(0, "hips_mean")
+
+    candidates = [c for c in candidates if c in df.columns]
     if not candidates:
         return None
 
@@ -86,6 +92,34 @@ def choose_primary_angle(
             quality(chosen),
         )
     return chosen
+
+
+def _maybe_add_bilateral_hip_mean(
+    df: pd.DataFrame, exercise: str | ExerciseType, view: str | ViewType
+) -> None:
+    """Añadir una columna con la media bilateral de cadera para vista frontal de peso muerto."""
+
+    ex = as_exercise(exercise).value
+    vw = as_view(view).value
+    if ex != "deadlift" or vw != "front":
+        return
+
+    if {"left_hip", "right_hip"}.issubset(df.columns):
+        left = pd.to_numeric(df["left_hip"], errors="coerce")
+        right = pd.to_numeric(df["right_hip"], errors="coerce")
+        stacked = np.column_stack([left.to_numpy(copy=False), right.to_numpy(copy=False)])
+        df["hips_mean"] = np.nanmean(stacked, axis=1)
+
+    raw_left = df.get("raw_left_hip")
+    raw_right = df.get("raw_right_hip")
+    if raw_left is not None and raw_right is not None:
+        raw_stacked = np.column_stack(
+            [
+                pd.to_numeric(raw_left, errors="coerce").to_numpy(copy=False),
+                pd.to_numeric(raw_right, errors="coerce").to_numpy(copy=False),
+            ]
+        )
+        df["raw_hips_mean"] = np.nanmean(raw_stacked, axis=1)
 
 
 def _trimmed_rom_deg(df: pd.DataFrame, col: str) -> float:
@@ -294,6 +328,7 @@ def compute_metrics_and_angle(
         warmup_seconds=warmup_seconds,
         warmup_frames=warmup_frames,
     )
+    _maybe_add_bilateral_hip_mean(df_metrics, exercise, view)
     angle_range = 0.0
 
     chosen_primary = primary_angle
