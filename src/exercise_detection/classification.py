@@ -17,6 +17,7 @@ from .smoothing import smooth
 from .types import AggregateMetrics, ClassificationScores, FeatureSeries, ViewResult
 from .view import classify_view
 from src.utils.angles import apply_warmup_mask, maybe_convert_radians_to_degrees, suppress_spikes
+from src.config.settings import DEFAULT_WARMUP_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ ANGLE_LIKE_KEYS = {
 
 RADIAN_PRONE_KEYS = {"torso_tilt_deg", "shoulder_yaw_deg"}
 
-DETECTION_WARMUP_SECONDS = 0.5
+DETECTION_WARMUP_SECONDS = DEFAULT_WARMUP_SECONDS
 DETECTION_WARMUP_MAX_FRAMES = 3
 DETECTION_SPIKE_THRESHOLD_DEG = 55.0
 

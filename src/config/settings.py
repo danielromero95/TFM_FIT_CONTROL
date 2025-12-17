@@ -92,7 +92,8 @@ DEFAULT_DEBUG_MODE = True
 
 # Periodo inicial en segundos antes de iniciar conteo para estabilizar la
 # cámara y las detecciones.
-DEFAULT_WARMUP_SECONDS = 0.5
+# Default warmup removed so initial frames are preserved in charts by default.
+DEFAULT_WARMUP_SECONDS = 0.0
 
 # --- PROTECCIONES PARA MEDIOS PESADOS ---
 # Ajustes que previenen bloqueos cuando se cargan vídeos/fotos muy grandes.
