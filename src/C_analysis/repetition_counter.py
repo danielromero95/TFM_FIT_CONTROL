@@ -65,21 +65,28 @@ def _state_machine_reps(
     min_prominence: float,
     min_distance_frames: int,
     reference: np.ndarray | None = None,
+    top_thr: float | None = None,
+    bottom_thr: float | None = None,
+    require_top_first: bool = False,
+    require_bottom_confirmation: bool = False,
 ) -> Tuple[int, CountingDebugInfo]:
-    finite_angles = angles[np.isfinite(angles)]
-    if finite_angles.size == 0:
+    finite_mask = np.isfinite(angles)
+    if not finite_mask.any():
         return 0, CountingDebugInfo([], [])
 
+    finite_angles = angles[finite_mask]
     angle_range = float(np.nanmax(finite_angles) - np.nanmin(finite_angles))
     if not np.isfinite(angle_range) or angle_range < min_excursion:
         return 0, CountingDebugInfo([], [])
 
-    top_thr = float(np.nanpercentile(finite_angles, 70))
-    bottom_thr = float(np.nanpercentile(finite_angles, 30))
+    top_thr = float(np.nanpercentile(finite_angles, 70)) if top_thr is None else float(top_thr)
+    bottom_thr = float(np.nanpercentile(finite_angles, 30)) if bottom_thr is None else float(bottom_thr)
     vel_valid = np.abs(velocities[np.isfinite(velocities)])
     vel_thr = max(2.0, float(np.nanpercentile(vel_valid, 65))) if vel_valid.size else 2.0
 
     state = "IDLE"
+    seen_top = not require_top_first
+    first_top_idx = -1
     last_rep_frame = -10 * max(refractory_frames, min_distance_frames)
     last_valley_rep = -10 * max(refractory_frames, min_distance_frames)
     rep_indices: list[int] = []
@@ -87,19 +94,30 @@ def _state_machine_reps(
     bottom_value = np.nan
     bottom_idx = -1
     invalid_run = 0
-    long_gap_seen = False
+    bottom_confirmed = not require_bottom_confirmation
+    bottom_cross_margin = 0.1 * angle_range if require_bottom_confirmation else 0.0
 
-    for idx, (angle, vel) in enumerate(zip(angles, velocities)):
+    finite_indices = np.flatnonzero(finite_mask)
+    start_idx = int(finite_indices[0])
+    end_idx = int(finite_indices[-1])
+
+    for idx in range(start_idx, end_idx + 1):
+        angle = angles[idx]
+        vel = velocities[idx]
         if not np.isfinite(angle):
             invalid_run += 1
             if invalid_run > ANALYSIS_MAX_GAP_FRAMES:
                 state = "IDLE"
                 bottom_value = np.nan
                 bottom_idx = -1
-                long_gap_seen = True
+                bottom_confirmed = not require_bottom_confirmation
             continue
 
         invalid_run = 0
+        if require_top_first and (not seen_top) and angle >= top_thr:
+            seen_top = True
+            state = "TOP"
+            first_top_idx = idx
         descending = (np.isfinite(vel) and vel < -vel_thr) or (np.isfinite(angle) and angle < top_thr)
         ascending = (np.isfinite(vel) and vel > vel_thr) or (np.isfinite(angle) and angle > bottom_thr)
 
@@ -107,6 +125,8 @@ def _state_machine_reps(
             if angle <= bottom_thr:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
                 state = "BOTTOM"
             elif angle >= top_thr:
                 state = "TOP"
@@ -119,12 +139,16 @@ def _state_machine_reps(
             if np.isnan(bottom_value) or angle < bottom_value:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
             if angle <= bottom_thr:
                 state = "BOTTOM"
         elif state == "BOTTOM":
             if np.isnan(bottom_value) or angle < bottom_value:
                 bottom_value = angle
                 bottom_idx = idx
+                if require_bottom_confirmation and angle <= bottom_thr + bottom_cross_margin:
+                    bottom_confirmed = True
             if ascending:
                 state = "CONCENTRIC"
         elif state == "CONCENTRIC":
@@ -132,8 +156,11 @@ def _state_machine_reps(
                 state = "BOTTOM"
 
         recovered = (
-            bottom_idx >= 0
+            seen_top
+            and (not require_top_first or first_top_idx < 0 or bottom_idx >= first_top_idx)
+            and bottom_idx >= 0
             and np.isfinite(bottom_value)
+            and bottom_confirmed
             and ((angle - bottom_value >= min_prominence) or (angle >= top_thr))
         )
 
@@ -163,6 +190,7 @@ def _state_machine_reps(
                     last_valley_rep = valley_idx
             bottom_value = np.nan
             bottom_idx = -1
+            bottom_confirmed = not require_bottom_confirmation
             state = "TOP"
 
     if rep_indices:
@@ -183,8 +211,6 @@ def _state_machine_reps(
         prominences = [prom for _, prom in consolidated]
 
     debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
-    if long_gap_seen:
-        return 0, debug
     return len(rep_indices), debug
 
 
@@ -229,9 +255,25 @@ def count_repetitions_with_config(
     min_distance_sec = float(overrides.get("min_distance_sec", counting_cfg.min_distance_sec))
     min_distance_frames = max(1, int(round(min_distance_sec * fps_safe)))
 
+    top_thr_override = overrides.get("upper_threshold_deg")
+    bottom_thr_override = overrides.get("lower_threshold_deg")
+
     angles, velocities, _, reference = _prepare_primary_series(df_metrics, angle_column, fps_safe)
     if np.isfinite(angles).sum() < 3:
         return 0, CountingDebugInfo([], [])
+
+    hip_based = (
+        str(getattr(counting_cfg, "exercise", "")) == "deadlift"
+        and "hip" in str(angle_column)
+    )
+
+    finite_angles = angles[np.isfinite(angles)]
+    top_thr = float(top_thr_override) if top_thr_override is not None else None
+    bottom_thr = float(bottom_thr_override) if bottom_thr_override is not None else None
+    if hip_based and (top_thr is None or bottom_thr is None):
+        if finite_angles.size:
+            bottom_thr = float(np.nanpercentile(finite_angles, 20)) if bottom_thr is None else bottom_thr
+            top_thr = float(np.nanpercentile(finite_angles, 80)) if top_thr is None else top_thr
 
     reps, debug = _state_machine_reps(
         angles,
@@ -241,6 +283,10 @@ def count_repetitions_with_config(
         min_prominence=min_prominence,
         min_distance_frames=min_distance_frames,
         reference=reference,
+        top_thr=top_thr,
+        bottom_thr=bottom_thr,
+        require_top_first=hip_based,
+        require_bottom_confirmation=hip_based,
     )
 
     logger.debug(
