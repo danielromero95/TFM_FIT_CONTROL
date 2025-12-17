@@ -114,6 +114,66 @@ def test_state_machine_handles_noise_and_short_nans() -> None:
     assert reps == 1
 
 
+def test_counts_without_initial_peak_and_requires_recovery() -> None:
+    angles = [
+        90,
+        120,
+        150,
+        170,
+        150,
+        120,
+        90,
+        115,
+        140,
+        165,
+    ]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        min_prominence=15.0,
+        min_distance_sec=0.1,
+        refractory_sec=0.0,
+    )
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=30.0)
+
+    assert reps == 2
+    assert debug.valley_indices == [0, 6]
+
+
+def test_does_not_count_last_incomplete_valley() -> None:
+    angles = [
+        170,
+        150,
+        120,
+        90,
+        120,
+        150,
+        170,
+        150,
+        120,
+        95,
+        150,
+        170,
+        150,
+        120,
+        90,
+        95,
+    ]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        min_prominence=25.0,
+        min_distance_sec=0.1,
+        refractory_sec=0.0,
+    )
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=30.0)
+
+    assert reps == 2
+    assert debug.valley_indices == [3, 9]
+
+
 def test_state_machine_ignores_long_gaps() -> None:
     t = np.linspace(0, 2 * np.pi, 90)
     signal = 150 + 20 * np.cos(t)
