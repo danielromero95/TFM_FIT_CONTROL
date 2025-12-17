@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from src.exercise_detection.types import DetectionResult
 
+from src.config.models import CountingConfig
 from src.config.settings import (
     DEFAULT_GENERATE_VIDEO,
     DEFAULT_PREVIEW_FPS,
@@ -29,12 +30,17 @@ class Step(str, Enum):
 
 
 DEFAULT_EXERCISE_LABEL = "Auto-Detect"
+_COUNTING_DEFAULTS = CountingConfig()
 CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "low": float(SQUAT_LOW_THRESH),
     "high": float(SQUAT_HIGH_THRESH),
     "primary_angle": "auto",
     "debug_video": bool(DEFAULT_GENERATE_VIDEO),
     "use_crop": bool(DEFAULT_USE_CROP),
+    "min_prominence": float(_COUNTING_DEFAULTS.min_prominence),
+    "min_distance_sec": float(_COUNTING_DEFAULTS.min_distance_sec),
+    "refractory_sec": float(_COUNTING_DEFAULTS.refractory_sec),
+    "min_excursion_deg": float(_COUNTING_DEFAULTS.min_angle_excursion_deg),
 }
 
 

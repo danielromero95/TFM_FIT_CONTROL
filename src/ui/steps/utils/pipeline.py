@@ -61,18 +61,40 @@ def prepare_pipeline_inputs(
     cfg = config.load_default()
     cfg_values = state.configure_values or CONFIG_DEFAULTS
 
-    cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
-    cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
+    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
+    detected_label = None
+    if state.detect_result is not None:
+        detected_label = getattr(state.detect_result.label, "value", None) or getattr(
+            state.detect_result, "label", None
+        )
+    ex_key = EXERCISE_TO_CONFIG.get(
+        exercise_label,
+        detected_label or EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
+    )
+
+    if ex_key == "squat":
+        cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
+        cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
+
+    cfg.counting.min_prominence = float(
+        cfg_values.get("min_prominence", CONFIG_DEFAULTS["min_prominence"])
+    )
+    cfg.counting.min_distance_sec = float(
+        cfg_values.get("min_distance_sec", CONFIG_DEFAULTS["min_distance_sec"])
+    )
+    cfg.counting.refractory_sec = float(
+        cfg_values.get("refractory_sec", CONFIG_DEFAULTS["refractory_sec"])
+    )
+    cfg.counting.min_angle_excursion_deg = float(
+        cfg_values.get("min_excursion_deg", CONFIG_DEFAULTS["min_excursion_deg"])
+    )
+
     # Siempre ejecutamos en modo auto para que el pipeline elija el ángulo ideal.
     cfg.counting.primary_angle = "auto"
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
     cfg.pose.use_crop = True
 
-    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
-    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
-        exercise_label,
-        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
-    )
+    cfg.counting.exercise = ex_key
 
     det = state.detect_result
     prefetched_detection: Optional[DetectionResult] = None
