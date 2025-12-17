@@ -150,6 +150,7 @@ def _bench_score(agg: AggregateMetrics) -> float:
 
     if _bench_gate(agg):
         score += BENCH_GATE_BONUS
+        score = max(score, MIN_CONFIDENCE_SCORE)
     return max(0.0, score)
 
 
@@ -208,6 +209,9 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
         _margin_below(np.abs(agg.knee_forward_norm), DEADLIFT_KNEE_FORWARD_MAX_NORM),
     ]
     penalty += SQUAT_HINGE_PENALTY_WEIGHT * sum(max(0.0, cue) for cue in hinge_cues)
+
+    if np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG:
+        score *= 0.35
 
     return score, penalty
 
@@ -287,6 +291,12 @@ def _apply_deadlift_veto(
     if bench_score > deadlift_score:
         return False
 
+    hinge_evidence = [
+        _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG),
+        _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM),
+        _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG),
+    ]
+
     movement = max(agg.hip_rom, agg.bar_range_norm)
     squat_rom = np.isfinite(agg.knee_rom) and agg.knee_rom >= DEADLIFT_SQUAT_ROM_THRESHOLD_DEG
     squat_deep = np.isfinite(agg.knee_deep_fraction) and agg.knee_deep_fraction >= DEADLIFT_KNEE_DEEP_VETO_FRACTION
@@ -296,6 +306,10 @@ def _apply_deadlift_veto(
     elbows_flexed = np.isfinite(agg.elbow_flexed_fraction) and agg.elbow_flexed_fraction >= SQUAT_ELBOW_FLEXED_FRACTION_MIN
 
     squat_like = sum([squat_rom, squat_deep, hip_ratio_low, pelvis_drop, bar_high, elbows_flexed])
+
+    hinge_like = sum(margin > 0.0 for margin in hinge_evidence)
+    if view_label != "front" and hinge_like >= 2 and movement >= DEADLIFT_VETO_MOVEMENT_MIN:
+        return True
 
     if view_label == "front":
         if squat_deep or squat_like >= 2:
@@ -345,6 +359,9 @@ def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> str:
     squat_score = max(0.0, adjusted.get("squat", 0.0))
     deadlift_score = max(0.0, adjusted.get("deadlift", 0.0))
     bench_score = max(0.0, adjusted.get("bench_press", 0.0))
+
+    if _bench_gate(agg) and bench_score >= MIN_CONFIDENCE_SCORE:
+        return "bench_press"
 
     if bench_score > max(squat_score, deadlift_score) and bench_score >= MIN_CONFIDENCE_SCORE:
         return "bench_press"
