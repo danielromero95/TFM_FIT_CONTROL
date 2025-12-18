@@ -91,7 +91,11 @@ def _build_frame_mask(length: int, reliability: np.ndarray | None, warmup_frames
         rel_arr = np.asarray(reliability, dtype=bool)
         if rel_arr.size:
             limit = min(frame_count, rel_arr.size)
-            mask[:limit] &= rel_arr[:limit]
+            reliability_mask = np.zeros(frame_count, dtype=bool)
+            reliability_mask[:limit] = rel_arr[:limit]
+
+            if reliability_mask.any():
+                mask &= reliability_mask
 
     return mask
 

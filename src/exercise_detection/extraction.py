@@ -343,7 +343,13 @@ def _evaluate_view_reliability(landmarks: list[dict[str, float]]) -> Tuple[bool,
         )
         return coords_ok and np.isfinite(vis) and vis >= RELIABILITY_VIS_THRESHOLD
 
-    required_ok = _joint_ok(left_shoulder) and _joint_ok(right_shoulder) and _joint_ok(left_hip) and _joint_ok(right_hip)
+    reliable_joints = (
+        _joint_ok(left_shoulder),
+        _joint_ok(right_shoulder),
+        _joint_ok(left_hip),
+        _joint_ok(right_hip),
+    )
+    required_ok = sum(reliable_joints) >= 3
 
     vis_meta = {
         "shoulder_vis_left": float(left_shoulder.get("visibility", float("nan"))),
