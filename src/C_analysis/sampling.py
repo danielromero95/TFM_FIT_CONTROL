@@ -1,4 +1,9 @@
-"""Funciones relacionadas con la lectura del vídeo y la planificación del muestreo."""
+"""Planificación de muestreo de vídeo.
+
+Aquí se definen las heurísticas que deciden cada cuántos fotogramas extraer
+cuadros del vídeo (``sample_rate``) y qué FPS efectivo usar durante la
+inferencia, según los metadatos del archivo y la configuración elegida.
+"""
 
 from __future__ import annotations
 
@@ -29,8 +34,10 @@ class SamplingPlan:
 def compute_sample_rate(fps: float, cfg: config.Config) -> int:
     """Calcular el *stride* inicial a partir del FPS original y la configuración."""
 
+    # Si el usuario fija un muestreo manual, se respeta por encima de todo.
     if cfg.video.manual_sample_rate and cfg.video.manual_sample_rate > 0:
         return max(1, int(cfg.video.manual_sample_rate))
+    # De lo contrario, se calcula el stride necesario para aproximar el FPS objetivo.
     if fps > 0 and cfg.video.target_fps and cfg.video.target_fps > 0:
         return max(1, int(round(fps / cfg.video.target_fps)))
     return 1
@@ -62,6 +69,8 @@ def make_sampling_plan(
     warnings: list[str] = []
 
     fps_base = float(fps_metadata)
+    # Preferimos el FPS del lector cuando los metadatos son poco fiables
+    # (por ejemplo, tras reencodificaciones) o cuando las heurísticas lo indican.
     if (fps_base <= 0.0 or prefer_reader_fps) and fps_from_reader > 0.0:
         fps_base = float(fps_from_reader)
     if fps_base <= 0.0 and fps_from_reader <= 0.0:
@@ -71,6 +80,7 @@ def make_sampling_plan(
         fps_base = 1.0
 
     sample_rate = int(initial_sample_rate)
+    # Si el stride inicial no limita, recalculamos para acercarnos al FPS objetivo.
     if initial_sample_rate == 1 and cfg.video.target_fps and cfg.video.target_fps > 0:
         recomputed = compute_sample_rate(fps_base, cfg)
         if recomputed > 1:
@@ -78,6 +88,7 @@ def make_sampling_plan(
 
     fps_effective = fps_base / sample_rate if sample_rate > 0 else fps_base
 
+    # Propagamos advertencias para mostrarlas en la UI y bitácoras.
     if fps_warning:
         message = f"{fps_warning} Using FPS value: {fps_base:.2f}."
         logger.warning(message)

@@ -6,7 +6,7 @@ Este archivo concentra la lógica necesaria para:
 - Ajustar los *dataframes* de *landmarks* para reducir su huella de memoria.
 
 Separar estas responsabilidades facilita reutilizar las piezas y aislar errores durante las
-pruebas. Los comentarios adicionales explican en español los porqués detrás de cada decisión.
+pruebas.
 """
 
 from __future__ import annotations

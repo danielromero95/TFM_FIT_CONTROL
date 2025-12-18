@@ -2,43 +2,43 @@
 
 **Repository:** `TFM_FIT_CONTROL`
 **Author:** Daniel Romero
-**Version:** 2.8 (07-11-2025)
+**Version:** 3.0 (18-12-2025)
 
 ---
 
-## Description
+## Descripción
 
-This project delivers an exercise-analysis system powered by computer vision.
-From strength-training videos (squat, bench press, deadlift), the application aims to:
+Este proyecto ofrece un sistema de análisis de ejercicios impulsado por visión por computador.
+A partir de vídeos de entrenamiento de fuerza (sentadilla, press de banca, peso muerto), la aplicación busca:
 
-- Detect the exercise type (squat / bench press / deadlift) and camera view (front / lateral) with confidence scores.
-- Automatically count repetitions.
-- Calculate key joint angles (knee, hip, shoulder).
-- Detect potential technique errors (future development).
-- Provide a streamlined web demo to visualize and download the outcomes.
+- Detectar el tipo de ejercicio (sentadilla / press de banca / peso muerto) y la vista de cámara (frontal / lateral) con puntuaciones de confianza.
+- Contar repeticiones automáticamente.
+- Calcular ángulos articulares clave (rodilla, cadera, hombro).
+- Detectar posibles errores de técnica (desarrollo futuro).
+- Proporcionar una demo web sencilla para visualizar y descargar los resultados.
 
-The core workflow includes:
+El flujo principal incluye:
 
-- **Video preprocessing:** frame extraction, resizing, normalization, filtering (Gaussian, CLAHE), and ROI cropping.
-- **Pose estimation:** MediaPipe Pose (BlazePose 3D) for landmark extraction (33 landmarks per frame) and angle / angular-velocity / symmetry calculations.
-- **Analysis:** repetition detection, metric aggregation, and (to develop) alerting on technique deviations.
+- **Preprocesamiento de vídeo:** extracción de fotogramas, redimensionado, normalización, filtrado (Gaussian, CLAHE) y recorte de ROI.
+- **Estimación de pose:** MediaPipe Pose (BlazePose 3D) para extraer landmarks (33 puntos por frame) y calcular ángulos / velocidades angulares / simetrías.
+- **Análisis:** detección de repeticiones, agregación de métricas y (por desarrollar) alertas sobre desviaciones técnicas.
 
 ---
 
-## Installation
+## Instalación
 
-The project ships with `pyproject.toml`. Use your preferred toolchain.
+El proyecto incluye `pyproject.toml`. Usa tu herramienta preferida.
 
-### Option A — uv (recommended)
+### Opción A — uv (recomendada)
 
 ~~~
-# From repo root
+# Desde la raíz del repositorio
 uv venv
 uv pip install -e .
 uv run streamlit run src/app.py
 ~~~
 
-### Option B — venv + pip
+### Opción B — venv + pip
 
 ~~~
 python -m venv .venv
@@ -50,141 +50,184 @@ pip install -e .
 streamlit run src/app.py
 ~~~
 
-### (Legacy) Conda
-
-A legacy `environment.yml` exists under `OLD/`, but it’s no longer the primary path.
-
-## Quick Start
+## Inicio rápido
 
 ~~~
 streamlit run src/app.py
 ~~~
 
-## UI Steps
+## Pasos en la interfaz
 
-1. Upload a training video.
-2. Detect exercise & view (auto or manual).
-3. Configure parameters (FPS, rotation, debug video, etc.).
-4. Run the analysis (asynchronous; progress shown).
-5. Results: repetition count, metrics, optional debug video, downloads.
+1. Sube un vídeo de entrenamiento.
+2. Detecta ejercicio y vista (automático o manual).
+3. Configura parámetros (FPS, rotación, vídeo de depuración, etc.).
+4. Ejecuta el análisis (asíncrono; se muestra el progreso).
+5. Resultados: conteo de repeticiones, métricas, vídeo de depuración opcional y descargas.
 
 ---
 
-## What’s new in 2.8
+## Novedades en 3.0
 
-- **Smarter primary angle selection.** The analysis pipeline now chooses the most complete joint angle for the detected exercise, auto-tunes the prominence/distance thresholds, and exports the effective run configuration so repetition counting matches the captured motion.
-- **Expanded metric coverage.** Hip hinge angles and trunk inclination are computed alongside the existing knee and elbow metrics and surface as exercise-aware defaults when plotting results.
-- **Contextual metric guidance.** The results metric picker highlights the primary counting angle, resets selections per run, and adds inline help popovers that explain each metric and how it relates to rep counting.
-- **Visual threshold overlays.** The synchronized metrics viewer can render configured low/high thresholds together with repetition bands while keeping the legend in a compact layout beneath the chart.
+- **Protecciones para medios pesados.** La pipeline detecta vídeos grandes y
+  reduce la previsualización o escala/desactiva los overlays para evitar cuellos
+  de botella en máquinas modestas. También limita los FPS de depuración para
+  que la reproducción se mantenga fluida incluso en clips densos.
+- **Muestreo temporal y overlays web-safe.** El muestreo se recalibra en función
+  de los metadatos (o el lector cuando son poco fiables) para trabajar con FPS
+  efectivos coherentes, y los vídeos de depuración se generan con copias H.264
+  listas para reproducirse en navegador.
+- **Clasificación de ejercicio más transparente.** Las heurísticas que puntúan
+  cada levantamiento (profundidad, recorrido de la barra, simetría de brazos,
+  inclinación del torso) se documentan y priorizan señales más fiables para
+  distinguir sentadilla, peso muerto y press de banca.
 
-## What’s new in 2.7
+## Novedades en 2.8
 
-- Video rotation is now fully corrected across the pipeline, preventing flipped overlays and ensuring exported debug videos respect the intended orientation.
-- Metrics visualization stays synchronized with playback: the cursor marker, overlays, and chart layout were refined so interactions remain frame-accurate even after relayouts.
-- BroadcastChannel synchronization links the detection view and metrics viewer, keeping multiple components in lockstep during playback.
-- Landmark-aware overlay adjustments keep rotations consistent when mixing rendered landmarks with captured frames.
+- **Selección más inteligente del ángulo principal.** La pipeline de análisis ahora elige el ángulo articular más completo para el ejercicio detectado, ajusta automáticamente los umbrales de prominencia/distancia y exporta la configuración efectiva de ejecución para que el conteo de repeticiones coincida con el movimiento capturado.
+- **Cobertura de métricas ampliada.** Se calculan los ángulos de bisagra de cadera e inclinación del tronco junto con las métricas existentes de rodilla y codo, y se exponen como valores predeterminados sensibles al ejercicio al graficar resultados.
+- **Guía contextual de métricas.** El selector de métricas de resultados resalta el ángulo principal de conteo, reinicia selecciones por ejecución y añade popovers de ayuda en línea que explican cada métrica y cómo se relaciona con el conteo de repeticiones.
+- **Overlays visuales de umbrales.** El visor sincronizado de métricas puede mostrar los umbrales configurados bajos/altos junto con las bandas de repeticiones manteniendo la leyenda en un diseño compacto bajo la gráfica.
 
-## What’s new in 2.6
+## Novedades en 2.7
 
-- Single source of truth for repetition counting
+- La rotación de vídeo ahora se corrige por completo en toda la pipeline, evitando overlays invertidos y asegurando que los vídeos de depuración exportados respeten la orientación prevista.
+- La visualización de métricas permanece sincronizada con la reproducción: el cursor, los overlays y el diseño de la gráfica se refinaron para que las interacciones sigan siendo precisas por fotograma incluso tras relayouts.
+- La sincronización con BroadcastChannel enlaza la vista de detección y el visor de métricas, manteniendo múltiples componentes en sintonía durante la reproducción.
+- Los ajustes de overlays conscientes de landmarks mantienen rotaciones coherentes al combinar landmarks renderizados con fotogramas capturados.
+
+## Novedades en 2.6
+
+- Fuente única de verdad para el conteo de repeticiones.
 
 - Nuevo paquete: src/C_analysis/ con repetition_counter.py y el resto de utilidades de análisis.
 
-- Removed legacy src/D_modeling/ package and unused fault_detection.py.
+- Eliminado el paquete legado src/D_modeling/ y el archivo sin uso fault_detection.py.
 
-- Robust valley-based repetition counter
+- Contador de repeticiones robusto basado en valles.
 
-- Valley detection on inverted angle sequence with prominence and min distance thresholds.
+- Detección de valles sobre la secuencia de ángulos invertida con umbrales de prominencia y distancia mínima.
 
-- Refractory window consolidation: clusters close valleys and keeps the most prominent per window.
+- Consolidación por ventana refractaria: agrupa valles cercanos y mantiene el más prominente por ventana.
 
-- Aligned debug output: CountingDebugInfo(valley_indices, prominences) stays consistent after filtering.
-
-
-
-## What’s new in 2.5
-
-- Synchronized video + metrics viewer (Plotly). A frame-accurate cursor is tied to video playback; clicking on the chart seeks the video to that exact point.
-
-- Repetition awareness. Shaded bands mark each rep and a “Go to rep” slider jumps playback to the start of the selected repetition.
-
-- Fast & smooth rendering. Intelligent downsampling (≈3k points cap) keeps charts responsive while requestAnimationFrame provides smooth cursor updates.
-
-- Better chart navigation. Scroll-to-zoom and double-click to reset the X axis; unified X-axis hover tooltips.
-
-- Robust compatibility. Works with Streamlit 1.50 (graceful handling when components.html doesn’t support key).
-
-- Reusable video helper. Public get_video_source exposes the existing data-URI logic for other modules.
-
-- Results UX improvements. Metric selection is persisted, frame_idx is hidden from the picker, and the app gracefully falls back to the legacy video renderer when metrics are unavailable or unselected.
-
-- Modular architecture. New src/ui/metrics_sync.py component encapsulates the viewer and can be reused across screens.
+- Salida de depuración alineada: CountingDebugInfo(valley_indices, prominences) se mantiene consistente tras el filtrado.
 
 
-## What’s new in 2.3
 
-**Documentation and project structure refresh.** This release focuses on improving discoverability and aligning the repository layout with the refactored modules:
+## Novedades en 2.5
 
-- Updated README with the latest release information and reorganized change-log sections.
-- Added a high-level overview of the current project structure to accelerate onboarding.
-- Clarified the purpose of legacy assets stored under `OLD/` for historical reference.
+- Visor sincronizado de vídeo + métricas (Plotly). Un cursor preciso por fotograma se vincula a la reproducción; al hacer clic en la gráfica se busca el vídeo a ese punto exacto.
 
-## What’s new in 2.0
+- Conciencia de repeticiones. Bandas sombreadas marcan cada repetición y un slider “Go to rep” salta la reproducción al inicio de la repetición seleccionada.
 
-**Automatic Exercise & View Detection (MVP)**
+- Renderizado rápido y fluido. El downsampling inteligente (límite ≈3k puntos) mantiene las gráficas ágiles mientras requestAnimationFrame ofrece actualizaciones suaves del cursor.
 
-- Added `src/exercise_detection/exercise_detector.py` (and `src/exercise_detection/__init__.py`).
-- Detects squat / bench press / deadlift + front / side with a confidence score.
-- Uses MediaPipe landmarks with heuristics (ROMs, pelvis displacement, wrist travel) and new view cues:
-  - Shoulder yaw (3D angle from left/right shoulder depth).
-  - Shoulder z-depth delta (asymmetry).
-  - Normalized shoulder width (width/torso-length) with stability check.
+- Mejor navegación en las gráficas. Zoom con scroll y doble clic para reiniciar el eje X; tooltips de hover unificados en el eje X.
 
-**Streamlit integration**
+- Compatibilidad robusta. Funciona con Streamlit 1.50 (manejo flexible cuando components.html no soporta key).
 
-- “Detectar ejercicio (beta)” button now runs detection, caches results, and updates the selectbox.
-- Detection results (label, view, confidence) are shown in the UI.
-- `run_pipeline(..., prefetched_detection=...)` accepts cached UI results to skip duplicate detector runs.
+- Helper de vídeo reutilizable. El método público get_video_source expone la lógica existente de data-URI para otros módulos.
 
-**RunStats now includes:**
+- Mejoras de UX en resultados. La selección de métricas se persiste, frame_idx se oculta en el selector y la app recurre con gracia al renderizador de vídeo legado cuando las métricas no están disponibles o no se seleccionan.
 
-- `exercise_selected` (UI choice)
+- Arquitectura modular. El nuevo componente src/ui/metrics_sync.py encapsula el visor y puede reutilizarse en distintas pantallas.
+
+
+## Novedades en 2.3
+
+**Actualización de documentación y estructura del proyecto.** Esta versión se centra en mejorar la descubribilidad y alinear la estructura del repositorio con los módulos refactorizados:
+
+- README actualizado con la información más reciente y secciones de changelog reorganizadas.
+- Añade una vista general de alto nivel de la estructura actual del proyecto para acelerar la incorporación.
+- Se clarifica el propósito de los recursos legados almacenados en `OLD/` como referencia histórica.
+
+## Novedades en 2.0
+
+**Detección automática de ejercicio y vista (MVP)**
+
+- Añadido `src/exercise_detection/exercise_detector.py` (y `src/exercise_detection/__init__.py`).
+- Detecta sentadilla / press de banca / peso muerto + vista frontal / lateral con una puntuación de confianza.
+- Usa landmarks de MediaPipe con heurísticas (ROMs, desplazamiento de pelvis, recorrido de muñeca) y nuevas señales de vista:
+  - Yaw de hombros (ángulo 3D a partir de la profundidad de hombro izquierdo/derecho).
+  - Delta de profundidad z de hombros (asimetría).
+  - Anchura de hombros normalizada (anchura/longitud de torso) con comprobación de estabilidad.
+
+**Integración con Streamlit**
+
+- El botón “Detectar ejercicio (beta)” ahora ejecuta la detección, cachea resultados y actualiza el selectbox.
+- Los resultados de detección (etiqueta, vista, confianza) se muestran en la UI.
+- `run_pipeline(..., prefetched_detection=...)` acepta resultados cacheados de la UI para evitar ejecuciones duplicadas del detector.
+
+**RunStats ahora incluye:**
+
+- `exercise_selected` (elección de la UI)
 - `exercise_detected`, `view_detected`, `detection_confidence`
-- Results table shows both selected vs detected for transparency.
+- La tabla de resultados muestra seleccionado vs detectado para mayor transparencia.
 
-**Debugging & tests**
+**Depuración y tests**
 
-- Lightweight debug logging prints a single `DET DEBUG` line with kinematic and view stats (ROMs, width mean/std, yaw median, z-depth median).
-- Synthetic fixtures for squat/bench press/deadlift and front vs side view checks.
+- El logging ligero de depuración imprime una única línea `DET DEBUG` con estadísticas cinemáticas y de vista (ROMs, media/std de anchura, mediana de yaw, mediana de profundidad z).
+- Fixtures sintéticos para sentadilla/press de banca/peso muerto y comprobaciones de vista frontal vs lateral.
 
-## What’s new in 1.1
+## Novedades en 1.1
 
-**Parity achieved between Streamlit and Desktop UI.** Both front-ends now call the same unified pipeline and config:
+**Paridad lograda entre Streamlit y la UI de escritorio.** Ambos front-ends ahora llaman a la misma pipeline unificada y configuración:
 
-- Unified `Config` (dataclasses) with SHA1 **fingerprint** for reproducibility.
-- Single entry point `run_pipeline(video_path, cfg)` returning a rich `Report`.
-- Robust FPS detection with fallbacks + guardrails (`min_frames`, `min_fps`).
-- One *single* resize stage (documented in config) before pose estimation.
-- Rep counting based on valleys with **prominence / min distance / refractory**.
-- Streamlit & GUI surface **run stats**, warnings and `skip_reason`.
-- Pinned OpenCV/SciPy in `environment.yml` for stability.
+- `Config` unificada (dataclasses) con **fingerprint** SHA1 para reproducibilidad.
+- Punto de entrada único `run_pipeline(video_path, cfg)` que devuelve un `Report` completo.
+- Detección de FPS robusta con alternativas y salvaguardas (`min_frames`, `min_fps`).
+- Una única etapa de redimensionado (documentada en la config) antes de la estimación de pose.
+- Conteo de repeticiones basado en valles con **prominence / min distance / refractory**.
+- Streamlit y la interfaz de escritorio exponen **run stats**, avisos y `skip_reason`.
+- OpenCV/SciPy fijados en `environment.yml` para mayor estabilidad.
 
 ---
 
-## Project structure (v2.3)
+## Estructura del proyecto (v3.0)
 
-| Path | Description |
+| Ruta | Descripción |
 | --- | --- |
-| `src/app.py` | Streamlit entry point that wires UI controls to the exercise-analysis pipeline. |
-| `src/pipeline/` | Preprocessing, pose-estimation, and repetition-analysis building blocks. |
-| `src/exercise_detection/` | Heuristics and models that infer exercise type and camera view. |
-| `src/config/` | Dataclasses, defaults, and validation utilities governing pipeline execution. |
-| `src/utils/` | Shared helpers for I/O, logging, math utilities, and MediaPipe integrations. |
-| `tests/` | Automated tests (unit + integration) that validate the detection pipeline and utilities. |
-| `docs/` | Design notes, research references, and extended documentation. |
-| `OLD/` | Historical experiments, legacy scripts, and the deprecated `environment.yml`. |
-| `pyproject.toml` | Project metadata, dependency declarations, and entry-points for tooling. |
-| `uv.lock` | Locked dependency versions for reproducible uv-based environments. |
-| `project_tree.cmd` | Helper script to regenerate a summarized repository tree. |
+| `src/app.py` | Punto de entrada de Streamlit que conecta la UI con la pipeline de análisis. |
+| `src/A_preprocessing/` | Extracción de frames y utilidades de vídeo (metadatos, saneo, recorte) previas a la estimación de pose. |
+| `src/B_pose_estimation/` | Pipeline de pose: constantes, estimadores, geometría y métricas derivadas a partir de landmarks. |
+| `src/C_analysis/` | Análisis posterior: conteo de repeticiones, métricas agregadas, overlays y streaming de resultados. |
+| `src/D_visualization/` | Renderizado de landmarks, estilos de overlay y escritura de vídeos de depuración. |
+| `src/config/` | Dataclasses de configuración, valores por defecto y validaciones para ejecutar la pipeline. |
+| `src/core/` | Utilidades compartidas (I/O, matemáticas, logging) empleadas por varios módulos. |
+| `src/exercise_detection/` | Heurísticas para clasificar ejercicio y vista de cámara a partir de señales cinemáticas. |
+| `src/ui/` | Componentes específicos de Streamlit (sincronización de métricas, helpers de vídeo). |
+| `src/pipeline_data.py` | Tipos y estructuras de datos comunes que comparten las etapas de la pipeline. |
+| `tests/` | Tests automatizados (unitarios e integración) para la pipeline y utilidades clave. |
+| `docs/` | Notas de diseño, referencias de investigación y documentación extendida. |
+| `1-ENTREGA_TFM/` | Material de la primera entrega (memoria, tablas e imágenes de soporte). |
+| `README_DEV.md` | Referencia independiente (legada) de notas para desarrolladores; su contenido principal figura al final de este README. |
+| `pyproject.toml` | Metadatos del proyecto, dependencias y entry-points para tooling. |
+| `requirements.txt` | Dependencias fijadas para entornos que no usan `uv`. |
+| `uv.lock` | Versiones bloqueadas para instalaciones reproducibles con uv. |
+| `project_tree.cmd` | Script de ayuda para regenerar un árbol resumido del repositorio. |
+
+## Notas para desarrolladores: ajuste del clasificador de ejercicios
+
+Las heurísticas implementadas en `src/exercise_detection` exponen todos los umbrales
+ajustables en `constants.py`, de modo que se pueden modificar sin tocar los módulos de
+lógica:
+
+- **Sampling y smoothing**: `DEFAULT_SAMPLING_RATE`, `SMOOTHING_*`.
+- **Segmentación**: histéresis de rodilla y margen de caída de la barra.
+- **Clasificador de vista**: pesos por feature y márgenes de decisión.
+- **Puntuaciones de ejercicio**: ángulos de corte, penalizaciones y multiplicadores de veto.
+
+La pipeline de clasificación emite un log compacto `INFO` por clip con los
+valores agregados y las puntuaciones brutas/ajustadas. El log `DEBUG` incluye los
+fondos por repetición. Son la forma más rápida de comprobar qué señales dominan
+una predicción al calibrar las constantes.
+
+Ejecuta los tests sintéticos con `pytest -q` para confirmar que los refactors
+mantienen el comportamiento cualitativo esperado en sentadilla, peso muerto,
+press de banca y escenarios desconocidos.
+
+Al añadir nuevas métricas derivadas o estadísticas, utiliza los helpers de
+`exercise_detection.stats` (por ejemplo `safe_nanmedian` y `safe_nanstd`).
+Protegen frente a entradas llenas de NaN para evitar `RuntimeWarning` de NumPy
+mientras se preserva el comportamiento actual.
 
 ---
