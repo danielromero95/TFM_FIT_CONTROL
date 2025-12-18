@@ -1,8 +1,10 @@
-"""Herramientas dedicadas a la generación de videos de depuración con *overlays* de pose.
+"""Herramientas dedicadas a la generación de videos de depuración con *overlays*.
 
 Aquí reunimos funciones cuyo único objetivo es reconstruir cuadros originales y renderizar
 las poses filtradas sobre ellos. De esta forma el módulo principal del pipeline permanece
-enfocado en la orquestación y delega la lógica específica de visualización.
+enfocado en la orquestación y delega la lógica específica de visualización. Se detalla cómo
+se replica el mismo muestreo y rotación del análisis y cómo se genera una copia web-safe
+para uso en navegadores.
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ def iter_original_frames_for_overlay(
 ) -> Iterable[np.ndarray]:
     """Recuperar cuadros originales utilizando el mismo muestreo de la pipeline."""
 
+    # Mantener el modo de muestreo (por tiempo o índice) garantiza que el overlay
+    # se alinee con la secuencia procesada durante la inferencia.
     target = float(target_fps) if target_fps and target_fps > 0 else None
     sampling_mode = "time" if target is not None else "index"
 
@@ -61,6 +65,7 @@ def iter_original_frames_for_overlay(
     for finfo in iterator:
         frame = finfo.array
         if max_long_side and max_long_side > 0:
+            # Reescalamos cuadros grandes para evitar generar overlays pesados.
             height, width = frame.shape[:2]
             long_side = max(height, width)
             if long_side > max_long_side:
@@ -144,6 +149,8 @@ def generate_overlay_video(
         max_long_side=overlay_max_long_side,
     )
 
+    # Renderizamos los landmarks sobre los cuadros originales, respetando la
+    # rotación y el tamaño procesado para que las proporciones coincidan.
     stats = render_landmarks_video(
         frames_iter,
         frame_sequence,
@@ -161,6 +168,8 @@ def generate_overlay_video(
         overlay_path.unlink(missing_ok=True)
         return None
 
+    # Se genera una copia en H.264 con extensión .mp4 para garantizar
+    # compatibilidad en navegadores y reproductores web.
     web_safe = make_web_safe_h264(overlay_path)
     stream_path = overlay_path
     if web_safe.ok and web_safe.output_path is not None:

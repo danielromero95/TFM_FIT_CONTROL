@@ -1,4 +1,9 @@
-"""Cálculo de métricas biomecánicas y ajuste automático de parámetros de conteo."""
+"""Cálculo de métricas y autoajuste de parámetros de conteo.
+
+Este módulo centraliza la lógica que transforma las secuencias de *landmarks*
+en métricas biomecánicas (ROM, inclinaciones, etc.) y decide cómo contar
+repeticiones de forma robusta.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +16,9 @@ import pandas as pd
 
 from src import config
 from src.B_pose_estimation.pipeline import calculate_metrics_from_sequence, filter_and_interpolate_landmarks
-from .repetition_counter import count_repetitions_with_config
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
+
+from .repetition_counter import count_repetitions_with_config
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,9 @@ def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame | np.ndarray, o
         son las cajas de recorte asociadas y ``quality_mask`` es una serie booleana.
     """
 
+    # ``filter_and_interpolate_landmarks`` devuelve la secuencia limpia, las
+    # cajas de recorte y una máscara de calidad. Los convertimos a tipos
+    # homogéneos para el resto del pipeline.
     sequence, crops, quality = filter_and_interpolate_landmarks(df_raw)
     return sequence, crops, pd.Series(quality)
 
@@ -49,6 +58,7 @@ def choose_primary_angle(
 ) -> str | None:
     """Seleccionar de forma heurística el ángulo principal según ejercicio y vista."""
 
+    # Normalizamos etiquetas para poder comparar con el mapa de candidatos.
     ex = as_exercise(exercise).value
     vw = as_view(view).value
     candidates_map = {
@@ -61,11 +71,14 @@ def choose_primary_angle(
         return None
 
     def series_for(col: str):
+        # Priorizamos columnas "raw" (sin suavizado) para medir cobertura real.
         raw_name = f"raw_{col}"
         base = df[raw_name] if raw_name in df.columns else df[col]
         return pd.to_numeric(base, errors="coerce")
 
     def quality(col: str) -> tuple[float, float]:
+        # Medimos calidad por dos factores: cobertura (porcentaje de valores
+        # válidos) y rango de movimiento (ROM) observado.
         series = series_for(col)
         finite = series.dropna()
         if finite.empty:
@@ -151,6 +164,7 @@ def _estimate_cadence_period(
         return None
 
     if columns is None:
+        # Usamos rodillas por defecto porque suelen tener buena señal y ROM.
         columns = []
         for base in ("left_knee", "right_knee"):
             raw = f"raw_{base}"
@@ -176,6 +190,7 @@ def _estimate_cadence_period(
         series = pd.to_numeric(df[col], errors="coerce")
         if series.isna().all():
             continue
+        # Interpolamos huecos para estimar picos aunque falten algunos valores.
         filled = series.interpolate(method="linear", limit_direction="both")
         values = filled.to_numpy(dtype=float)
         if values.size < 3:
@@ -210,10 +225,12 @@ def auto_counting_params(
 ) -> AutoTuneResult:
     """Inferir parámetros de conteo basados en la cadencia y robustez del movimiento."""
 
+    # Valores iniciales que se usan como respaldo si la auto-calibración falla.
     prom_default = float(getattr(counting_cfg, "min_prominence", 0.0) or 0.0)
     dist_default = float(getattr(counting_cfg, "min_distance_sec", 0.5) or 0.5)
     refractory_default = float(getattr(counting_cfg, "refractory_sec", 0.4) or 0.4)
 
+    # Tomamos el ROM recortado (percentiles 10-90) para evitar outliers.
     rom = _trimmed_rom_deg(df_metrics, primary or "")
     prom_candidates = [max(5.0, 0.20 * rom)] if rom > 0 else [5.0]
     iqr = _iqr_deg(df_metrics, primary or "")
@@ -222,6 +239,8 @@ def auto_counting_params(
     prom_candidates.append(prom_default)
     prom = max(prom_candidates)
 
+    # Estimamos el periodo de cadencia (tiempo entre repeticiones) para ajustar
+    # distancias mínimas y ventana refractaria de manera proporcional.
     cadence_period = _estimate_cadence_period(df_metrics, fps)
     if cadence_period is not None and np.isfinite(cadence_period):
         min_distance = float(np.clip(0.35 * cadence_period, 0.35, 1.2))

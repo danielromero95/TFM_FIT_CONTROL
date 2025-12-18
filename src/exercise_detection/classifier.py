@@ -1,4 +1,11 @@
-"""Cálculo de puntuaciones por ejercicio, lógica de vetos y confianza final."""
+"""Clasificador heurístico de ejercicios con anotaciones en español.
+
+Calcula puntuaciones por ejercicio, aplica vetos y deriva la confianza final.
+El objetivo es transparente: combinar métricas agregadas para decidir si un
+vídeo corresponde a sentadilla, peso muerto o press de banca. Se documentan
+las señales que se premian o penalizan para facilitar la interpretación y
+ajustes futuros.
+"""
 
 from __future__ import annotations
 
@@ -75,6 +82,8 @@ LABELS = ("squat", "deadlift", "bench_press")
 def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, ClassificationScores, Mapping[str, float]]:
     """Calcula la etiqueta, la confianza y las puntuaciones intermedias del ejercicio."""
 
+    # Inicializamos contadores para acumular puntuaciones crudas y penalizaciones
+    # que luego se traducen en probabilidades normalizadas.
     raw_scores: Dict[str, float] = {label: 0.0 for label in LABELS}
     penalties: Dict[str, float] = {label: 0.0 for label in LABELS}
     adjusted: Dict[str, float] = {label: 0.0 for label in LABELS}
@@ -107,6 +116,7 @@ def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, Classification
 
 
 def _bench_score(agg: AggregateMetrics) -> float:
+    # Torso casi horizontal es condición mínima para considerar press de banca.
     torso_margin = _margin_above(agg.torso_tilt_bottom, BENCH_TORSO_HORIZONTAL_DEG)
     if torso_margin <= 0:
         return 0.0
@@ -133,6 +143,7 @@ def _bench_score(agg: AggregateMetrics) -> float:
 
 
 def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
+    # Analizamos profundidad (cadera/rodilla), inclinación y simetría de brazos.
     knee_depth = _margin_below(agg.knee_min, SQUAT_KNEE_BOTTOM_MAX_DEG)
     hip_depth = _margin_below(agg.hip_min, SQUAT_HIP_BOTTOM_MAX_DEG)
     depth = max(knee_depth, hip_depth)
