@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 
 from .constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 
@@ -23,45 +21,77 @@ def configure_environment() -> None:
         # Forzamos a ``absl`` a emitir solo errores para no saturar la consola.
         absl_logging.set_verbosity(absl_logging.ERROR)
 
-    if sys.platform.startswith("win"):
-        conda_prefix = os.environ.get("CONDA_PREFIX")
-        if conda_prefix:
-            dll_dir = Path(conda_prefix) / "Library" / "bin"
-            if dll_dir.exists():
-                # Añadimos las DLL de Conda al ``PATH`` para evitar errores de carga.
-                os.environ["PATH"] = str(dll_dir) + os.pathsep + os.environ.get("PATH", "")
-
-
 # --- PARÁMETROS DEL PIPELINE ---
+# Complejidad del grafo de MediaPipe (0/1/2). Usamos el modelo "heavy" (2)
+# para priorizar precisión en vídeos complejos, asumiendo el coste extra.
 MODEL_COMPLEXITY = 2
 POSE_MODEL_COMPLEXITY = MODEL_COMPLEXITY
+# Mantiene activado el uso del modelo base de pose sin segmentación de fondo,
+# ya que la aplicación solo necesita *landmarks* corporales y no máscaras.
 POSE_ENABLE_SEGMENTATION = False
+
+# Desactiva el suavizado de la máscara de segmentación porque no usamos
+# segmentación: evitamos trabajo innecesario si algún caller la activa.
 POSE_SMOOTH_SEGMENTATION = False
+
+# Mantiene un suavizado temporal de landmarks para reducir saltos entre frames
+# y obtener ángulos más estables al contar repeticiones.
 POSE_SMOOTH_LANDMARKS = True
+
+# Indica que las entradas son vídeo (False): habilita el seguimiento entre
+# frames y evita recalcular detecciones completas en cada paso.
 POSE_STATIC_IMAGE_MODE = False
+
+# Resolución objetivo a la que se reescala la entrada antes de inferir pose,
+# balanceando coste computacional y nivel de detalle de los landmarks.
 DEFAULT_TARGET_WIDTH = 256
 DEFAULT_TARGET_HEIGHT = 256
 DETECTION_SAMPLE_FPS = 4.0
+
+# Frecuencia de refresco del panel de previsualización de la UI para no
+# saturar recursos mientras se procesa el vídeo.
 DEFAULT_PREVIEW_FPS = 10.0
 DEFAULT_LANDMARK_MIN_VISIBILITY = 0.5
 
-# --- PARÁMETROS DE CONTEO (LEGADO) ---
+# --- PARÁMETROS DE CONTEO ---
+# Umbrales usados por el contador de repeticiones y la validación de profundidad.
+# Rango de ángulos aceptado para clasificar una sentadilla como profunda.
 SQUAT_HIGH_THRESH = 160.0
 SQUAT_LOW_THRESH = 100.0
 PEAK_PROMINENCE = 10  # Prominencia usada por el detector de picos
 PEAK_DISTANCE = 15    # Distancia mínima en fotogramas entre repeticiones
 
 # --- VALORES PREDETERMINADOS PARA LA UI ---
+# Activa el recorte centrado en la persona detectada para mejorar precisión
+# de pose y evitar píxeles innecesarios.
 DEFAULT_USE_CROP = True
+
+# Genera un vídeo de depuración con overlays para inspeccionar resultados.
 DEFAULT_GENERATE_VIDEO = True
+
+# Permite mostrar diagnósticos adicionales en consola/GUI al depurar.
 DEFAULT_DEBUG_MODE = True
 
 # --- PROTECCIONES PARA MEDIOS PESADOS ---
-OVERLAY_MAX_LONG_SIDE = 1280          # píxeles (p.ej. 720p/1080p-lite)
-OVERLAY_DISABLE_OVER_BYTES = 40 * 1024 * 1024  # 40 MB
-PREVIEW_DISABLE_OVER_MP = 2.5         # desactiva preview si megapíxeles > 2.5
-PREVIEW_MAX_FPS_HEAVY = 5.0           # reduce preview FPS cuando es pesado
-OVERLAY_FPS_CAP = 15.0                # límite superior para FPS del overlay
+# Ajustes que previenen bloqueos cuando se cargan vídeos/fotos muy grandes.
+# Máximo tamaño del lado más largo para overlays generados (p. ej. 720p).
+OVERLAY_MAX_LONG_SIDE = 1280
+
+# Desactiva overlays cuando el artefacto resultante superaría este peso (40MB)
+# evitando consumos excesivos de memoria y disco.
+OVERLAY_DISABLE_OVER_BYTES = 40 * 1024 * 1024
+
+# Deshabilita la previsualización en vivo cuando la imagen supera este límite
+# de megapíxeles para no saturar la GPU/CPU.
+PREVIEW_DISABLE_OVER_MP = 2.5
+
+# Reduce los FPS de previsualización cuando el medio es pesado para priorizar
+# estabilidad del procesamiento.
+PREVIEW_MAX_FPS_HEAVY = 5.0
+
+# Límite superior de FPS que se permite renderizar en el overlay para mantener
+# un uso de recursos predecible en máquinas modestas.
+OVERLAY_FPS_CAP = 15.0
 
 
 def build_pose_kwargs(
