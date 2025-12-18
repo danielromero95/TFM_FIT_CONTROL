@@ -1,7 +1,7 @@
 # FIT CONTROL
 
-**Repository:** `TFM_FIT_CONTROL`
-**Author:** Daniel Romero
+**Repositorio:** `TFM_FIT_CONTROL`
+**Autor:** Daniel Romero
 **Version:** 3.0 (18-12-2025)
 
 ---
@@ -25,9 +25,9 @@ El flujo principal incluye:
 
 ---
 
-## Instalación
+## Instalación y ejecución
 
-El proyecto incluye `pyproject.toml`. Usa tu herramienta preferida.
+El proyecto incluye los archivos `pyproject.toml` y `requirements.txt` para la creación del entorno virtual con las dependencias necesarias para la ejecución del proyecto.
 
 ### Opción A — uv (recomendada)
 
@@ -47,12 +47,6 @@ python -m venv .venv
 # macOS/Linux:
 source .venv/bin/activate
 pip install -e .
-streamlit run src/app.py
-~~~
-
-## Inicio rápido
-
-~~~
 streamlit run src/app.py
 ~~~
 
@@ -197,10 +191,9 @@ streamlit run src/app.py
 | `src/ui/` | Componentes específicos de Streamlit (sincronización de métricas, helpers de vídeo). |
 | `src/pipeline_data.py` | Tipos y estructuras de datos comunes que comparten las etapas de la pipeline. |
 | `tests/` | Tests automatizados (unitarios e integración) para la pipeline y utilidades clave. |
-| `docs/` | Notas de diseño, referencias de investigación y documentación extendida. |
-| `1-ENTREGA_TFM/` | Material de la primera entrega (memoria, tablas e imágenes de soporte). |
-| `README_DEV.md` | Referencia independiente (legada) de notas para desarrolladores; su contenido principal figura al final de este README. |
-| `pyproject.toml` | Metadatos del proyecto, dependencias y entry-points para tooling. |
+| `docs/` | Anteproyecto de Fit Control. |
+| `1-ENTREGA_TFM/` | Material de la entrega (memoria, tablas e imágenes de soporte). |
+| `pyproject.toml` | Dependencias fijadas para entornos que usan `uv`. |
 | `requirements.txt` | Dependencias fijadas para entornos que no usan `uv`. |
 | `uv.lock` | Versiones bloqueadas para instalaciones reproducibles con uv. |
 | `project_tree.cmd` | Script de ayuda para regenerar un árbol resumido del repositorio. |
