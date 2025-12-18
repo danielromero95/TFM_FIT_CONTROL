@@ -69,9 +69,9 @@ def _build_payload(
 
 @st.cache_data(show_spinner=False)
 def _load_asset_text(name: str) -> str:
-    """Carga un recurso estático desde ``src.ui.assets.metrics_sync``."""
+    """Carga un recurso estático desde ``src.ui.metrics_sync.assets``."""
 
-    path = files("src.ui.assets.metrics_sync").joinpath(name)
+    path = files("src.ui.metrics_sync.assets").joinpath(name)
     return path.read_text(encoding="utf-8")
 
 

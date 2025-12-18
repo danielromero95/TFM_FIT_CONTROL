@@ -30,4 +30,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ui.metrics_sync" = ["assets/*.css", "assets/*.js"]
+"ui.metrics_sync.assets" = ["*.css", "*.js"]
