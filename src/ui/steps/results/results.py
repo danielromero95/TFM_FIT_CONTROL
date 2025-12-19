@@ -17,111 +17,13 @@ except Exception:
 
 from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
+from src.ui.metrics_catalog import human_metric_name, metric_base_description
 from src.ui.metrics_sync import render_video_with_metrics_sync
 from src.ui.state import get_state
 from ..utils import step_container
 
 
 _METRIC_HELP_CSS_EMITTED_KEY = "_metric_help_css_emitted"
-
-
-def _humanize_metric_name(metric: str) -> str:
-    base_names = {
-        "left_knee": "left knee angle",
-        "right_knee": "right knee angle",
-        "left_elbow": "left elbow angle",
-        "right_elbow": "right elbow angle",
-        "left_hip": "left hip angle",
-        "right_hip": "right hip angle",
-        "trunk_inclination_deg": "trunk inclination",
-        "shoulder_width": "shoulder width",
-        "foot_separation": "foot separation",
-        "knee_symmetry": "knee symmetry",
-        "elbow_symmetry": "elbow symmetry",
-    }
-    if metric in base_names:
-        return base_names[metric]
-    if metric.startswith("raw_"):
-        return f"raw {metric[4:].replace('_', ' ')}"
-    if metric.startswith("ang_vel_"):
-        return f"angular velocity of {metric[8:].replace('_', ' ')}"
-    return metric.replace("_", " ")
-
-
-def _metric_base_description(metric: str, exercise: str) -> str | None:
-    exercise = exercise or ""
-    descriptions = {
-        "left_knee": {
-            "squat": "Left knee flexion angle that captures squat depth.",
-            "bench_press": "Left knee flexion angle recorded to show leg drive stability during bench press.",
-            "deadlift": "Left knee flexion angle illustrating the pull setup and lockout.",
-            "default": "Left knee flexion angle measured at the hip–knee–ankle joints.",
-        },
-        "right_knee": {
-            "squat": "Right knee flexion angle mirroring squat depth on the working side.",
-            "bench_press": "Right knee flexion angle captured for leg drive monitoring during bench press.",
-            "deadlift": "Right knee flexion angle that reflects the pull stance and lockout.",
-            "default": "Right knee flexion angle measured at the hip–knee–ankle joints.",
-        },
-        "left_elbow": {
-            "squat": "Left elbow flexion angle, useful for spotting arm movement during squats.",
-            "bench_press": "Left elbow flexion angle tracing press depth and lockout.",
-            "deadlift": "Left elbow flexion angle, helpful for verifying straight arms during the pull.",
-            "default": "Left elbow flexion angle measured at the shoulder–elbow–wrist joints.",
-        },
-        "right_elbow": {
-            "squat": "Right elbow flexion angle for checking upper-body posture during squats.",
-            "bench_press": "Right elbow flexion angle monitoring press depth and lockout symmetry.",
-            "deadlift": "Right elbow flexion angle confirming arm extension during the pull.",
-            "default": "Right elbow flexion angle measured at the shoulder–elbow–wrist joints.",
-        },
-        "left_hip": {
-            "squat": "Left hip hinge angle complementing the view of squat depth.",
-            "bench_press": "Left hip hinge angle that shows lower-body tension on the bench.",
-            "deadlift": "Left hip hinge angle measuring the deadlift setup and lockout.",
-            "default": "Left hip hinge angle measured at the shoulder–hip–knee joints.",
-        },
-        "right_hip": {
-            "squat": "Right hip hinge angle mirroring the squat descent and ascent.",
-            "bench_press": "Right hip hinge angle indicating leg drive while benching.",
-            "deadlift": "Right hip hinge angle capturing hip extension through the deadlift.",
-            "default": "Right hip hinge angle measured at the shoulder–hip–knee joints.",
-        },
-        "trunk_inclination_deg": {
-            "squat": "Torso inclination relative to the hips, showing forward lean in the squat.",
-            "bench_press": "Torso inclination relative to the hips, highlighting arch control on the bench.",
-            "deadlift": "Torso inclination relative to the hips, indicating back angle in the pull.",
-            "default": "Torso inclination relative to the hips expressed in degrees.",
-        },
-        "shoulder_width": {
-            "squat": "Horizontal distance between shoulders (normalized), reflecting upper-body stance.",
-            "bench_press": "Horizontal distance between shoulders (normalized), tracking shoulder width on the bench.",
-            "deadlift": "Horizontal distance between shoulders (normalized), confirming back tightness in the pull setup.",
-            "default": "Horizontal distance between shoulders in normalized screen units.",
-        },
-        "foot_separation": {
-            "squat": "Horizontal distance between ankles (normalized), showing squat stance width.",
-            "bench_press": "Horizontal distance between ankles (normalized), showing bench foot placement.",
-            "deadlift": "Horizontal distance between ankles (normalized), showing deadlift stance width.",
-            "default": "Horizontal distance between ankles in normalized screen units.",
-        },
-        "knee_symmetry": {
-            "squat": "Symmetry score between left and right knee angles (1 means perfectly matched).",
-            "bench_press": "Symmetry score between left and right knee angles to monitor lower-body balance on the bench.",
-            "deadlift": "Symmetry score between left and right knee angles to verify even pull mechanics.",
-            "default": "Symmetry score between knee angles where 1 indicates identical motion.",
-        },
-        "elbow_symmetry": {
-            "squat": "Symmetry score between left and right elbow angles (1 means perfectly matched).",
-            "bench_press": "Symmetry score between left and right elbow angles to track pressing balance.",
-            "deadlift": "Symmetry score between left and right elbow angles to confirm straight-arm symmetry.",
-            "default": "Symmetry score between elbow angles where 1 indicates identical motion.",
-        },
-    }
-    base = descriptions.get(metric, {})
-    if exercise in base:
-        return base[exercise]
-    return base.get("default", None)
 
 
 def _counting_relation_text(
@@ -131,7 +33,7 @@ def _counting_relation_text(
     *,
     is_primary: bool,
 ) -> str:
-    primary_label = _humanize_metric_name(primary_metric) if primary_metric else "the auto-selected primary angle"
+    primary_label = human_metric_name(primary_metric) if primary_metric else "the auto-selected primary angle"
     primary_candidates = {
         "squat": {"left_knee", "right_knee"},
         "bench_press": {"left_elbow", "right_elbow"},
@@ -162,16 +64,16 @@ def _build_metric_help(
 
         if metric.startswith("raw_"):
             source_metric = metric[4:]
-            human_label = _humanize_metric_name(source_metric)
+            human_label = human_metric_name(source_metric)
             base_desc = f"Raw (unfiltered) {human_label} values straight from pose detection."
             relation = _counting_relation_text(source_metric, exercise, primary_metric, is_primary=False)
         elif metric.startswith("ang_vel_"):
             source_metric = metric[8:]
-            human_label = _humanize_metric_name(source_metric)
+            human_label = human_metric_name(source_metric)
             base_desc = f"Angular velocity of the {human_label} in degrees per second."
             relation = _counting_relation_text(source_metric, exercise, primary_metric, is_primary=False)
         else:
-            base_desc = _metric_base_description(metric, exercise)
+            base_desc = metric_base_description(metric, exercise)
             if base_desc is None:
                 continue
             relation = _counting_relation_text(metric, exercise, primary_metric, is_primary=(metric == primary_metric))
