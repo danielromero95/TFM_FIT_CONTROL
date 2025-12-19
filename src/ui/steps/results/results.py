@@ -24,6 +24,7 @@ from ..utils import step_container
 
 
 _METRIC_HELP_CSS_EMITTED_KEY = "_metric_help_css_emitted"
+_SUMMARY_METRIC_CSS_EMITTED_KEY = "_summary_metric_css_emitted"
 
 
 def _counting_relation_text(
@@ -83,6 +84,68 @@ def _build_metric_help(
         help_map[metric] = {"title": title, "body": body}
 
     return help_map
+
+
+def _format_run_duration(duration_ms: float | None) -> str | None:
+    """Convert milliseconds into a brief human-friendly duration string."""
+
+    if duration_ms is None or duration_ms <= 0:
+        return None
+
+    seconds_total = duration_ms / 1000.0
+    minutes, seconds = divmod(seconds_total, 60)
+    if minutes >= 1:
+        return f"{int(minutes)}m {seconds:0.1f}s"
+    return f"{seconds_total:0.1f}s"
+
+
+def _highlight_metrics(stats: RunStats) -> List[Tuple[str, str]]:
+    """Collect the key metrics to display in the results header."""
+
+    highlights: List[Tuple[str, str]] = []
+
+    duration = _format_run_duration(stats.t_total_ms)
+    if duration:
+        highlights.append(("Analysis time", duration))
+
+    frames = getattr(stats, "frames", 0) or 0
+    if frames > 0:
+        highlights.append(("Frames analyzed", f"{frames:,}"))
+
+    confidence = getattr(stats, "detection_confidence", 0.0) or 0.0
+    if confidence > 0:
+        highlights.append(("Detection confidence", f"{confidence * 100:.0f}%"))
+
+    return highlights
+
+
+def _emit_summary_metric_styles() -> None:
+    if st.session_state.get(_SUMMARY_METRIC_CSS_EMITTED_KEY):
+        return
+
+    st.session_state[_SUMMARY_METRIC_CSS_EMITTED_KEY] = True
+    st.markdown(
+        """
+<style>
+.summary-metric {
+    text-align: center;
+    padding: 8px 4px;
+}
+
+.summary-metric__label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.summary-metric__value {
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _emit_metric_help_assets() -> None:
@@ -654,3 +717,23 @@ def _results_summary() -> None:
         state = get_state()
         if state.last_run_success:
             st.success("Analysis complete ✅")
+
+            report: Report | None = getattr(state, "report", None)
+            stats: RunStats | None = getattr(report, "stats", None) if report else None
+            if stats:
+                highlights = _highlight_metrics(stats)
+                if highlights:
+                    _emit_summary_metric_styles()
+                    cols = st.columns(len(highlights))
+                    for (label, value), col in zip(highlights, cols):
+                        col.markdown(
+                            f"""
+<div class="summary-metric">
+    <div class="summary-metric__label">{label}</div>
+    <div class="summary-metric__value">{value}</div>
+</div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+        else:
+            st.info("No results found to display.")
