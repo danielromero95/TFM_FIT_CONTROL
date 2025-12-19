@@ -99,75 +99,45 @@ def _format_run_duration(duration_ms: float | None) -> str | None:
     return f"{seconds_total:0.1f}s"
 
 
-def _run_highlights(stats: RunStats) -> List[Tuple[str, str]]:
-    """Surface only the key run highlights in a compact layout."""
+def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
+    """Build a compact list of run parameters to highlight in the UI."""
 
-    highlights: List[Tuple[str, str]] = []
+    def _as_label(value: object | None) -> str:
+        if value is None:
+            return ""
+        label = getattr(value, "value", value)
+        return str(label)
 
-    duration = _format_run_duration(getattr(stats, "t_total_ms", None))
-    if duration:
-        highlights.append(("Analysis time", duration))
+    params: List[Tuple[str, str]] = []
+
+    exercise_selected = _as_label(getattr(stats, "exercise_selected", None))
+    exercise_detected = _as_label(getattr(stats, "exercise_detected", None))
+    if exercise_selected:
+        params.append(("Selected exercise", exercise_selected))
+    if exercise_detected:
+        params.append(("Detected exercise", exercise_detected))
+
+    view_detected = _as_label(getattr(stats, "view_detected", None))
+    if view_detected:
+        params.append(("Detected view", view_detected.title()))
+
+    primary_angle = getattr(stats, "primary_angle", None)
+    if primary_angle:
+        params.append(("Primary angle", human_metric_name(primary_angle)))
+
+    fps_effective = getattr(stats, "fps_effective", 0.0) or 0.0
+    if fps_effective > 0:
+        params.append(("Effective FPS", f"{fps_effective:.1f}"))
 
     frames = getattr(stats, "frames", 0) or 0
     if frames > 0:
-        highlights.append(("Frames analyzed", f"{frames:,}"))
+        params.append(("Frames analyzed", f"{frames:,}"))
 
     confidence = getattr(stats, "detection_confidence", 0.0) or 0.0
     if confidence > 0:
-        highlights.append(("Detection confidence", f"{confidence * 100:.0f}%"))
+        params.append(("Detection confidence", f"{confidence * 100:.0f}%"))
 
-    return highlights
-
-
-def _emit_run_highlights_styles() -> None:
-    if st.session_state.get(_RUN_HIGHLIGHTS_STYLES_EMITTED_KEY):
-        return
-
-    st.session_state[_RUN_HIGHLIGHTS_STYLES_EMITTED_KEY] = True
-    st.markdown(
-        """
-<style>
-.run-highlights-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
-    margin: 12px 0 4px;
-}
-
-.run-highlight {
-    padding: 10px 12px;
-    text-align: center;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.02);
-}
-
-.run-highlight__label {
-    font-size: 0.95rem;
-    margin-bottom: 6px;
-    color: rgba(0, 0, 0, 0.65);
-}
-
-.run-highlight__value {
-    font-size: 1.35rem;
-    font-weight: 600;
-    line-height: 1.2;
-}
-
-@media (prefers-color-scheme: dark) {
-    .run-highlight {
-        border-color: rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.03);
-    }
-
-    .run-highlight__label {
-        color: rgba(255, 255, 255, 0.7);
-    }
-}
-</style>
-        """,
-        unsafe_allow_html=True,
-    )
+    return params
 
 
 def _emit_metric_help_assets() -> None:
@@ -743,21 +713,16 @@ def _results_summary() -> None:
             report: Report | None = getattr(state, "report", None)
             stats: RunStats | None = getattr(report, "stats", None) if report else None
             if stats:
-                highlights = _run_highlights(stats)
-                if highlights:
-                    _emit_run_highlights_styles()
-                    cards = "".join(
-                        f"""
-                        <div class=\"run-highlight\">
-                            <div class=\"run-highlight__label\">{label}</div>
-                            <div class=\"run-highlight__value\">{value}</div>
-                        </div>
-                        """
-                        for label, value in highlights
-                    )
-                    st.markdown(
-                        f"<div class='run-highlights-grid'>{cards}</div>",
-                        unsafe_allow_html=True,
-                    )
+                duration = _format_run_duration(stats.t_total_ms)
+                if duration:
+                    st.caption(f"Analysis time: {duration}")
+
+                params = _run_parameters(stats)
+                if params:
+                    st.markdown("**Run context**")
+                    cols = st.columns(min(3, len(params)))
+                    for idx, (label, value) in enumerate(params):
+                        with cols[idx % len(cols)]:
+                            st.metric(label=label, value=value)
         else:
             st.info("No results found to display.")
