@@ -109,25 +109,6 @@ def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
 
     params: List[Tuple[str, str]] = []
 
-    exercise_selected = _as_label(getattr(stats, "exercise_selected", None))
-    exercise_detected = _as_label(getattr(stats, "exercise_detected", None))
-    if exercise_selected:
-        params.append(("Selected exercise", exercise_selected))
-    if exercise_detected:
-        params.append(("Detected exercise", exercise_detected))
-
-    view_detected = _as_label(getattr(stats, "view_detected", None))
-    if view_detected:
-        params.append(("Detected view", view_detected.title()))
-
-    primary_angle = getattr(stats, "primary_angle", None)
-    if primary_angle:
-        params.append(("Primary angle", human_metric_name(primary_angle)))
-
-    fps_effective = getattr(stats, "fps_effective", 0.0) or 0.0
-    if fps_effective > 0:
-        params.append(("Effective FPS", f"{fps_effective:.1f}"))
-
     frames = getattr(stats, "frames", 0) or 0
     if frames > 0:
         params.append(("Frames analyzed", f"{frames:,}"))
@@ -718,7 +699,6 @@ def _results_summary() -> None:
 
                 params = _run_parameters(stats)
                 if params:
-                    st.markdown("**Run context**")
                     cols = st.columns(min(3, len(params)))
                     for idx, (label, value) in enumerate(params):
                         with cols[idx % len(cols)]:
