@@ -24,6 +24,7 @@ from ..utils import step_container
 
 
 _METRIC_HELP_CSS_EMITTED_KEY = "_metric_help_css_emitted"
+_RUN_HIGHLIGHTS_STYLES_EMITTED_KEY = "_run_highlights_styles_emitted"
 
 
 def _counting_relation_text(
@@ -83,6 +84,90 @@ def _build_metric_help(
         help_map[metric] = {"title": title, "body": body}
 
     return help_map
+
+
+def _format_run_duration(duration_ms: float | None) -> str | None:
+    """Convert milliseconds into a brief human-friendly duration string."""
+
+    if duration_ms is None or duration_ms <= 0:
+        return None
+
+    seconds_total = duration_ms / 1000.0
+    minutes, seconds = divmod(seconds_total, 60)
+    if minutes >= 1:
+        return f"{int(minutes)}m {seconds:0.1f}s"
+    return f"{seconds_total:0.1f}s"
+
+
+def _run_highlights(stats: RunStats) -> List[Tuple[str, str]]:
+    """Surface only the key run highlights in a compact layout."""
+
+    highlights: List[Tuple[str, str]] = []
+
+    duration = _format_run_duration(getattr(stats, "t_total_ms", None))
+    if duration:
+        highlights.append(("Analysis time", duration))
+
+    frames = getattr(stats, "frames", 0) or 0
+    if frames > 0:
+        highlights.append(("Frames analyzed", f"{frames:,}"))
+
+    confidence = getattr(stats, "detection_confidence", 0.0) or 0.0
+    if confidence > 0:
+        highlights.append(("Detection confidence", f"{confidence * 100:.0f}%"))
+
+    return highlights
+
+
+def _emit_run_highlights_styles() -> None:
+    if st.session_state.get(_RUN_HIGHLIGHTS_STYLES_EMITTED_KEY):
+        return
+
+    st.session_state[_RUN_HIGHLIGHTS_STYLES_EMITTED_KEY] = True
+    st.markdown(
+        """
+<style>
+.run-highlights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 12px 0 4px;
+}
+
+.run-highlight {
+    padding: 10px 12px;
+    text-align: center;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.run-highlight__label {
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+    color: rgba(0, 0, 0, 0.65);
+}
+
+.run-highlight__value {
+    font-size: 1.35rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+@media (prefers-color-scheme: dark) {
+    .run-highlight {
+        border-color: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .run-highlight__label {
+        color: rgba(255, 255, 255, 0.7);
+    }
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _emit_metric_help_assets() -> None:
@@ -654,3 +739,25 @@ def _results_summary() -> None:
         state = get_state()
         if state.last_run_success:
             st.success("Analysis complete ✅")
+
+            report: Report | None = getattr(state, "report", None)
+            stats: RunStats | None = getattr(report, "stats", None) if report else None
+            if stats:
+                highlights = _run_highlights(stats)
+                if highlights:
+                    _emit_run_highlights_styles()
+                    cards = "".join(
+                        f"""
+                        <div class=\"run-highlight\">
+                            <div class=\"run-highlight__label\">{label}</div>
+                            <div class=\"run-highlight__value\">{value}</div>
+                        </div>
+                        """
+                        for label, value in highlights
+                    )
+                    st.markdown(
+                        f"<div class='run-highlights-grid'>{cards}</div>",
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.info("No results found to display.")
