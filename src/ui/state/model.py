@@ -65,6 +65,8 @@ class AppState:
     progress_value_from_cb: int = 0
     phase_text_from_cb: str = "Preparando..."
     run_id: str | None = None
+    analysis_started_at: float | None = None
+    analysis_completed_at: float | None = None
     preview_enabled: bool = False
     preview_fps: float = float(DEFAULT_PREVIEW_FPS)
     preview_frame_count: int = 0

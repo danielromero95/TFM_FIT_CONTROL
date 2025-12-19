@@ -26,6 +26,16 @@ from ..utils import step_container
 _METRIC_HELP_CSS_EMITTED_KEY = "_metric_help_css_emitted"
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    minutes, remainder = divmod(int(seconds), 60)
+    if minutes:
+        return f"{minutes}m {remainder:02d}s"
+    if seconds >= 10:
+        return f"{seconds:.0f}s"
+    return f"{seconds:.1f}s"
+
+
 def _counting_relation_text(
     metric: str,
     exercise: str,
@@ -654,3 +664,34 @@ def _results_summary() -> None:
         state = get_state()
         if state.last_run_success:
             st.success("Analysis complete ✅")
+            report: Report | None = getattr(state, "report", None)
+            stats: RunStats | None = getattr(report, "stats", None) if report else None
+
+            summary_items: List[Tuple[str, str]] = []
+            elapsed: float | None = None
+            if state.analysis_started_at is not None and state.analysis_completed_at is not None:
+                elapsed = max(0.0, state.analysis_completed_at - state.analysis_started_at)
+                summary_items.append(("Analysis time", _format_duration(elapsed)))
+
+            if stats is not None:
+                frames = int(getattr(stats, "frames", 0) or 0)
+                fps_original = float(getattr(stats, "fps_original", 0.0) or 0.0)
+                if frames > 0 and fps_original > 0:
+                    video_duration_s = frames / fps_original
+                    summary_items.append(
+                        ("Video duration", _format_duration(video_duration_s))
+                    )
+                if frames > 0 and elapsed and elapsed > 0:
+                    throughput_fps = frames / elapsed
+                    summary_items.append(("Processing speed", f"{throughput_fps:.1f} fps"))
+                    if fps_original > 0:
+                        realtime_factor = throughput_fps / fps_original
+                        summary_items.append(
+                            ("Vs playback", f"{realtime_factor:.1f}× video speed")
+                        )
+
+            if summary_items:
+                cols = st.columns(min(4, len(summary_items)))
+                for idx, (label, value) in enumerate(summary_items):
+                    with cols[idx % len(cols)]:
+                        st.metric(label, value)

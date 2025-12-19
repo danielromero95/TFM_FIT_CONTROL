@@ -111,6 +111,8 @@ def _running_step() -> None:
             state.overlay_video_download_path = None
             state.progress_value_from_cb = 0
             state.phase_text_from_cb = phase_for(0, debug_enabled=debug_enabled)
+            state.analysis_started_at = time.time()
+            state.analysis_completed_at = None
             # Asegura que el estado de preview arranca deshabilitado
             state.preview_enabled = False
             state.preview_frame_count = 0
@@ -495,6 +497,7 @@ def _running_step() -> None:
         finally:
             _drain_progress_queue()
             state = get_state()
+            state.analysis_completed_at = time.time()
             state.run_id = None
             if state.analysis_future is current_future:
                 state.analysis_future = None
