@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.metrics_catalog import human_metric_name, metric_base_description
+from src.ui.metrics_catalog import metric_base_description
 from src.ui.state import CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step, get_state, go_to
 from src.ui.steps.detect import EXERCISE_TO_CONFIG
 from ..utils import step_container
@@ -84,8 +84,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             )
 
         if chosen_primary:
-            primary_label = human_metric_name(chosen_primary)
-            st.caption(f"Primary angle used for rep counting: **{primary_label}**")
+            st.caption(f"Primary angle used for rep counting: **{chosen_primary}**")
             primary_desc = metric_base_description(chosen_primary, exercise_label)
             if primary_desc:
                 st.caption(primary_desc)
