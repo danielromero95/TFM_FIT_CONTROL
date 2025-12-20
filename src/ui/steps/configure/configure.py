@@ -25,7 +25,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = CONFIG_DEFAULTS.copy()
         else:
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
-        cfg_values.pop("target_fps", None)
         cfg_values["use_crop"] = True
 
         col1, col2 = st.columns(2)
@@ -100,12 +99,46 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             key="cfg_debug_video",
         )
 
+        col_fps, col_complexity = st.columns(2)
+        with col_fps:
+            target_fps = st.number_input(
+                "Target FPS",
+                min_value=1,
+                max_value=60,
+                value=int(cfg_values.get("target_fps", CONFIG_DEFAULTS["target_fps"])),
+                disabled=disabled,
+                key="cfg_target_fps",
+                help=(
+                    "Frames per second used during processing. Lower values reduce processing time"
+                    " while higher values capture more motion detail but may take longer."
+                ),
+            )
+        with col_complexity:
+            complexity_options = [0, 1, 2]
+            stored_complexity = int(
+                cfg_values.get("model_complexity", CONFIG_DEFAULTS["model_complexity"])
+            )
+            selected_index = complexity_options.index(stored_complexity) if stored_complexity in complexity_options else 0
+            model_complexity = st.selectbox(
+                "Pose model complexity",
+                options=complexity_options,
+                index=selected_index,
+                disabled=disabled,
+                key="cfg_model_complexity",
+                help=(
+                    "0 = fastest with lower accuracy, 1 = balanced, 2 = most accurate but heavier."
+                    " Higher complexity improves pose quality at the cost of speed."
+                ),
+            )
+
         current_values = {
             "low": float(low),
             "high": float(high),
             "primary_angle": "auto",
             "debug_video": bool(debug_video),
             "use_crop": True,
+            "target_fps": float(target_fps),
+            "model_complexity": int(model_complexity),
         }
         if not disabled:
             state.configure_values = current_values

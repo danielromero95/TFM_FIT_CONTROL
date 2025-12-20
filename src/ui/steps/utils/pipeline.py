@@ -62,6 +62,10 @@ def prepare_pipeline_inputs(
 
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
+    cfg.video.target_fps = float(cfg_values.get("target_fps", CONFIG_DEFAULTS["target_fps"]))
+    cfg.pose.model_complexity = int(
+        cfg_values.get("model_complexity", CONFIG_DEFAULTS["model_complexity"])
+    )
     # Siempre ejecutamos en modo auto para que el pipeline elija el ángulo ideal.
     cfg.counting.primary_angle = "auto"
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
