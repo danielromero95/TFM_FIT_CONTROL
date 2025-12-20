@@ -483,6 +483,7 @@ def _results_panel() -> Dict[str, bool]:
         st.markdown("### 5. Results")
         st.markdown('<div class="results-panel">', unsafe_allow_html=True)
 
+        # Maintain a stable action payload shape even without rendering the buttons
         actions: Dict[str, bool] = {"adjust": False, "reset": False}
 
         state = get_state()
@@ -670,7 +671,7 @@ def _results_panel() -> Dict[str, bool]:
                 debug_path = Path(debug_video_path)
                 has_overlay = bool(overlay_stream_path or overlay_raw_path)
                 download_label = (
-                    "Download landmark overlay video"
+                    "📹 Download landmark overlay video"
                     if has_overlay
                     else "Download debug video"
                 )
@@ -686,6 +687,7 @@ def _results_panel() -> Dict[str, bool]:
                         data=debug_bytes,
                         file_name=debug_path.name,
                         mime="video/mp4",
+                        use_container_width=True,
                     )
 
             if state.metrics_path is not None:
@@ -708,20 +710,6 @@ def _results_panel() -> Dict[str, bool]:
 
         else:
             st.info("No results found to display.")
-
-        adjust_col, reset_col = st.columns(2)
-        with adjust_col:
-            st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
-            adjust_clicked = st.button("Adjust configuration and re-run", key="results_adjust")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if adjust_clicked:
-                actions["adjust"] = True
-        with reset_col:
-            st.markdown('<div class="btn--back">', unsafe_allow_html=True)
-            reset_clicked = st.button("Back to start", key="results_reset")
-            st.markdown('</div>', unsafe_allow_html=True)
-            if reset_clicked:
-                actions["reset"] = True
 
         st.markdown("</div>", unsafe_allow_html=True)
 
