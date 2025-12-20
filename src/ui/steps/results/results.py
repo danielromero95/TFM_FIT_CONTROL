@@ -135,7 +135,7 @@ def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
 
         .run-param-label {
             font-size: 13px;
-            color: rgba(49, 51, 63, 0.7);
+            color: rgba(255, 255, 255, 0.7);
             font-weight: 600;
             margin-bottom: 2px;
         }
@@ -143,7 +143,7 @@ def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
         .run-param-value {
             font-size: 22px;
             font-weight: 700;
-            color: rgba(49, 51, 63, 0.9);
+            color: rgba(255, 255, 255, 0.9);
             line-height: 1.2;
         }
         </style>
