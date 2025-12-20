@@ -11,6 +11,7 @@ from src.config.settings import (
     DEFAULT_GENERATE_VIDEO,
     DEFAULT_PREVIEW_FPS,
     DEFAULT_USE_CROP,
+    MODEL_COMPLEXITY,
     SQUAT_HIGH_THRESH,
     SQUAT_LOW_THRESH,
 )
@@ -33,6 +34,8 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "primary_angle": "auto",
     "debug_video": bool(DEFAULT_GENERATE_VIDEO),
     "use_crop": bool(DEFAULT_USE_CROP),
+    "target_fps": 10.0,
+    "model_complexity": int(MODEL_COMPLEXITY),
 }
 
 
