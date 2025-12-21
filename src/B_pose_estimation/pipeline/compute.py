@@ -163,10 +163,6 @@ def calculate_metrics_from_sequence(
     preferred_mask = quality_mask if quality_mask is not None else getattr(sequence, "quality_mask", None)
     valid_mask = _normalize_mask(preferred_mask)
 
-    raw_angles = dfm[ANGLE_COLUMNS].copy()
-    for column in ANGLE_COLUMNS:
-        dfm[f"raw_{column}"] = np.where(valid_mask, raw_angles[column], np.nan)
-
     window_seconds = ANALYSIS_SAVGOL_WINDOW_SEC if smooth_window is None else max(smooth_window / max(fps, 1e-6), 0.0)
     polyorder = ANALYSIS_SAVGOL_POLYORDER if sg_poly is None else sg_poly
     smoothing_meta: Dict[str, float | int | str | None] = {
@@ -197,8 +193,8 @@ def calculate_metrics_from_sequence(
     dfm.attrs["smoothing"] = smoothing_meta
 
     def _symmetry(col_left: str, col_right: str) -> np.ndarray:
-        L = raw_angles[col_left].to_numpy()
-        R = raw_angles[col_right].to_numpy()
+        L = dfm[col_left].to_numpy()
+        R = dfm[col_right].to_numpy()
         max_lr = np.maximum(np.abs(L), np.abs(R))
         nan_mask = ~np.isfinite(L) | ~np.isfinite(R)
         both_zero = max_lr == 0
