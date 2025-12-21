@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
+import io
 import json
 import math
+import zipfile
+from dataclasses import fields
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -96,6 +101,66 @@ def _format_run_duration(duration_ms: float | None) -> str | None:
     if minutes >= 1:
         return f"{int(minutes)}m {seconds:0.1f}s"
     return f"{seconds_total:0.1f}s"
+
+
+def _serialize_stat_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _serialize_stats(stats: RunStats) -> Dict[str, object]:
+    serialized: Dict[str, object] = {}
+    for field in fields(stats):
+        serialized[field.name] = _serialize_stat_value(getattr(stats, field.name))
+    return serialized
+
+
+def _build_debug_report_bundle(
+    *,
+    report: Report,
+    stats_df: pd.DataFrame,
+    metrics_df: pd.DataFrame | None,
+    metrics_csv: str | None,
+    effective_config_bytes: bytes | None,
+    video_name: str | None,
+) -> bytes:
+    """Package run data, config, and metrics into a portable debug report."""
+
+    bundle = io.BytesIO()
+    generated_at = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    effective_config = effective_config_bytes
+    if effective_config is None:
+        effective_config = json.dumps(
+            report.config_used.to_serializable_dict(), indent=2, ensure_ascii=False
+        ).encode("utf-8")
+
+    payload: Dict[str, object] = {
+        "generated_at_utc": generated_at,
+        "video_name": video_name,
+        "stats": _serialize_stats(report.stats),
+        "warnings": list(report.stats.warnings),
+        "skip_reason": report.stats.skip_reason,
+        "debug_notes": getattr(report.stats, "debug_notes", []),
+        "config_sha1": report.stats.config_sha1,
+        "config_used": report.config_used.to_serializable_dict(),
+    }
+
+    if metrics_df is not None:
+        payload["metrics_preview"] = metrics_df.head(20).to_dict(orient="records")
+
+    with zipfile.ZipFile(bundle, "w") as zf:
+        zf.writestr("report.json", json.dumps(payload, indent=2, ensure_ascii=False))
+        zf.writestr("run_stats.csv", stats_df.to_csv(index=False))
+        if metrics_csv:
+            zf.writestr("metrics.csv", metrics_csv)
+        if effective_config:
+            zf.writestr("effective_config.json", effective_config)
+
+    bundle.seek(0)
+    return bundle.read()
 
 
 def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
@@ -648,18 +713,12 @@ def _results_panel() -> Dict[str, bool]:
                 st.error(f"Repetition counting skipped: {stats.skip_reason}")
 
             eff_path = getattr(report, "effective_config_path", None)
+            eff_bytes = None
             if eff_path:
                 try:
                     eff_bytes = Path(eff_path).read_bytes()
                 except Exception:
-                    pass
-                else:
-                    st.download_button(
-                        "Download effective config",
-                        data=eff_bytes,
-                        file_name=Path(eff_path).name,
-                        mime="application/json",
-                    )
+                    st.warning("Could not read effective config for the debug report.")
 
             with st.expander("Run statistics (optional)", expanded=False):
                 try:
@@ -690,8 +749,8 @@ def _results_panel() -> Dict[str, bool]:
                         use_container_width=True,
                     )
 
+            metrics_data: str | None = None
             if state.metrics_path is not None:
-                metrics_data = None
                 try:
                     metrics_data = Path(state.metrics_path).read_text(
                         encoding="utf-8"
@@ -700,13 +759,34 @@ def _results_panel() -> Dict[str, bool]:
                     st.error("The metrics file for download was not found.")
                 except OSError as exc:
                     st.error(f"Could not read metrics: {exc}")
-                else:
-                    st.download_button(
-                        "Download metrics",
-                        data=metrics_data,
-                        file_name=f"{Path(state.video_path).stem}_metrics.csv",
-                        mime="text/csv",
-                    )
+                
+            try:
+                report_bundle = _build_debug_report_bundle(
+                    report=report,
+                    stats_df=stats_df,
+                    metrics_df=metrics_df,
+                    metrics_csv=metrics_data,
+                    effective_config_bytes=eff_bytes,
+                    video_name=Path(state.video_path).name if state.video_path else None,
+                )
+            except Exception as exc:
+                st.error(f"Could not assemble debug report: {exc}")
+            else:
+                report_name = (
+                    f"{Path(state.video_path).stem}_report.zip"
+                    if state.video_path
+                    else "analysis_report.zip"
+                )
+                st.download_button(
+                    "Download report",
+                    data=report_bundle,
+                    file_name=report_name,
+                    mime="application/zip",
+                    help=(
+                        "Includes effective config, run statistics, warnings, and a"
+                        " metrics snapshot to help debug issues."
+                    ),
+                )
 
         else:
             st.info("No results found to display.")

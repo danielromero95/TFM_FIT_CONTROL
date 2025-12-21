@@ -42,6 +42,7 @@ class RunStats:
     min_distance_sec: float
     refractory_sec: float
     warnings: list[str] = field(default_factory=list)
+    debug_notes: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
     config_path: Optional[Path] = None
     # Tiempos por etapa (milisegundos). Opcional por compatibilidad retroactiva.
