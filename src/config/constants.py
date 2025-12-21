@@ -9,7 +9,6 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".mpg", ".mpeg", ".wmv"}
 # NOTA: usamos ``parents[2]`` porque este archivo vive en ``src/config/``.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
-DEFAULT_POSES_DIR = DEFAULT_OUTPUT_DIR / "poses"
 
 # --- CONSTANTES DEL PIPELINE ---
 # Apostamos por umbrales ligeramente más permisivos para maximizar la detección

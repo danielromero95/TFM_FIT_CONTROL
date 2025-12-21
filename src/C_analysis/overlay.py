@@ -19,7 +19,6 @@ import numpy as np
 from src.A_preprocessing.frame_extraction import extract_frames_stream
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.D_visualization import render_landmarks_video
-from src.D_visualization.landmark_video_io import make_web_safe_h264
 
 
 @dataclass(slots=True)
@@ -168,15 +167,8 @@ def generate_overlay_video(
         overlay_path.unlink(missing_ok=True)
         return None
 
-    # Se genera una copia en H.264 con extensión .mp4 para garantizar
-    # compatibilidad en navegadores y reproductores web.
-    web_safe = make_web_safe_h264(overlay_path)
-    stream_path = overlay_path
-    if web_safe.ok and web_safe.output_path is not None:
-        stream_path = web_safe.output_path
-
     return OverlayVideoResult(
         raw_path=overlay_path,
-        stream_path=stream_path,
-        web_safe_ok=web_safe.ok,
+        stream_path=overlay_path,
+        web_safe_ok=True,
     )

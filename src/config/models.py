@@ -8,12 +8,7 @@ import hashlib
 import json
 
 # Importa valores por defecto definidos en los módulos de configuración central.
-from .constants import (
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_POSES_DIR,
-    MIN_DETECTION_CONFIDENCE,
-    MIN_TRACKING_CONFIDENCE,
-)
+from .constants import DEFAULT_OUTPUT_DIR, MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from .settings import (
     DEFAULT_USE_CROP,
     DEFAULT_TARGET_WIDTH,
@@ -96,7 +91,6 @@ class DebugConfig:
 class OutputConfig:
     """Estructura de carpetas donde se guardan los artefactos generados."""
     base_dir: Path = DEFAULT_OUTPUT_DIR
-    poses_dir: Path = DEFAULT_POSES_DIR
 
 
 @dataclass
