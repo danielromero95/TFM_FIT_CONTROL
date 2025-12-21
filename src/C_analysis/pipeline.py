@@ -57,16 +57,15 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     """Crear las carpetas de salida necesarias para el análisis."""
 
     base_dir = Path(output_cfg.base_dir).expanduser().resolve()
-    counts_dir = Path(output_cfg.counts_dir).expanduser()
     poses_dir = Path(output_cfg.poses_dir).expanduser()
 
-    for path in {base_dir, counts_dir, poses_dir}:
+    for path in {base_dir, poses_dir}:
         path.mkdir(parents=True, exist_ok=True)
 
     session_dir = base_dir / video_path.stem
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    return OutputPaths(base_dir=base_dir, counts_dir=counts_dir, poses_dir=poses_dir, session_dir=session_dir)
+    return OutputPaths(base_dir=base_dir, poses_dir=poses_dir, session_dir=session_dir)
 
 
 def run_pipeline(

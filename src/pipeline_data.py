@@ -19,7 +19,6 @@ class OutputPaths:
     """Rutas de salida calculadas para una ejecución del pipeline."""
 
     base_dir: Path
-    counts_dir: Path
     poses_dir: Path
     session_dir: Path
 
