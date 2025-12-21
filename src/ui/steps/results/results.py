@@ -696,8 +696,8 @@ def _results_panel() -> Dict[str, bool]:
             stats_df = pd.DataFrame(stats_rows, columns=["Field", "Value"]).astype({"Value": "string"})
 
             if metrics_df is not None:
-                st.markdown("#### Calculated metrics")
-                st.dataframe(metrics_df, width="stretch")
+                with st.expander("Calculated metrics", expanded=False):
+                    st.dataframe(metrics_df, width="stretch")
 
             if stats.warnings:
                 st.warning("\n".join(f"• {msg}" for msg in stats.warnings))
@@ -771,7 +771,7 @@ def _results_panel() -> Dict[str, bool]:
                     else "analysis_report.zip"
                 )
                 st.download_button(
-                    "Download report",
+                    "📑 Download report",
                     data=report_bundle,
                     file_name=report_name,
                     mime="application/zip",
@@ -779,6 +779,7 @@ def _results_panel() -> Dict[str, bool]:
                         "Includes effective config, run statistics, warnings, and a"
                         " metrics snapshot to help debug issues."
                     ),
+                    use_container_width=True,
                 )
 
         else:
