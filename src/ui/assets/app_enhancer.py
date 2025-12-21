@@ -28,12 +28,17 @@ _APP_ENHANCER_TEMPLATE = """
     function ensureToolbarTitle(reattach = true) {
       const header = doc.querySelector('header[data-testid="stHeader"]');
       if (!header) { return false; }
-      let title = header.querySelector('.app-toolbar-title');
+
+      const toolbar = header.querySelector('[data-testid="stToolbar"]');
+      const host = toolbar || header;
+
+      let title = host.querySelector('.app-toolbar-title');
       if (!title) {
         title = doc.createElement('div');
         title.className = 'app-toolbar-title';
-        header.insertBefore(title, header.firstChild);
+        host.insertBefore(title, host.firstChild);
       }
+
       if (title.textContent !== TITLE) { title.textContent = TITLE; }
       if (reattach) { attachHeaderObserver(); }
       return true;
@@ -51,7 +56,7 @@ _APP_ENHANCER_TEMPLATE = """
       const header = doc.querySelector('header[data-testid="stHeader"]');
       if (!header) { headerObserver.disconnect(); return false; }
       headerObserver.disconnect();
-      headerObserver.observe(header, { childList: true });
+      headerObserver.observe(header, { childList: true, subtree: true });
       return true;
     }
 

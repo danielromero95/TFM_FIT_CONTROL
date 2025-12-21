@@ -2,7 +2,7 @@
 from pathlib import Path
 
 # --- CONFIGURACIÓN GENERAL ---
-APP_NAME = "Gym Performance Analyzer"
+APP_NAME = "FIT CONTROL"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".mpg", ".mpeg", ".wmv"}
 
 # --- RUTAS DE ARCHIVOS ---
