@@ -104,7 +104,6 @@ def _running_step() -> None:
 
             state.pipeline_error = None
             state.report = None
-            state.count_path = None
             state.metrics_path = None
             state.cfg_fingerprint = None
             state.overlay_video_stream_path = None
@@ -203,7 +202,6 @@ def _running_step() -> None:
                         )
                 if state.run_id is None:
                     state.report = None
-                    state.count_path = None
                     state.metrics_path = None
                     state.cfg_fingerprint = None
                     state.overlay_video_stream_path = None
@@ -254,7 +252,6 @@ def _running_step() -> None:
                 latest_phase = "Canceled"
                 state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
-                state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
                 state.overlay_video_stream_path = None
@@ -295,7 +292,6 @@ def _running_step() -> None:
                 latest_phase = "Canceled"
                 state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
-                state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
                 state.overlay_video_stream_path = None
@@ -323,7 +319,6 @@ def _running_step() -> None:
                 latest_phase = "Canceled"
                 state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
-                state.count_path = None
                 state.metrics_path = None
                 state.cfg_fingerprint = None
                 state.overlay_video_stream_path = None
@@ -416,10 +411,8 @@ def _running_step() -> None:
             file_errors: list[str] = []
             video_path = state.video_path
             if video_path:
-                counts_dir = Path(report.config_used.output.counts_dir)
                 poses_dir = Path(report.config_used.output.poses_dir)
                 try:
-                    counts_dir.mkdir(parents=True, exist_ok=True)
                     poses_dir.mkdir(parents=True, exist_ok=True)
                 except OSError as io_exc:
                     file_errors.append(
@@ -427,17 +420,6 @@ def _running_step() -> None:
                     )
 
                 video_stem = Path(video_path).stem
-                try:
-                    count_path = counts_dir / f"{video_stem}_count.txt"
-                    count_path.write_text(
-                        f"{report.repetitions}\n", encoding="utf-8"
-                    )
-                    state.count_path = str(count_path)
-                except OSError as io_exc:
-                    state.count_path = None
-                    file_errors.append(
-                        f"Could not write repetition count: {io_exc}"
-                    )
 
                 metrics_df = report.metrics
                 if metrics_df is not None:
@@ -451,7 +433,6 @@ def _running_step() -> None:
                 else:
                     state.metrics_path = None
             else:
-                state.count_path = None
                 state.metrics_path = None
 
             latest_progress = 100
@@ -482,7 +463,6 @@ def _running_step() -> None:
         except Exception as exc:
             state.pipeline_error = f"Error in analysis thread: {exc}"
             state.report = None
-            state.count_path = None
             state.metrics_path = None
             state.cfg_fingerprint = None
             state.overlay_video_stream_path = None

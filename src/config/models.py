@@ -10,7 +10,6 @@ import json
 # Importa valores por defecto definidos en los módulos de configuración central.
 from .constants import (
     DEFAULT_OUTPUT_DIR,
-    DEFAULT_COUNTS_DIR,
     DEFAULT_POSES_DIR,
     MIN_DETECTION_CONFIDENCE,
     MIN_TRACKING_CONFIDENCE,
@@ -97,7 +96,6 @@ class DebugConfig:
 class OutputConfig:
     """Estructura de carpetas donde se guardan los artefactos generados."""
     base_dir: Path = DEFAULT_OUTPUT_DIR
-    counts_dir: Path = DEFAULT_COUNTS_DIR
     poses_dir: Path = DEFAULT_POSES_DIR
 
 

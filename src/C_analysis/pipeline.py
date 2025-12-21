@@ -57,16 +57,15 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     """Crear las carpetas de salida necesarias para el análisis."""
 
     base_dir = Path(output_cfg.base_dir).expanduser().resolve()
-    counts_dir = Path(output_cfg.counts_dir).expanduser()
     poses_dir = Path(output_cfg.poses_dir).expanduser()
 
-    for path in {base_dir, counts_dir, poses_dir}:
+    for path in {base_dir, poses_dir}:
         path.mkdir(parents=True, exist_ok=True)
 
     session_dir = base_dir / video_path.stem
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    return OutputPaths(base_dir=base_dir, counts_dir=counts_dir, poses_dir=poses_dir, session_dir=session_dir)
+    return OutputPaths(base_dir=base_dir, poses_dir=poses_dir, session_dir=session_dir)
 
 
 def run_pipeline(
@@ -101,6 +100,7 @@ def run_pipeline(
     manual_rotate = cfg.pose.rotate
     processing_rotate = normalize_rotation_deg(int(manual_rotate)) if manual_rotate is not None else 0
     warnings: list[str] = []
+    debug_notes: list[str] = []
     skip_reason: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     fps_effective = 0.0
@@ -434,9 +434,10 @@ def run_pipeline(
     cfg.counting.min_prominence = float(auto_params.min_prominence)
     cfg.counting.min_distance_sec = float(auto_params.min_distance_sec)
     cfg.counting.refractory_sec = float(auto_params.refractory_sec)
-    warnings.append(
-        "Auto-tuned: prominence ≥ "
-        f"{auto_params.min_prominence:.1f}°  ·  min distance = {auto_params.min_distance_sec:.2f}s  ·  refractory = {auto_params.refractory_sec:.2f}s."
+    debug_notes.append(
+        "Auto-tuned thresholds "
+        f"→ prominence ≥ {auto_params.min_prominence:.1f}°, min distance = {auto_params.min_distance_sec:.2f}s, "
+        f"refractory = {auto_params.refractory_sec:.2f}s."
     )
     logger.info(
         "COUNT AUTO-TUNE: exercise=%s primary=%s -> prominence=%.1f° distance=%.2fs refractory=%.2fs",
@@ -525,6 +526,7 @@ def run_pipeline(
         min_distance_sec=float(cfg.counting.min_distance_sec),
         refractory_sec=float(cfg.counting.refractory_sec),
         warnings=warnings,
+        debug_notes=debug_notes,
         skip_reason=skip_reason,
         config_path=config_path,
         t_extract_ms=float(extract_ms),
