@@ -158,7 +158,7 @@ def _build_debug_report_bundle(
     return bundle.read()
 
 
-def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
+def _run_parameters(stats: RunStats) -> List[Tuple[str, str, str | None]]:
     """Build a compact list of run parameters to highlight in the UI."""
 
     def _as_label(value: object | None) -> str:
@@ -167,24 +167,30 @@ def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
         label = getattr(value, "value", value)
         return str(label)
 
-    params: List[Tuple[str, str]] = []
+    params: List[Tuple[str, str, str | None]] = []
 
     duration = _format_run_duration(getattr(stats, "t_total_ms", None))
     if duration:
-        params.append(("Analysis time", duration))
+        params.append(("Analysis time", duration, None))
 
     frames = getattr(stats, "frames", 0) or 0
     if frames > 0:
-        params.append(("Frames analyzed", f"{frames:,}"))
+        params.append(("Frames analyzed", f"{frames:,}", None))
 
     confidence = getattr(stats, "detection_confidence", 0.0) or 0.0
     if confidence > 0:
-        params.append(("Detection confidence", f"{confidence * 100:.0f}%"))
+        params.append(
+            (
+                "Detection confidence",
+                f"{confidence * 100:.0f}%",
+                "Average likelihood that the person was detected in each frame. Higher values indicate more reliable pose estimation.",
+            )
+        )
 
     return params
 
 
-def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
+def _render_run_parameters(params: List[Tuple[str, str, str | None]]) -> None:
     st.markdown(
         """
         <style>
@@ -212,12 +218,13 @@ def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
     )
 
     cols = st.columns(min(3, len(params)))
-    for idx, (label, value) in enumerate(params):
+    for idx, (label, value, help_text) in enumerate(params):
         with cols[idx % len(cols)]:
+            tooltip_attr = f' title="{help_text}"' if help_text else ""
             st.markdown(
                 f"""
                 <div class="run-param-card">
-                    <div class="run-param-label">{label}</div>
+                    <div class="run-param-label"{tooltip_attr}>{label}</div>
                     <div class="run-param-value">{value}</div>
                 </div>
                 """,
