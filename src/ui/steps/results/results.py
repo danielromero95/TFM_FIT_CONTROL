@@ -67,12 +67,7 @@ def _build_metric_help(
         relation: str
         prefix = "PRIMARY — " if primary_metric and metric == primary_metric else ""
 
-        if metric.startswith("raw_"):
-            source_metric = metric[4:]
-            human_label = human_metric_name(source_metric)
-            base_desc = f"Raw (unfiltered) {human_label} values straight from pose detection."
-            relation = _counting_relation_text(source_metric, exercise, primary_metric, is_primary=False)
-        elif metric.startswith("ang_vel_"):
+        if metric.startswith("ang_vel_"):
             source_metric = metric[8:]
             human_label = human_metric_name(source_metric)
             base_desc = f"Angular velocity of the {human_label} in degrees per second."
@@ -565,16 +560,14 @@ def _results_panel() -> Dict[str, bool]:
                 metrics_df = metrics_df.reset_index(drop=True)
 
             numeric_columns: List[str] = []
-            raw_numeric_columns: List[str] = []
             if metrics_df is not None:
                 numeric_candidates = [
                     c
                     for c in metrics_df.columns
                     if metrics_df[c].dtype.kind in "fi" and c != "frame_idx"
                 ]
-                raw_numeric_columns = [c for c in numeric_candidates if c.startswith("raw_")]
-                numeric_columns = [c for c in numeric_candidates if not c.startswith("raw_")]
-            metric_options = numeric_columns + raw_numeric_columns
+                numeric_columns = numeric_candidates
+            metric_options = numeric_columns
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 

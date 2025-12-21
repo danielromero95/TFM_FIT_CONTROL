@@ -71,9 +71,7 @@ def choose_primary_angle(
         return None
 
     def series_for(col: str):
-        # Priorizamos columnas "raw" (sin suavizado) para medir cobertura real.
-        raw_name = f"raw_{col}"
-        base = df[raw_name] if raw_name in df.columns else df[col]
+        base = df[col]
         return pd.to_numeric(base, errors="coerce")
 
     def quality(col: str) -> tuple[float, float]:
@@ -106,8 +104,7 @@ def _trimmed_rom_deg(df: pd.DataFrame, col: str) -> float:
 
     if df is None or not col:
         return 0.0
-    raw = f"raw_{col}"
-    base = df[raw] if raw in df.columns else df[col] if col in df.columns else None
+    base = df[col] if col in df.columns else None
     if base is None:
         return 0.0
     series = pd.to_numeric(base, errors="coerce").dropna()
@@ -124,8 +121,7 @@ def _iqr_deg(df: pd.DataFrame, col: str) -> float | None:
 
     if df is None or not col:
         return None
-    raw = f"raw_{col}"
-    base = df[raw] if raw in df.columns else df[col] if col in df.columns else None
+    base = df[col] if col in df.columns else None
     if base is None:
         return None
     series = pd.to_numeric(base, errors="coerce").dropna()
@@ -165,13 +161,7 @@ def _estimate_cadence_period(
 
     if columns is None:
         # Usamos rodillas por defecto porque suelen tener buena señal y ROM.
-        columns = []
-        for base in ("left_knee", "right_knee"):
-            raw = f"raw_{base}"
-            if raw in df.columns:
-                columns.append(raw)
-            elif base in df.columns:
-                columns.append(base)
+        columns = [base for base in ("left_knee", "right_knee") if base in df.columns]
     else:
         columns = [col for col in columns if col in df.columns]
 

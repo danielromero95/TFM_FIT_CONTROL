@@ -96,8 +96,6 @@ def human_metric_name(metric: str) -> str:
 
     if metric in HUMAN_METRIC_NAMES:
         return HUMAN_METRIC_NAMES[metric]
-    if metric.startswith("raw_"):
-        return f"raw {metric[4:].replace('_', ' ')}"
     if metric.startswith("ang_vel_"):
         return f"angular velocity of {metric[8:].replace('_', ' ')}"
     return metric.replace("_", " ")
