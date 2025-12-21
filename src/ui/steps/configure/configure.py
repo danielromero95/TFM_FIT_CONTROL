@@ -109,8 +109,8 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 disabled=disabled,
                 key="cfg_target_fps",
                 help=(
-                    "Frames per second used during processing. Lower values reduce processing time"
-                    " while higher values capture more motion detail but may take longer."
+                    "Frames per second used during processing.<br/>"
+                    "Lower values reduce processing time while higher values capture more motion detail but may take longer."
                 ),
             )
         with col_complexity:
@@ -126,8 +126,10 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 disabled=disabled,
                 key="cfg_model_complexity",
                 help=(
-                    "0 = fastest with lower accuracy, 1 = balanced, 2 = most accurate but heavier."
-                    " Higher complexity improves pose quality at the cost of speed."
+                    "Higher complexity improves pose quality at the cost of speed.<br/>"
+                    "0 = fastest with lower accuracy<br/>"
+                    "1 = balanced<br/>"
+                    "2 = most accurate but heavier"
                 ),
             )
 

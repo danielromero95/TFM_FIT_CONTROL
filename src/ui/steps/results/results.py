@@ -9,6 +9,7 @@ import math
 import zipfile
 from dataclasses import fields
 from enum import Enum
+from html import escape
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -211,13 +212,19 @@ def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
         unsafe_allow_html=True,
     )
 
+    help_by_label = {
+        "Detection confidence": "Probability that the person was detected in each frame. Higher values indicate more reliable pose estimation.",
+    }
+
     cols = st.columns(min(3, len(params)))
     for idx, (label, value) in enumerate(params):
+        help_text = help_by_label.get(label)
+        display_label = f"<span title='{escape(help_text)}'>{label}</span>" if help_text else label
         with cols[idx % len(cols)]:
             st.markdown(
                 f"""
                 <div class="run-param-card">
-                    <div class="run-param-label">{label}</div>
+                    <div class="run-param-label">{display_label}</div>
                     <div class="run-param-value">{value}</div>
                 </div>
                 """,
