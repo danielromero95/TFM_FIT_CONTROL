@@ -68,6 +68,21 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     return OutputPaths(base_dir=base_dir, poses_dir=poses_dir, session_dir=session_dir)
 
 
+def _write_used_config(session_dir: Path, cfg: config.Config) -> Path:
+    """Persistir la configuración efectiva utilizada en el análisis.
+
+    Se omite la sección ``output`` para evitar exponer rutas locales de usuario.
+    """
+
+    used_config_path = session_dir / "config_used.json"
+    used_cfg_dict = cfg.to_serializable_dict()
+    used_cfg_dict.pop("output", None)
+    used_config_path.write_text(
+        json.dumps(used_cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return used_config_path
+
+
 def run_pipeline(
     video_path: str,
     cfg: config.Config,
@@ -87,11 +102,6 @@ def run_pipeline(
     logger.info("CONFIG_SHA1=%s", config_sha1)
 
     output_paths = _prepare_output_paths(Path(video_path), cfg.output)
-    config_path = output_paths.session_dir / "config_used.json"
-    config_path.write_text(
-        json.dumps(cfg.to_serializable_dict(), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
 
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
@@ -496,11 +506,7 @@ def run_pipeline(
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
         df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
-    effective_config_path = output_paths.session_dir / "config_effective.json"
-    effective_cfg_dict = cfg.to_serializable_dict()
-    effective_config_path.write_text(
-        json.dumps(effective_cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    _write_used_config(output_paths.session_dir, cfg)
 
     notify(100, "PIPELINE COMPLETED")
     t5 = time.perf_counter()

@@ -1,6 +1,11 @@
 """Paquete que agrupa la lógica modularizada del servicio de análisis."""
 
-from .pipeline import _prepare_output_paths, run_full_pipeline_in_memory, run_pipeline
+from .pipeline import (
+    _prepare_output_paths,
+    _write_used_config,
+    run_full_pipeline_in_memory,
+    run_pipeline,
+)
 from .repetition_counter import CountingDebugInfo, count_repetitions_with_config
 from .sampling import (
     SamplingPlan,
@@ -15,6 +20,7 @@ __all__ = [
     "run_pipeline",
     "run_full_pipeline_in_memory",
     "_prepare_output_paths",
+    "_write_used_config",
     "SamplingPlan",
     "make_sampling_plan",
     "compute_sample_rate",

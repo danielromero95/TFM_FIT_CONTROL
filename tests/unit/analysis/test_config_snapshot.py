@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import json
 from types import ModuleType
 from typing import Any
 
@@ -99,7 +100,7 @@ if "scipy" not in sys.modules:
     sys.modules["scipy.signal"] = fake_signal
 
 from src import config
-from src.C_analysis import _prepare_output_paths
+from src.C_analysis import _prepare_output_paths, _write_used_config
 
 
 def test_config_snapshot_uses_session_directory(tmp_path) -> None:
@@ -119,3 +120,19 @@ def test_config_snapshot_uses_session_directory(tmp_path) -> None:
     assert config_path == expected_path
     assert config_path.parent == output_paths.session_dir
     assert config_path != output_paths.base_dir / "config_used.json"
+
+
+def test_config_snapshot_strips_output_section(tmp_path) -> None:
+    cfg = config.Config()
+
+    base_dir = tmp_path / "outputs"
+    cfg.output.base_dir = base_dir
+    cfg.output.poses_dir = base_dir / "poses"
+
+    video_path = tmp_path / "sample_video.mp4"
+    output_paths = _prepare_output_paths(video_path, cfg.output)
+
+    written_path = _write_used_config(output_paths.session_dir, cfg)
+
+    saved_config = json.loads(written_path.read_text(encoding="utf-8"))
+    assert "output" not in saved_config
