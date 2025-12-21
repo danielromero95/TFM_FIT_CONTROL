@@ -61,6 +61,7 @@ class Report:
     metrics: Optional["pd.DataFrame"]
     stats: RunStats
     config_used: config.Config
+    metrics_path: Optional[Path] = None
     debug_video_path: Optional[Path] = None
     overlay_video_path: Optional[Path] = None
     overlay_video_stream_path: Optional[Path] = None
