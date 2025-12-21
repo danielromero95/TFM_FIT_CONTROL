@@ -538,6 +538,35 @@ def _compute_rep_intervals(
     return intervals
 
 
+def _compute_rep_speeds(
+    rep_intervals: List[Tuple[int, int]], stats: RunStats
+) -> pd.DataFrame:
+    """Estimate per-rep cadence and duration from frame intervals."""
+
+    if not rep_intervals:
+        return pd.DataFrame()
+
+    fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
+    fps = fps if fps > 0 else 1.0
+
+    rows: List[Dict[str, float]] = []
+    for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
+        span_frames = max(1, end_frame - start_frame)
+        duration_s = span_frames / fps
+        cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
+        rows.append(
+            {
+                "Repetition": i,
+                "Start frame": float(start_frame),
+                "End frame": float(end_frame),
+                "Duration (s)": duration_s,
+                "Cadence (reps/min)": cadence_rps * 60.0,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def _results_panel() -> Dict[str, bool]:
     with step_container("results"):
         st.markdown("### 5. Results")
@@ -568,6 +597,7 @@ def _results_panel() -> Dict[str, bool]:
                 ]
                 numeric_columns = numeric_candidates
             metric_options = numeric_columns
+            rep_intervals: List[Tuple[int, int]] = []
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
@@ -583,6 +613,12 @@ def _results_panel() -> Dict[str, bool]:
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
+                rep_intervals = _compute_rep_intervals(
+                    metrics_df=metrics_df,
+                    report=report,
+                    stats=stats,
+                    numeric_columns=(numeric_columns if numeric_columns else metric_options),
+                )
                 if metric_options:
                     # Prefer exercise-specific metrics for defaults
                     ex = getattr(stats, "exercise_detected", "")
@@ -626,12 +662,6 @@ def _results_panel() -> Dict[str, bool]:
                         _emit_metric_help_assets()
                         _emit_metric_help_script(widget_key, metric_help)
                     if selected_metrics:
-                        rep_intervals = _compute_rep_intervals(
-                            metrics_df=metrics_df,
-                            report=report,
-                            stats=stats,
-                            numeric_columns=(numeric_columns if numeric_columns else metric_options),
-                        )
                         cfg_vals = state.configure_values or {}
                         thresholds: List[float] = []
                         for key in ("low", "high"):
@@ -671,6 +701,18 @@ def _results_panel() -> Dict[str, bool]:
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.info("No metrics were generated for this run.")
+
+            rep_speeds_df = _compute_rep_speeds(rep_intervals, stats)
+            if not rep_speeds_df.empty:
+                st.markdown("#### Repetition speed")
+                st.bar_chart(
+                    rep_speeds_df.set_index("Repetition")["Cadence (reps/min)"],
+                    height=240,
+                )
+                st.caption(
+                    "Cadence is derived from rep durations using the effective frame rate."
+                )
+                st.dataframe(rep_speeds_df, use_container_width=True)
 
             stats_rows = [
                 {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
