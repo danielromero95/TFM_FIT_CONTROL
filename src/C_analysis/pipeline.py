@@ -100,6 +100,7 @@ def run_pipeline(
     warnings: list[str] = []
     debug_notes: list[str] = []
     skip_reason: Optional[str] = None
+    counting_accuracy_warning: Optional[str] = None
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     fps_effective = 0.0
     sample_rate = 1
@@ -290,12 +291,11 @@ def run_pipeline(
         warnings.append(skip_reason)
     if fps_effective < cfg.video.min_fps:
         message = (
-            f"Effective FPS {fps_effective:.2f} below the minimum ({cfg.video.min_fps}). "
-            "Skipping repetition counting."
+            f"Effective FPS {fps_effective:.2f} below the recommended minimum "
+            f"({cfg.video.min_fps}). Repetition counting accuracy may be affected."
         )
         warnings.append(message)
-        if skip_reason is None:
-            skip_reason = message
+        counting_accuracy_warning = message
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
@@ -521,6 +521,7 @@ def run_pipeline(
         min_prominence=float(cfg.counting.min_prominence),
         min_distance_sec=float(cfg.counting.min_distance_sec),
         refractory_sec=float(cfg.counting.refractory_sec),
+        counting_accuracy_warning=counting_accuracy_warning,
         warnings=warnings,
         debug_notes=debug_notes,
         skip_reason=skip_reason,

@@ -601,6 +601,9 @@ def _results_panel() -> Dict[str, bool]:
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
+            if stats.counting_accuracy_warning:
+                st.warning(stats.counting_accuracy_warning)
+
             if state.preview_enabled:
                 st.info("El vídeo con landmarks se visualizó durante el análisis.")
 
