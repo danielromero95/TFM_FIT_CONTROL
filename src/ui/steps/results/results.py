@@ -121,13 +121,21 @@ def _serialize_stats(stats: RunStats) -> Dict[str, object]:
 def _build_debug_report_bundle(
     *,
     report: Report,
+    stats_df: pd.DataFrame,
+    metrics_df: pd.DataFrame | None,
     metrics_csv: str | None,
+    effective_config_bytes: bytes | None,
     video_name: str | None,
 ) -> bytes:
     """Package run data, config, and metrics into a portable debug report."""
 
     bundle = io.BytesIO()
     generated_at = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    effective_config = effective_config_bytes
+    if effective_config is None:
+        effective_config = json.dumps(
+            report.config_used.to_serializable_dict(), indent=2, ensure_ascii=False
+        ).encode("utf-8")
 
     payload: Dict[str, object] = {
         "generated_at_utc": generated_at,
@@ -140,10 +148,16 @@ def _build_debug_report_bundle(
         "config_used": report.config_used.to_serializable_dict(),
     }
 
+    if metrics_df is not None:
+        payload["metrics_preview"] = metrics_df.head(20).to_dict(orient="records")
+
     with zipfile.ZipFile(bundle, "w") as zf:
         zf.writestr("report.json", json.dumps(payload, indent=2, ensure_ascii=False))
+        zf.writestr("run_stats.csv", stats_df.to_csv(index=False))
         if metrics_csv:
             zf.writestr("metrics.csv", metrics_csv)
+        if effective_config:
+            zf.writestr("effective_config.json", effective_config)
 
     bundle.seek(0)
     return bundle.read()
@@ -698,6 +712,14 @@ def _results_panel() -> Dict[str, bool]:
             if stats.skip_reason:
                 st.error(f"Repetition counting skipped: {stats.skip_reason}")
 
+            eff_path = getattr(report, "effective_config_path", None)
+            eff_bytes = None
+            if eff_path:
+                try:
+                    eff_bytes = Path(eff_path).read_bytes()
+                except Exception:
+                    st.warning("Could not read effective config for the debug report.")
+
             with st.expander("Run statistics (optional)", expanded=False):
                 try:
                     st.dataframe(stats_df, width="stretch")
@@ -741,7 +763,10 @@ def _results_panel() -> Dict[str, bool]:
             try:
                 report_bundle = _build_debug_report_bundle(
                     report=report,
+                    stats_df=stats_df,
+                    metrics_df=metrics_df,
                     metrics_csv=metrics_data,
+                    effective_config_bytes=eff_bytes,
                     video_name=Path(state.video_path).name if state.video_path else None,
                 )
             except Exception as exc:
@@ -758,8 +783,8 @@ def _results_panel() -> Dict[str, bool]:
                     file_name=report_name,
                     mime="application/zip",
                     help=(
-                        "Includes a concise report.json plus metrics.csv (if present)"
-                        " to help troubleshoot analysis runs without duplicate files."
+                        "Includes effective config, run statistics, warnings, and a"
+                        " metrics snapshot to help debug issues."
                     ),
                 )
 
