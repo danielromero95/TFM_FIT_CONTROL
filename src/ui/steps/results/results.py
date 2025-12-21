@@ -713,7 +713,7 @@ def _results_panel() -> Dict[str, bool]:
                 except Exception:
                     st.warning("Could not read effective config for the debug report.")
 
-            with st.expander("Run statistics (optional)", expanded=False):
+            with st.expander("Run statistics", expanded=False):
                 try:
                     st.dataframe(stats_df, width="stretch")
                 except Exception:
