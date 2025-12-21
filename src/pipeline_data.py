@@ -39,6 +39,7 @@ class RunStats:
     min_prominence: float
     min_distance_sec: float
     refractory_sec: float
+    counting_accuracy_warning: Optional[str] = None
     warnings: list[str] = field(default_factory=list)
     debug_notes: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
