@@ -88,10 +88,7 @@ def run_pipeline(
 
     output_paths = _prepare_output_paths(Path(video_path), cfg.output)
     config_path = output_paths.session_dir / "config_used.json"
-    config_path.write_text(
-        json.dumps(cfg.to_serializable_dict(), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    metrics_path = output_paths.session_dir / "metrics.csv"
 
     t0 = time.perf_counter()
     notify(5, "STAGE 1: Extracting and rotating frames...")
@@ -494,11 +491,12 @@ def run_pipeline(
     if cfg.debug.debug_mode:
         logger.info("DEBUG MODE: Saving intermediate data...")
         df_raw_landmarks.to_csv(output_paths.session_dir / "1_raw_landmarks.csv", index=False)
-        df_metrics.to_csv(output_paths.session_dir / "2_metrics.csv", index=False)
 
-    effective_config_path = output_paths.session_dir / "config_effective.json"
+    df_metrics.to_csv(metrics_path, index=False)
+
     effective_cfg_dict = cfg.to_serializable_dict()
-    effective_config_path.write_text(
+    effective_cfg_dict.pop("output", None)
+    config_path.write_text(
         json.dumps(effective_cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
@@ -554,7 +552,8 @@ def run_pipeline(
         overlay_video_stream_path=overlay_video_stream_path,
         stats=stats,
         config_used=cfg,
-        effective_config_path=effective_config_path,
+        metrics_path=metrics_path,
+        effective_config_path=config_path,
     )
 
 

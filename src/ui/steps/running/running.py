@@ -410,28 +410,9 @@ def _running_step() -> None:
 
             file_errors: list[str] = []
             video_path = state.video_path
-            if video_path:
-                poses_dir = Path(report.config_used.output.poses_dir)
-                try:
-                    poses_dir.mkdir(parents=True, exist_ok=True)
-                except OSError as io_exc:
-                    file_errors.append(
-                        f"Could not prepare output directories: {io_exc}"
-                    )
-
-                video_stem = Path(video_path).stem
-
-                metrics_df = report.metrics
-                if metrics_df is not None:
-                    try:
-                        metrics_path = poses_dir / f"{video_stem}_metrics.csv"
-                        metrics_df.to_csv(metrics_path, index=False)
-                        state.metrics_path = str(metrics_path)
-                    except OSError as io_exc:
-                        state.metrics_path = None
-                        file_errors.append(f"Could not write metrics: {io_exc}")
-                else:
-                    state.metrics_path = None
+            metrics_path = getattr(report, "metrics_path", None)
+            if metrics_path and Path(metrics_path).exists():
+                state.metrics_path = str(metrics_path)
             else:
                 state.metrics_path = None
 
