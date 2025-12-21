@@ -107,15 +107,12 @@ def test_config_snapshot_uses_session_directory(tmp_path) -> None:
 
     base_dir = tmp_path / "outputs"
     cfg.output.base_dir = base_dir
-    cfg.output.counts_dir = base_dir / "counts"
-    cfg.output.poses_dir = base_dir / "poses"
 
     video_path = tmp_path / "sample_video.mp4"
     output_paths = _prepare_output_paths(video_path, cfg.output)
 
     config_path = output_paths.session_dir / "config_used.json"
-    expected_path = output_paths.base_dir / Path(video_path).stem / "config_used.json"
-
-    assert config_path == expected_path
+    assert config_path == output_paths.session_dir / "config_used.json"
     assert config_path.parent == output_paths.session_dir
-    assert config_path != output_paths.base_dir / "config_used.json"
+    assert config_path.parent.parent == output_paths.base_dir
+    assert Path(video_path).stem in output_paths.session_dir.name

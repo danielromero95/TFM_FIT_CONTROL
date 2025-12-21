@@ -14,7 +14,6 @@ def apply_settings(cfg: config.Config, settings: Dict[str, Any]) -> None:
     if "output_dir" in settings:
         base_dir = Path(settings["output_dir"]).expanduser()
         cfg.output.base_dir = base_dir
-        cfg.output.poses_dir = base_dir / "poses"
     if "sample_rate" in settings:
         cfg.video.manual_sample_rate = int(settings["sample_rate"])
     if "rotate" in settings:

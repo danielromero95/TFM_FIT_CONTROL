@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
@@ -57,15 +58,15 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     """Crear las carpetas de salida necesarias para el análisis."""
 
     base_dir = Path(output_cfg.base_dir).expanduser().resolve()
-    poses_dir = Path(output_cfg.poses_dir).expanduser()
+    base_dir.mkdir(parents=True, exist_ok=True)
 
-    for path in {base_dir, poses_dir}:
-        path.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%d_%m_%Y-%H_%M")
+    session_name = f"{video_path.stem}-{timestamp}"
 
-    session_dir = base_dir / video_path.stem
+    session_dir = base_dir / session_name
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    return OutputPaths(base_dir=base_dir, poses_dir=poses_dir, session_dir=session_dir)
+    return OutputPaths(base_dir=base_dir, session_dir=session_dir)
 
 
 def run_pipeline(
@@ -246,11 +247,7 @@ def run_pipeline(
             cfg,
             detection_enabled=prefetched_detection is None,
             detection_source_fps=detection_source,
-            debug_video_path=(
-                output_paths.session_dir / f"{output_paths.session_dir.name}_debug_HQ.mp4"
-                if cfg.debug.generate_debug_video
-                else None
-            ),
+            debug_video_path=None,
             debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
             preview_callback=preview_cb_to_use,
             preview_fps=(
@@ -386,6 +383,7 @@ def run_pipeline(
                 if overlay_result is not None:
                     overlay_video_path = overlay_result.raw_path
                     overlay_video_stream_path = overlay_result.stream_path
+                    debug_video_path = overlay_video_path
                     logger.info(
                         "Overlay video generated at %s (web_safe=%s stream=%s)",
                         overlay_video_path,
