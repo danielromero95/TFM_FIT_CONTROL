@@ -709,10 +709,6 @@ def _results_panel() -> Dict[str, bool]:
                     rep_speeds_df.set_index("Repetition")["Cadence (reps/min)"],
                     height=240,
                 )
-                st.caption(
-                    "Cadence is derived from rep durations using the effective frame rate."
-                )
-                st.dataframe(rep_speeds_df, use_container_width=True)
 
             stats_rows = [
                 {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
