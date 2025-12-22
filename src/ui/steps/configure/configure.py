@@ -18,6 +18,27 @@ def _primary_candidates_for(ex_key: str) -> list[str]:
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     with step_container("configure"):
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stNumberInput"] > label,
+            div[data-testid="stSelectbox"] > label,
+            div[data-testid="stCheckbox"] > label {
+                justify-content: center;
+                text-align: center;
+                width: 100%;
+            }
+
+            div[data-testid="stNumberInput"] > label p,
+            div[data-testid="stSelectbox"] > label p,
+            div[data-testid="stCheckbox"] > label p {
+                text-align: center;
+                width: 100%;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown("### 3. Configure the analysis")
         state = get_state()
         stored_cfg = state.configure_values
