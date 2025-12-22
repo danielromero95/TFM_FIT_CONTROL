@@ -60,7 +60,7 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     base_dir = Path(output_cfg.base_dir).expanduser().resolve()
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%d_%m_%Y-%H_%M")
+    timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M")
     session_name = f"{video_path.stem}-{timestamp}"
 
     session_dir = base_dir / session_name

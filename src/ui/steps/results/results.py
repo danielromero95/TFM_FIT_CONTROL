@@ -114,6 +114,21 @@ def _serialize_stats(stats: RunStats) -> Dict[str, object]:
     return serialized
 
 
+def _session_name_from_paths(*candidates: object | None) -> str | None:
+    """Return the session directory name from the first valid candidate path."""
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parent = Path(candidate).expanduser().parent
+        except Exception:
+            continue
+        if parent and parent.name:
+            return parent.name
+    return None
+
+
 def _build_debug_report_bundle(
     *,
     report: Report,
@@ -848,11 +863,14 @@ def _results_panel() -> Dict[str, bool]:
             except Exception as exc:
                 st.error(f"Could not assemble debug report: {exc}")
             else:
-                report_name = (
-                    f"{Path(state.video_path).stem}_report.zip"
-                    if state.video_path
-                    else "analysis_report.zip"
+                report_name = _session_name_from_paths(
+                    state.metrics_path,
+                    getattr(report.stats, "config_path", None),
+                    getattr(report, "metrics_path", None),
                 )
+                if not report_name:
+                    report_name = Path(state.video_path).stem if state.video_path else None
+                report_name = f"{report_name}.zip" if report_name else "analysis_report.zip"
                 st.download_button(
                     "📑 Download report",
                     data=report_bundle,
