@@ -39,6 +39,9 @@ class RunStats:
     min_prominence: float
     min_distance_sec: float
     refractory_sec: float
+    reps_detected_raw: int = 0
+    reps_detected_final: int = 0
+    reps_rejected_threshold: int = 0
     counting_accuracy_warning: Optional[str] = None
     warnings: list[str] = field(default_factory=list)
     debug_notes: list[str] = field(default_factory=list)

@@ -18,7 +18,7 @@ from src import config
 from src.B_pose_estimation.pipeline import calculate_metrics_from_sequence, filter_and_interpolate_landmarks
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 
-from .repetition_counter import count_repetitions_with_config
+from .repetition_counter import CountingDebugInfo, count_repetitions_with_config
 
 logger = logging.getLogger(__name__)
 
@@ -334,16 +334,16 @@ def maybe_count_reps(
     skip_reason: Optional[str],
     *,
     overrides: Optional[dict[str, float]] = None,
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], CountingDebugInfo]:
     """Contar repeticiones a menos que exista una causa para omitir el conteo."""
 
     if skip_reason is not None:
-        return 0, []
+        return 0, [], CountingDebugInfo([], [])
 
     result, debug_info = count_repetitions_with_config(
-        df_metrics, cfg.counting, fps_effective, overrides=overrides
+        df_metrics, cfg.counting, fps_effective, faults_cfg=cfg.faults, overrides=overrides
     )
     stage_warnings: list[str] = []
     if result == 0 and not debug_info.valley_indices:
         stage_warnings.append("No repetitions were detected with the current parameters.")
-    return result, stage_warnings
+    return result, stage_warnings, debug_info

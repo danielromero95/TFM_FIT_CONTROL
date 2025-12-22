@@ -64,6 +64,8 @@ class CountingConfig:
     min_distance_sec: float = 0.5
     refractory_sec: float = 0.4
     min_angle_excursion_deg: float = 15.0
+    enforce_low_thresh: bool = False
+    enforce_high_thresh: bool = False
 
 
 @dataclass

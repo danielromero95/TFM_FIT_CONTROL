@@ -19,6 +19,7 @@ from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from .errors import NoFramesExtracted
+from .repetition_counter import CountingDebugInfo
 
 from .config_bridge import apply_settings
 from .metrics import (
@@ -469,18 +470,19 @@ def run_pipeline(
         "refractory_sec": float(auto_params.refractory_sec),
     }
     reps = 0
+    count_debug = CountingDebugInfo([], [])
     if chosen_primary and chosen_primary != cfg.counting.primary_angle:
         cfg.counting.primary_angle = chosen_primary
     if skip_reason is None:
         t4 = time.perf_counter()
         notify(90, "STAGE 5: Counting repetitions...")
-        reps, count_warnings = maybe_count_reps(
+        reps, count_warnings, count_debug = maybe_count_reps(
             df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
         )
         warnings.extend(count_warnings)
     else:
         notify(90, "STAGE 5: Counting skipped due to quality constraints.")
-        reps, count_warnings = maybe_count_reps(
+        reps, count_warnings, count_debug = maybe_count_reps(
             df_metrics, cfg, fps_effective, skip_reason, overrides=count_overrides
         )
         warnings.extend(count_warnings)
@@ -506,6 +508,11 @@ def run_pipeline(
     count_ms = (t5 - t4) * 1000 if "t4" in locals() else 0.0
     total_ms = (t5 - t0) * 1000
 
+    reps_final = reps if skip_reason is None else 0
+
+    if count_debug.rejection_reasons:
+        debug_notes.extend(count_debug.rejection_reasons)
+
     stats = RunStats(
         config_sha1=config_sha1,
         fps_original=float(fps_original),
@@ -520,6 +527,9 @@ def run_pipeline(
         min_prominence=float(cfg.counting.min_prominence),
         min_distance_sec=float(cfg.counting.min_distance_sec),
         refractory_sec=float(cfg.counting.refractory_sec),
+        reps_detected_raw=int(count_debug.raw_count or 0),
+        reps_detected_final=int(reps_final),
+        reps_rejected_threshold=int(count_debug.reps_rejected_threshold or 0),
         counting_accuracy_warning=counting_accuracy_warning,
         warnings=warnings,
         debug_notes=debug_notes,
@@ -543,7 +553,7 @@ def run_pipeline(
         total_ms,
     )
     return Report(
-        repetitions=reps if skip_reason is None else 0,
+        repetitions=reps_final,
         metrics=df_metrics,
         debug_video_path=debug_video_path,
         overlay_video_path=overlay_video_path,
