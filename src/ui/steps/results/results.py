@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -518,9 +519,9 @@ def _compute_rep_intervals(
     report: Report,
     stats: RunStats,
     numeric_columns: List[str],
-) -> List[Tuple[int, int]]:
+) -> Tuple[List[Tuple[int, int]], List[int], pd.Series, str | None]:
     if metrics_df.empty:
-        return []
+        return [], [], pd.Series(dtype=float), None
 
     fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
     fps = fps if fps > 0 else 1.0
@@ -533,7 +534,7 @@ def _compute_rep_intervals(
         frame_values = pd.Series(range(len(df)))
 
     if frame_values.empty:
-        return []
+        return [], [], frame_values, None
 
     first_frame = int(frame_values.iloc[0])
     last_frame = int(frame_values.iloc[-1]) if len(frame_values) > 1 else first_frame + 1
@@ -547,7 +548,7 @@ def _compute_rep_intervals(
     if not candidate or candidate not in df.columns:
         candidate = numeric_columns[0] if numeric_columns else None
     if not candidate or candidate not in df.columns:
-        return []
+        return [], [], frame_values, None
 
     valley_indices: List[int] = []
     config_used = getattr(report, "config_used", None)
@@ -582,7 +583,7 @@ def _compute_rep_intervals(
                 valley_indices = filtered
 
     if not valley_indices:
-        return []
+        return [], [], frame_values, candidate
 
     frame_count = len(frame_values)
     valley_frames = []
@@ -592,7 +593,7 @@ def _compute_rep_intervals(
 
     valley_frames = sorted(set(valley_frames))
     if not valley_frames:
-        return []
+        return [], [], frame_values, candidate
 
     total_frames = max(last_frame, first_frame)
     if total_frames <= first_frame:
@@ -605,13 +606,19 @@ def _compute_rep_intervals(
         start_frame = max(first_frame, start_frame)
         end_frame = max(start_frame, end_frame)
         intervals.append((start_frame, end_frame))
-    return intervals
+    return intervals, valley_frames, frame_values, candidate
 
 
 def _compute_rep_speeds(
-    rep_intervals: List[Tuple[int, int]], stats: RunStats
+    rep_intervals: List[Tuple[int, int]],
+    stats: RunStats,
+    *,
+    valley_frames: List[int],
+    frame_values: pd.Series,
+    metrics_df: pd.DataFrame | None,
+    primary_metric: str | None,
 ) -> pd.DataFrame:
-    """Estimate per-rep cadence and duration from frame intervals."""
+    """Estimate per-rep cadence, duration, and phase speeds from frame intervals."""
 
     if not rep_intervals:
         return pd.DataFrame()
@@ -619,11 +626,66 @@ def _compute_rep_speeds(
     fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
     fps = fps if fps > 0 else 1.0
 
-    rows: List[Dict[str, float]] = []
+    if metrics_df is None or metrics_df.empty or primary_metric not in metrics_df.columns:
+        metrics_series = None
+    else:
+        metrics_series = pd.to_numeric(metrics_df[primary_metric], errors="coerce")
+
+    def _metric_at_frame(frame: int) -> float:
+        if metrics_series is None or frame_values.empty:
+            return math.nan
+        try:
+            nearest_idx = (frame_values - frame).abs().idxmin()
+        except Exception:
+            return math.nan
+        try:
+            return float(metrics_series.iloc[int(nearest_idx)])
+        except Exception:
+            return math.nan
+
+    def _speed_unit(metric: str | None) -> str:
+        if not metric:
+            return "units/s"
+        if metric.endswith("_m") or "meter" in metric:
+            return "m/s"
+        if "deg" in metric or "angle" in metric:
+            return "deg/s"
+        return "normalized units/s"
+
+    speed_unit = _speed_unit(primary_metric)
+
+    rows: List[Dict[str, float | str]] = []
     for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
         span_frames = max(1, end_frame - start_frame)
         duration_s = span_frames / fps
         cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
+
+        bottom_frame = (
+            valley_frames[i - 1]
+            if i - 1 < len(valley_frames)
+            else int(round((start_frame + end_frame) / 2))
+        )
+        bottom_frame = min(max(bottom_frame, start_frame), end_frame)
+
+        start_val = _metric_at_frame(start_frame)
+        bottom_val = _metric_at_frame(bottom_frame)
+        end_val = _metric_at_frame(end_frame)
+
+        down_frames = max(1, bottom_frame - start_frame)
+        up_frames = max(1, end_frame - bottom_frame)
+        down_duration = down_frames / fps
+        up_duration = up_frames / fps
+
+        if any(math.isnan(v) for v in (start_val, bottom_val, end_val)):
+            down_change = 0.0
+            up_change = 0.0
+        else:
+            down_change = start_val - bottom_val
+            up_change = end_val - bottom_val
+
+        down_speed = (abs(down_change) / down_duration) if down_duration > 0 else 0.0
+        up_speed = (abs(up_change) / up_duration) if up_duration > 0 else 0.0
+
         rows.append(
             {
                 "Repetition": i,
@@ -631,10 +693,17 @@ def _compute_rep_speeds(
                 "End frame": float(end_frame),
                 "Duration (s)": duration_s,
                 "Cadence (reps/min)": cadence_rps * 60.0,
+                "Bottom frame": float(bottom_frame),
+                "Down duration (s)": down_duration,
+                "Up duration (s)": up_duration,
+                f"Down speed ({speed_unit})": down_speed,
+                f"Up speed ({speed_unit})": up_speed,
             }
         )
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df.attrs["speed_unit"] = speed_unit
+    return df
 
 
 def _results_panel() -> Dict[str, bool]:
@@ -668,6 +737,9 @@ def _results_panel() -> Dict[str, bool]:
                 numeric_columns = numeric_candidates
             metric_options = numeric_columns
             rep_intervals: List[Tuple[int, int]] = []
+            valley_frames: List[int] = []
+            frame_values = pd.Series(dtype=float)
+            primary_metric: str | None = None
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
@@ -686,7 +758,7 @@ def _results_panel() -> Dict[str, bool]:
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
-                rep_intervals = _compute_rep_intervals(
+                rep_intervals, valley_frames, frame_values, primary_metric = _compute_rep_intervals(
                     metrics_df=metrics_df,
                     report=report,
                     stats=stats,
@@ -775,13 +847,69 @@ def _results_panel() -> Dict[str, bool]:
             else:
                 st.info("No metrics were generated for this run.")
 
-            rep_speeds_df = _compute_rep_speeds(rep_intervals, stats)
+            rep_speeds_df = _compute_rep_speeds(
+                rep_intervals,
+                stats,
+                valley_frames=valley_frames,
+                frame_values=frame_values,
+                metrics_df=metrics_df,
+                primary_metric=primary_metric,
+            )
             if not rep_speeds_df.empty:
+                speed_unit = rep_speeds_df.attrs.get("speed_unit", "units/s")
+                down_speed_col = f"Down speed ({speed_unit})"
+                up_speed_col = f"Up speed ({speed_unit})"
+
                 st.markdown("#### Repetition speed")
-                st.bar_chart(
-                    rep_speeds_df.set_index("Repetition")["Cadence (reps/min)"],
-                    height=240,
+                st.caption(
+                    "Down = top to bottom of the rep. Up = bottom back to the top. "
+                    "Speeds are computed from the primary angle so you can compare lowering and lifting tempos." +
+                    (" Values are shown in meters per second when the primary metric is measured in meters; "
+                    "otherwise angular metrics use degrees per second." if speed_unit != "units/s" else "")
                 )
+
+                cadence_avg = rep_speeds_df["Cadence (reps/min)"].mean()
+                st.metric("Average cadence", f"{cadence_avg:.1f} reps/min")
+
+                rep_chart_df = rep_speeds_df.melt(
+                    id_vars=["Repetition"],
+                    value_vars=[down_speed_col, up_speed_col],
+                    var_name="Phase",
+                    value_name="Speed",
+                )
+                rep_chart_df["Phase duration (s)"] = rep_chart_df.apply(
+                    lambda row: (
+                        rep_speeds_df.loc[
+                            rep_speeds_df["Repetition"] == row["Repetition"],
+                            "Down duration (s)" if row["Phase"] == down_speed_col else "Up duration (s)",
+                        ]
+                        .astype(float)
+                        .iloc[0]
+                    ),
+                    axis=1,
+                )
+                chart = (
+                    alt.Chart(rep_chart_df)
+                    .mark_bar(size=28)
+                    .encode(
+                        x=alt.X("Repetition:O", title="Repetition"),
+                        y=alt.Y("Speed:Q", title=f"Speed ({speed_unit})"),
+                        color=alt.Color(
+                            "Phase:N",
+                            scale=alt.Scale(domain=[down_speed_col, up_speed_col], range=["#e4572e", "#2e86de"]),
+                            title="Phase",
+                        ),
+                        tooltip=[
+                            alt.Tooltip("Repetition:O"),
+                            alt.Tooltip("Phase:N", title="Phase"),
+                            alt.Tooltip("Speed:Q", title=f"Speed ({speed_unit})", format=".2f"),
+                            alt.Tooltip("Phase duration (s):Q", title="Phase duration (s)", format=".2f"),
+                            alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
+                        ],
+                    )
+                    .properties(height=280)
+                )
+                st.altair_chart(chart, use_container_width=True)
 
             stats_rows = [
                 {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
