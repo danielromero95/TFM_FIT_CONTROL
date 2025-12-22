@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-import logging
-from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
@@ -21,6 +19,7 @@ from src.config.constants import (
 )
 
 logger = logging.getLogger(__name__)
+EPS_DEG = 1.0
 
 
 @dataclass
@@ -28,6 +27,9 @@ class CountingDebugInfo:
     """Carga de depuración que devuelve el contador de repeticiones."""
     valley_indices: List[int]
     prominences: List[float]
+    raw_count: int = 0
+    reps_rejected_threshold: int = 0
+    rejection_reasons: List[str] | None = None
 
 
 def _quality_mask_from_df(df_metrics: pd.DataFrame, column: str) -> np.ndarray:
@@ -67,14 +69,14 @@ def _state_machine_reps(
     min_prominence: float,
     min_distance_frames: int,
     reference: np.ndarray | None = None,
-) -> Tuple[int, CountingDebugInfo]:
+) -> tuple[list[int], list[float], bool]:
     finite_angles = angles[np.isfinite(angles)]
     if finite_angles.size == 0:
-        return 0, CountingDebugInfo([], [])
+        return [], [], False
 
     angle_range = float(np.nanmax(finite_angles) - np.nanmin(finite_angles))
     if not np.isfinite(angle_range) or angle_range < min_excursion:
-        return 0, CountingDebugInfo([], [])
+        return [], [], False
 
     top_thr = float(np.nanpercentile(finite_angles, 70))
     bottom_thr = float(np.nanpercentile(finite_angles, 30))
@@ -138,10 +140,91 @@ def _state_machine_reps(
                         last_rep_frame = idx
                 state = "TOP"
 
-    debug = CountingDebugInfo(valley_indices=rep_indices, prominences=prominences)
     if long_gap_seen:
-        return 0, debug
-    return len(rep_indices), debug
+        return [], [], True
+    return rep_indices, prominences, False
+
+
+def _as_optional_float(value: object) -> float | None:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    return val if np.isfinite(val) else None
+
+
+def _rep_intervals_from_valleys(series_length: int, valley_indices: list[int]) -> list[tuple[int, int]]:
+    if series_length <= 0 or not valley_indices:
+        return []
+
+    bounded = [max(0, min(int(idx), series_length - 1)) for idx in valley_indices]
+    if not bounded:
+        return []
+
+    intervals: list[tuple[int, int]] = []
+    for i, valley in enumerate(bounded):
+        start = 0 if i == 0 else int(round((bounded[i - 1] + valley) / 2))
+        end = series_length - 1 if i == len(bounded) - 1 else int(round((valley + bounded[i + 1]) / 2))
+        start = max(0, min(start, series_length - 1))
+        end = max(start, min(end, series_length - 1))
+        intervals.append((start, end))
+    return intervals
+
+
+def _filter_reps_by_thresholds(
+    angles: np.ndarray,
+    valley_indices: list[int],
+    prominences: list[float],
+    *,
+    low_thresh: float | None,
+    high_thresh: float | None,
+    enforce_low: bool = True,
+    enforce_high: bool = True,
+) -> tuple[list[int], list[float], int, list[str]]:
+    apply_low = enforce_low and low_thresh is not None
+    apply_high = enforce_high and high_thresh is not None
+    if not apply_low and not apply_high:
+        return valley_indices, prominences, 0, []
+
+    intervals = _rep_intervals_from_valleys(len(angles), valley_indices)
+    filtered_indices: list[int] = []
+    filtered_proms: list[float] = []
+    rejection_reasons: list[str] = []
+
+    for idx, prominence, interval in zip(valley_indices, prominences, intervals):
+        start, end = interval
+        window = angles[start : end + 1]
+        finite = window[np.isfinite(window)]
+        if finite.size < 2:
+            rejection_reasons.append(
+                f"Rep at {idx} discarded: insufficient finite samples between {start} and {end}."
+            )
+            continue
+
+        min_angle = float(np.nanmin(finite))
+        max_angle = float(np.nanmax(finite))
+
+        low_ok = (not apply_low) or (min_angle <= low_thresh + EPS_DEG)  # type: ignore[operator]
+        high_ok = (not apply_high) or (max_angle >= high_thresh - EPS_DEG)  # type: ignore[operator]
+
+        if low_ok and high_ok:
+            filtered_indices.append(idx)
+            filtered_proms.append(prominence)
+            continue
+
+        if not low_ok and not high_ok:
+            reason = (
+                f"Rep at {idx} discarded: min {min_angle:.1f}° above low_thresh {low_thresh}°"
+                f" and max {max_angle:.1f}° below high_thresh {high_thresh}°."
+            )
+        elif not low_ok:
+            reason = f"Rep at {idx} discarded: min {min_angle:.1f}° above low_thresh {low_thresh}°."
+        else:
+            reason = f"Rep at {idx} discarded: max {max_angle:.1f}° below high_thresh {high_thresh}°."
+        rejection_reasons.append(reason)
+
+    rejected = len(valley_indices) - len(filtered_indices)
+    return filtered_indices, filtered_proms, rejected, rejection_reasons
 
 
 def count_repetitions_with_config(
@@ -149,6 +232,7 @@ def count_repetitions_with_config(
     counting_cfg: config.CountingConfig,
     fps: float,
     *,
+    faults_cfg: config.FaultConfig | None = None,
     overrides: dict[str, float] | None = None,
 ) -> Tuple[int, CountingDebugInfo]:
     """
@@ -189,7 +273,7 @@ def count_repetitions_with_config(
     if np.isfinite(angles).sum() < 3:
         return 0, CountingDebugInfo([], [])
 
-    reps, debug = _state_machine_reps(
+    rep_indices, prominences, long_gap_seen = _state_machine_reps(
         angles,
         velocities,
         refractory_frames=refractory_frames,
@@ -199,9 +283,39 @@ def count_repetitions_with_config(
         reference=reference,
     )
 
+    raw_count = len(rep_indices)
+    low_thresh = _as_optional_float(getattr(faults_cfg, "low_thresh", None) if faults_cfg else None)
+    high_thresh = _as_optional_float(getattr(faults_cfg, "high_thresh", None) if faults_cfg else None)
+    enforce_low = bool(getattr(counting_cfg, "enforce_low_thresh", False))
+    enforce_high = bool(getattr(counting_cfg, "enforce_high_thresh", False))
+
+    filtered_indices, filtered_proms, rejected, reasons = _filter_reps_by_thresholds(
+        reference if reference is not None else angles,
+        rep_indices,
+        prominences,
+        low_thresh=low_thresh,
+        high_thresh=high_thresh,
+        enforce_low=enforce_low,
+        enforce_high=enforce_high,
+    )
+
+    debug = CountingDebugInfo(
+        valley_indices=filtered_indices,
+        prominences=filtered_proms,
+        raw_count=raw_count,
+        reps_rejected_threshold=rejected,
+        rejection_reasons=reasons,
+    )
+
+    if long_gap_seen:
+        return 0, debug
+
+    reps = len(filtered_indices)
+
     logger.debug(
-        "Repetition count=%d (refractory=%d frames ≈ %.2fs, min_excursion=%.1f). Valid frames=%d/%d",
+        "Repetition count=%d (raw=%d, refractory=%d frames ≈ %.2fs, min_excursion=%.1f). Valid frames=%d/%d",
         reps,
+        raw_count,
         refractory_frames,
         refractory_frames / fps_safe,
         min_excursion,

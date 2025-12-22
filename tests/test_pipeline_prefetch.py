@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+from src.C_analysis.repetition_counter import CountingDebugInfo
+
 from src import config
 from src.A_preprocessing.video_metadata import VideoInfo
 from src.C_analysis import run_pipeline
@@ -112,7 +114,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(
         "src.C_analysis.pipeline.maybe_count_reps",
-        lambda *_args, **_kwargs: (2, []),
+        lambda *_args, **_kwargs: (2, [], CountingDebugInfo([], [])),
     )
 
     report = run_pipeline(

@@ -526,10 +526,14 @@ def _compute_rep_intervals(
         return []
 
     valley_indices: List[int] = []
-    counting_cfg = getattr(getattr(report, "config_used", None), "counting", None)
+    config_used = getattr(report, "config_used", None)
+    counting_cfg = getattr(config_used, "counting", None)
+    faults_cfg = getattr(config_used, "faults", None)
     if counting_cfg is not None:
         try:
-            _, debug = count_repetitions_with_config(df, counting_cfg, fps)
+            _, debug = count_repetitions_with_config(
+                df, counting_cfg, fps, faults_cfg=faults_cfg
+            )
             valley_indices = list(getattr(debug, "valley_indices", []))
         except Exception:
             valley_indices = []

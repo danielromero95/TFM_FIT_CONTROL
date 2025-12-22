@@ -171,6 +171,7 @@ streamlit run src/app.py
 - `exercise_selected` (elección de la UI)
 - `exercise_detected`, `view_detected`, `detection_confidence`
 - La tabla de resultados muestra seleccionado vs detectado para mayor transparencia.
+- `reps_detected_raw`, `reps_detected_final`, `reps_rejected_threshold` para diferenciar repeticiones candidatas y válidas tras el filtrado por umbrales.
 
 **Depuración y tests**
 
