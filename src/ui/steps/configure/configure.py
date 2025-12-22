@@ -19,6 +19,28 @@ def _primary_candidates_for(ex_key: str) -> list[str]:
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     with step_container("configure"):
         st.markdown("### 3. Configure the analysis")
+        centered_label_keys = [
+            "cfg_low",
+            "cfg_high",
+            "cfg_thresholds_enable",
+            "cfg_target_fps",
+            "cfg_model_complexity",
+            "cfg_debug_mode",
+        ]
+        st.markdown(
+            "<style>"
+            + "\n".join(
+                [
+                    (
+                        'div[data-testid="stWidgetLabel"]:has(> label[for="{key}"]) {{'
+                        " display: flex; justify-content: center; align-items: center; gap: 0.25rem; }"
+                    ).format(key=key)
+                    for key in centered_label_keys
+                ]
+            )
+            + "</style>",
+            unsafe_allow_html=True,
+        )
         state = get_state()
         stored_cfg = state.configure_values
         if stored_cfg is None:
