@@ -72,6 +72,7 @@ def prepare_pipeline_inputs(
     # Siempre ejecutamos en modo auto para que el pipeline elija el ángulo ideal.
     cfg.counting.primary_angle = "auto"
     cfg.debug.generate_debug_video = bool(cfg_values.get("debug_video", True))
+    cfg.debug.debug_mode = bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS.get("debug_mode", True)))
     cfg.pose.use_crop = True
 
     exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
