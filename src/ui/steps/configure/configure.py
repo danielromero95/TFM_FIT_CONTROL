@@ -5,7 +5,49 @@ import streamlit as st
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
 from src.ui.state import CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step, get_state, go_to
 from src.ui.steps.detect import EXERCISE_TO_CONFIG
+from html import escape
+
 from ..utils import step_container
+
+
+def _render_centered_label(label: str, help_text: str, *, key: str) -> None:
+    if "centered_label_style" not in st.session_state:
+        st.session_state["centered_label_style"] = True
+        st.markdown(
+            """
+            <style>
+            .centered-label {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.35rem;
+                font-weight: 600;
+            }
+            .centered-label .help-icon {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 1.15em;
+                height: 1.15em;
+                border-radius: 999px;
+                border: 1px solid currentColor;
+                font-size: 0.75em;
+                line-height: 1;
+                cursor: help;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        f"""
+        <div class="centered-label" id="{key}-label">
+            <span>{escape(label)}</span>
+            <span class="help-icon" title="{escape(help_text)}">?</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _primary_candidates_for(ex_key: str) -> list[str]:
@@ -27,8 +69,22 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
         cfg_values["use_crop"] = True
 
-        col1, col2 = st.columns(2)
+        thresholds_help = (
+            "Apply both upper and lower thresholds to filter repetitions."
+            " Turn off to ignore threshold filtering while counting."
+        )
+        lower_help = (
+            "Minimum primary angle needed to start counting a repetition."
+            " Adjust up to reduce false starts or down to capture smaller movements."
+        )
+        upper_help = (
+            "Maximum primary angle that finishes a repetition."
+            " Raise to allow deeper ranges or lower to flag overshooting reps."
+        )
+
+        col1, col2, col3 = st.columns(3)
         with col1:
+            _render_centered_label("Lower threshold (°)", lower_help, key="cfg_low")
             low = st.number_input(
                 "Lower threshold (°)",
                 min_value=0,
@@ -36,33 +92,35 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("low", CONFIG_DEFAULTS["low"])),
                 disabled=disabled,
                 key="cfg_low",
+                label_visibility="hidden",
+                help=lower_help,
             )
         with col2:
-            high_col, enable_col = st.columns([2, 1])
-            with high_col:
-                high = st.number_input(
-                    "Upper threshold (°)",
-                    min_value=0,
-                    max_value=180,
-                    value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
-                    disabled=disabled,
-                    key="cfg_high",
-                )
-            with enable_col:
-                thresholds_enable = st.checkbox(
-                    "Enable",
-                    value=bool(
-                        cfg_values.get(
-                            "thresholds_enable", CONFIG_DEFAULTS["thresholds_enable"]
-                        )
-                    ),
-                    disabled=disabled,
-                    key="cfg_thresholds_enable",
-                    help=(
-                        "Apply both upper and lower thresholds to filter repetitions."
-                        " Turn off to ignore threshold filtering while counting."
-                    ),
-                )
+            _render_centered_label("Upper threshold (°)", upper_help, key="cfg_high")
+            high = st.number_input(
+                "Upper threshold (°)",
+                min_value=0,
+                max_value=180,
+                value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
+                disabled=disabled,
+                key="cfg_high",
+                label_visibility="hidden",
+                help=upper_help,
+            )
+        with col3:
+            _render_centered_label("Enable", thresholds_help, key="cfg_thresholds_enable")
+            thresholds_enable = st.checkbox(
+                "Enable",
+                value=bool(
+                    cfg_values.get(
+                        "thresholds_enable", CONFIG_DEFAULTS["thresholds_enable"]
+                    )
+                ),
+                disabled=disabled,
+                key="cfg_thresholds_enable",
+                help=thresholds_help,
+                label_visibility="hidden",
+            )
 
         # Primary angle is auto-selected downstream; show as read-only
         chosen_primary = None
@@ -116,8 +174,23 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             key="cfg_debug_video",
         )
 
-        col_fps, col_complexity = st.columns(2)
+        fps_help = (
+            "Frames per second used during processing.\n\n"
+            "Lower values reduce processing time while higher values capture more motion detail but may take longer."
+        )
+        complexity_help = (
+            "Higher complexity improves pose quality at the cost of speed.\n\n"
+            "0 = fastest with lower accuracy.\n\n"
+            "1 = balanced.\n\n"
+            "2 = most accurate but heavier."
+        )
+        debug_help = (
+            "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
+        )
+
+        col_fps, col_complexity, col_debug = st.columns(3)
         with col_fps:
+            _render_centered_label("Target FPS", fps_help, key="cfg_target_fps")
             target_fps = st.number_input(
                 "Target FPS",
                 min_value=1,
@@ -125,10 +198,8 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("target_fps", CONFIG_DEFAULTS["target_fps"])),
                 disabled=disabled,
                 key="cfg_target_fps",
-                help=(
-                    "Frames per second used during processing.\n\n"
-                    "Lower values reduce processing time while higher values capture more motion detail but may take longer."
-                ),
+                help=fps_help,
+                label_visibility="hidden",
             )
         with col_complexity:
             complexity_options = [0, 1, 2]
@@ -136,18 +207,25 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 cfg_values.get("model_complexity", CONFIG_DEFAULTS["model_complexity"])
             )
             selected_index = complexity_options.index(stored_complexity) if stored_complexity in complexity_options else 0
+            _render_centered_label("Pose model complexity", complexity_help, key="cfg_model_complexity")
             model_complexity = st.selectbox(
                 "Pose model complexity",
                 options=complexity_options,
                 index=selected_index,
                 disabled=disabled,
                 key="cfg_model_complexity",
-                help=(
-                    "Higher complexity improves pose quality at the cost of speed.\n\n"
-                    "0 = fastest with lower accuracy.\n\n"
-                    "1 = balanced.\n\n"
-                    "2 = most accurate but heavier."
-                ),
+                help=complexity_help,
+                label_visibility="hidden",
+            )
+        with col_debug:
+            _render_centered_label("Debug mode", debug_help, key="cfg_debug_mode")
+            debug_mode = st.checkbox(
+                "Debug mode",
+                value=bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS["debug_mode"])),
+                disabled=disabled,
+                key="cfg_debug_mode",
+                help=debug_help,
+                label_visibility="hidden",
             )
 
         current_values = {
@@ -156,6 +234,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             "thresholds_enable": bool(thresholds_enable),
             "primary_angle": "auto",
             "debug_video": bool(debug_video),
+            "debug_mode": bool(debug_mode),
             "use_crop": True,
             "target_fps": float(target_fps),
             "model_complexity": int(model_complexity),
