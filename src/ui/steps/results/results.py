@@ -643,45 +643,39 @@ def _compute_rep_speeds(
         except Exception:
             return math.nan
 
-    def _speed_unit(metric: str | None) -> str:
-        if not metric:
-            return "units/s"
-        if metric.endswith("_m") or "meter" in metric:
-            return "m/s"
-        if "deg" in metric or "angle" in metric:
-            return "deg/s"
-        return "normalized units/s"
-
-    speed_unit = _speed_unit(primary_metric)
-
-    rows: List[Dict[str, float | str]] = []
+    rows: List[Dict[str, float]] = []
     for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
         span_frames = max(1, end_frame - start_frame)
         duration_s = span_frames / fps
         cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
 
-        bottom_frame = (
-            valley_frames[i - 1]
-            if i - 1 < len(valley_frames)
-            else int(round((start_frame + end_frame) / 2))
-        )
+        bottom_frame = valley_frames[i - 1] if i - 1 < len(valley_frames) else int(round((start_frame + end_frame) / 2))
         bottom_frame = min(max(bottom_frame, start_frame), end_frame)
 
         start_val = _metric_at_frame(start_frame)
         bottom_val = _metric_at_frame(bottom_frame)
         end_val = _metric_at_frame(end_frame)
 
-        down_frames = max(1, bottom_frame - start_frame)
-        up_frames = max(1, end_frame - bottom_frame)
-        down_duration = down_frames / fps
-        up_duration = up_frames / fps
+        first_phase_frames = max(1, bottom_frame - start_frame)
+        second_phase_frames = max(1, end_frame - bottom_frame)
 
         if any(math.isnan(v) for v in (start_val, bottom_val, end_val)):
-            down_change = 0.0
-            up_change = 0.0
+            start_delta = 0.0
+            end_delta = 0.0
         else:
-            down_change = start_val - bottom_val
-            up_change = end_val - bottom_val
+            start_delta = start_val - bottom_val
+            end_delta = end_val - bottom_val
+
+        if abs(start_delta) >= abs(end_delta):
+            down_duration = first_phase_frames / fps
+            up_duration = second_phase_frames / fps
+            down_change = start_delta
+            up_change = end_delta
+        else:
+            down_duration = second_phase_frames / fps
+            up_duration = first_phase_frames / fps
+            down_change = end_delta
+            up_change = start_delta
 
         down_speed = (abs(down_change) / down_duration) if down_duration > 0 else 0.0
         up_speed = (abs(up_change) / up_duration) if up_duration > 0 else 0.0
@@ -696,8 +690,8 @@ def _compute_rep_speeds(
                 "Bottom frame": float(bottom_frame),
                 "Down duration (s)": down_duration,
                 "Up duration (s)": up_duration,
-                f"Down speed ({speed_unit})": down_speed,
-                f"Up speed ({speed_unit})": up_speed,
+                "Down speed (units/s)": down_speed,
+                "Up speed (units/s)": up_speed,
             }
         )
 
@@ -863,47 +857,35 @@ def _results_panel() -> Dict[str, bool]:
                 st.markdown("#### Repetition speed")
                 st.caption(
                     "Down = top to bottom of the rep. Up = bottom back to the top. "
-                    "Speeds are computed from the primary angle so you can compare lowering and lifting tempos." +
-                    (" Values are shown in meters per second when the primary metric is measured in meters; "
-                    "otherwise angular metrics use degrees per second." if speed_unit != "units/s" else "")
+                    "Speeds are computed from the primary angle so you can compare lowering and lifting tempos."
                 )
-
-                cadence_avg = rep_speeds_df["Cadence (reps/min)"].mean()
-                st.metric("Average cadence", f"{cadence_avg:.1f} reps/min")
 
                 rep_chart_df = rep_speeds_df.melt(
                     id_vars=["Repetition"],
-                    value_vars=[down_speed_col, up_speed_col],
+                    value_vars=["Down speed (units/s)", "Up speed (units/s)"],
                     var_name="Phase",
                     value_name="Speed",
-                )
-                rep_chart_df["Phase duration (s)"] = rep_chart_df.apply(
-                    lambda row: (
-                        rep_speeds_df.loc[
-                            rep_speeds_df["Repetition"] == row["Repetition"],
-                            "Down duration (s)" if row["Phase"] == down_speed_col else "Up duration (s)",
-                        ]
-                        .astype(float)
-                        .iloc[0]
-                    ),
-                    axis=1,
                 )
                 chart = (
                     alt.Chart(rep_chart_df)
                     .mark_bar(size=28)
                     .encode(
                         x=alt.X("Repetition:O", title="Repetition"),
-                        y=alt.Y("Speed:Q", title=f"Speed ({speed_unit})"),
+                        y=alt.Y("Speed:Q", title="Speed (units/s)"),
                         color=alt.Color(
                             "Phase:N",
-                            scale=alt.Scale(domain=[down_speed_col, up_speed_col], range=["#e4572e", "#2e86de"]),
+                            scale=alt.Scale(
+                                domain=["Down speed (units/s)", "Up speed (units/s)"],
+                                range=["#e4572e", "#2e86de"],
+                            ),
                             title="Phase",
                         ),
                         tooltip=[
                             alt.Tooltip("Repetition:O"),
                             alt.Tooltip("Phase:N", title="Phase"),
-                            alt.Tooltip("Speed:Q", title=f"Speed ({speed_unit})", format=".2f"),
-                            alt.Tooltip("Phase duration (s):Q", title="Phase duration (s)", format=".2f"),
+                            alt.Tooltip("Speed:Q", title="Speed (units/s)", format=".2f"),
+                            alt.Tooltip("Down duration (s):Q", title="Down duration (s)", format=".2f"),
+                            alt.Tooltip("Up duration (s):Q", title="Up duration (s)", format=".2f"),
                             alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
                         ],
                     )
