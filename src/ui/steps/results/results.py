@@ -46,11 +46,20 @@ def _counting_relation_text(
         "deadlift": {"left_hip", "right_hip"},
     }
     if is_primary:
-        return "Reps are counted when this angle dips below the lower threshold and then rises past the upper threshold."
+        return (
+            "Reps are counted when this angle dips below the lower threshold and then rises past the upper threshold; "
+            "both thresholds only filter reps when Enable is turned on."
+        )
     if primary_metric:
         if metric in primary_candidates.get(exercise, set()):
-            return f"Not used for counting in this run; reps are detected from the {primary_label} crossing the configured thresholds."
-        return f"Not used for counting; reps are detected from the {primary_label} crossing the configured thresholds."
+            return (
+                f"Not used for counting in this run; reps are detected from the {primary_label} crossing the configured "
+                "thresholds (lower/upper thresholds only filter reps when Enable is turned on)."
+            )
+        return (
+            f"Not used for counting; reps are detected from the {primary_label} crossing the configured thresholds (the upper "
+            "threshold only filters reps when Enable is turned on)."
+        )
     return "Not used for counting; the system will pick a primary angle automatically when enough data is available."
 
 

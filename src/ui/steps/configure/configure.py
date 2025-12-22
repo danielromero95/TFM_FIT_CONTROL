@@ -38,14 +38,28 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 key="cfg_low",
             )
         with col2:
-            high = st.number_input(
-                "Upper threshold (°)",
-                min_value=0,
-                max_value=180,
-                value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
-                disabled=disabled,
-                key="cfg_high",
-            )
+            high_col, enable_col = st.columns([2, 1])
+            with high_col:
+                high = st.number_input(
+                    "Upper threshold (°)",
+                    min_value=0,
+                    max_value=180,
+                    value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
+                    disabled=disabled,
+                    key="cfg_high",
+                )
+            with enable_col:
+                thresholds_enable = st.checkbox(
+                    "Enable",
+                    value=bool(
+                        cfg_values.get(
+                            "thresholds_enable", CONFIG_DEFAULTS["thresholds_enable"]
+                        )
+                    ),
+                    disabled=disabled,
+                    key="cfg_thresholds_enable",
+                    help="Use both lower and upper thresholds as filters when counting reps.",
+                )
 
         # Primary angle is auto-selected downstream; show as read-only
         chosen_primary = None
@@ -136,6 +150,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         current_values = {
             "low": float(low),
             "high": float(high),
+            "thresholds_enable": bool(thresholds_enable),
             "primary_angle": "auto",
             "debug_video": bool(debug_video),
             "use_crop": True,
