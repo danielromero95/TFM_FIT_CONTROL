@@ -128,7 +128,7 @@ def _render_autodetect_button(
     """Ejecuta la detección automática y devuelve las etiquetas resultantes."""
 
     st.markdown('<div class="autodetect-btn">', unsafe_allow_html=True)
-    autodetect_clicked = st.button("Auto-Detect", key="btn_autodetect", use_container_width=True)
+    autodetect_clicked = st.button("Auto-Detect", key="btn_autodetect", width="stretch")
     st.markdown("</div>", unsafe_allow_html=True)
 
     if not autodetect_clicked:
@@ -221,7 +221,7 @@ def _render_navigation(selected_exercise: str, selected_view: str) -> None:
     back_col, continue_col = st.columns(2, gap="small")
     with back_col:
         st.markdown('<div class="btn--back">', unsafe_allow_html=True)
-        if st.button("Back", key="detect_back", use_container_width=True):
+        if st.button("Back", key="detect_back", width="stretch"):
             state.detect_result = None
             go_to(Step.UPLOAD)
             safe_rerun()
@@ -232,7 +232,7 @@ def _render_navigation(selected_exercise: str, selected_view: str) -> None:
         if st.button(
             "Continue",
             key="detect_continue",
-            use_container_width=True,
+            width="stretch",
             disabled=not can_continue,
         ):
             go_to(Step.CONFIGURE)
