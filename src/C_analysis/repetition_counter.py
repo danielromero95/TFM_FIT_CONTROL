@@ -19,7 +19,7 @@ from src.config.constants import (
 )
 
 logger = logging.getLogger(__name__)
-EPS_DEG = 1.0
+EPS_DEG = 0.0
 
 
 @dataclass
@@ -204,8 +204,8 @@ def _filter_reps_by_thresholds(
         min_angle = float(np.nanmin(finite))
         max_angle = float(np.nanmax(finite))
 
-        low_ok = (not apply_low) or (min_angle <= low_thresh + EPS_DEG)  # type: ignore[operator]
-        high_ok = (not apply_high) or (max_angle >= high_thresh - EPS_DEG)  # type: ignore[operator]
+        low_ok = (not apply_low) or (min_angle <= low_thresh)  # type: ignore[operator]
+        high_ok = (not apply_high) or (max_angle >= high_thresh)  # type: ignore[operator]
 
         if low_ok and high_ok:
             filtered_indices.append(idx)

@@ -226,6 +226,30 @@ def test_threshold_filter_applies_when_enabled() -> None:
     assert debug.reps_rejected_threshold == 2
 
 
+def test_threshold_filter_requires_high_threshold_to_be_reached() -> None:
+    angles = np.array([150.0, 159.9, 150.0])
+
+    filtered, _, rejected, reasons = _filter_reps_by_thresholds(
+        angles, [1], [1.0], low_thresh=None, high_thresh=160.0
+    )
+
+    assert filtered == []
+    assert rejected == 1
+    assert any("below high_thresh" in reason for reason in reasons)
+
+
+def test_threshold_filter_accepts_exact_high_threshold() -> None:
+    angles = np.array([150.0, 160.0, 150.0])
+
+    filtered, _, rejected, reasons = _filter_reps_by_thresholds(
+        angles, [1], [1.0], low_thresh=None, high_thresh=160.0
+    )
+
+    assert filtered == [1]
+    assert rejected == 0
+    assert reasons == []
+
+
 def test_threshold_validation_uses_reference_signal() -> None:
     angles = [
         150,
