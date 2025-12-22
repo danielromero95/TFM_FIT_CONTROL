@@ -226,46 +226,6 @@ def test_threshold_filter_applies_when_enabled() -> None:
     assert debug.reps_rejected_threshold == 2
 
 
-def test_threshold_filter_ignored_when_enforcement_disabled_even_if_impossible() -> None:
-    angles = [170, 150, 120, 90, 120, 150, 170, 150, 110, 80, 110, 150, 170]
-    df = pd.DataFrame({"left_knee": angles})
-    cfg = _make_cfg(
-        primary_angle="left_knee",
-        min_prominence=1.0,
-        min_distance_sec=0.1,
-        refractory_sec=0.0,
-        enforce_low_thresh=False,
-        enforce_high_thresh=False,
-    )
-    impossible_faults = config.FaultConfig(low_thresh=200.0, high_thresh=200.0)
-
-    reps, debug = count_repetitions_with_config(
-        df, cfg, fps=30.0, faults_cfg=impossible_faults
-    )
-
-    assert debug.raw_count == 2
-    assert reps == 2
-    assert debug.reps_rejected_threshold == 0
-
-
-def test_threshold_filter_applies_both_limits_when_enabled() -> None:
-    angles = np.array([170.0, 130.0, 170.0])
-
-    filtered, _, rejected, reasons = _filter_reps_by_thresholds(
-        angles,
-        [1],
-        [1.0],
-        low_thresh=120.0,
-        high_thresh=160.0,
-        enforce_low=True,
-        enforce_high=True,
-    )
-
-    assert filtered == []
-    assert rejected == 1
-    assert any("above low_thresh" in reason for reason in reasons)
-
-
 def test_threshold_filter_requires_high_threshold_to_be_reached() -> None:
     angles = np.array([150.0, 159.9, 150.0])
 

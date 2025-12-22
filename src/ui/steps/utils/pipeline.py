@@ -62,9 +62,7 @@ def prepare_pipeline_inputs(
 
     cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
     cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
-    thresholds_enable = bool(cfg_values.get("thresholds_enable", True))
-    cfg.counting.enforce_low_thresh = thresholds_enable
-    cfg.counting.enforce_high_thresh = thresholds_enable
+    cfg.counting.enforce_high_thresh = bool(cfg_values.get("strict_high", True))
     cfg.video.target_fps = float(cfg_values.get("target_fps", CONFIG_DEFAULTS["target_fps"]))
     cfg.pose.model_complexity = int(
         cfg_values.get("model_complexity", CONFIG_DEFAULTS["model_complexity"])
