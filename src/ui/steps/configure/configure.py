@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+
 import streamlit as st
 
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
@@ -13,11 +15,56 @@ def _primary_candidates_for(ex_key: str) -> list[str]:
         "squat": ["left_knee", "right_knee"],
         "bench_press": ["left_elbow", "right_elbow"],
         "deadlift": ["left_hip", "right_hip"],
-    }.get(ex_key, [])
+        }.get(ex_key, [])
+
+
+def _render_centered_label(text: str, help_text: str | None = None) -> None:
+    icon_html = ""
+    if help_text:
+        icon_html = (
+            f'<span class="centered-label__icon" title="{html.escape(help_text)}">?'
+            "</span>"
+        )
+    st.markdown(
+        "<div class=\"centered-label\">"
+        f"{html.escape(text)}"
+        f"{icon_html}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> None:
     with step_container("configure"):
+        st.markdown(
+            """
+            <style>
+            .centered-label {
+                width: 100%;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 0.25rem;
+                text-align: center;
+                font-weight: 600;
+            }
+
+            .centered-label__icon {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 1.25rem;
+                height: 1.25rem;
+                border-radius: 50%;
+                border: 1px solid currentColor;
+                font-size: 0.75rem;
+                line-height: 1;
+                cursor: help;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown("### 3. Configure the analysis")
         state = get_state()
         stored_cfg = state.configure_values
@@ -29,6 +76,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
 
         col1, col2, col3 = st.columns(3)
         with col1:
+            _render_centered_label("Lower threshold (°)")
             low = st.number_input(
                 "Lower threshold (°)",
                 min_value=0,
@@ -36,8 +84,10 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("low", CONFIG_DEFAULTS["low"])),
                 disabled=disabled,
                 key="cfg_low",
+                label_visibility="collapsed",
             )
         with col2:
+            _render_centered_label("Upper threshold (°)")
             high = st.number_input(
                 "Upper threshold (°)",
                 min_value=0,
@@ -45,8 +95,14 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
                 disabled=disabled,
                 key="cfg_high",
+                label_visibility="collapsed",
             )
         with col3:
+            thresholds_enable_help = (
+                "Apply both upper and lower thresholds to filter repetitions."
+                " Turn off to ignore threshold filtering while counting."
+            )
+            _render_centered_label("Enable", thresholds_enable_help)
             thresholds_enable = st.checkbox(
                 "Enable",
                 value=bool(
@@ -56,10 +112,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 ),
                 disabled=disabled,
                 key="cfg_thresholds_enable",
-                help=(
-                    "Apply both upper and lower thresholds to filter repetitions."
-                    " Turn off to ignore threshold filtering while counting."
-                ),
+                label_visibility="collapsed",
             )
 
         # Primary angle is auto-selected downstream; show as read-only
@@ -116,6 +169,11 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
 
         col_fps, col_complexity, col_debug = st.columns(3)
         with col_fps:
+            target_fps_help = (
+                "Frames per second used during processing.\n\n"
+                "Lower values reduce processing time while higher values capture more motion detail but may take longer."
+            )
+            _render_centered_label("Target FPS", target_fps_help)
             target_fps = st.number_input(
                 "Target FPS",
                 min_value=1,
@@ -123,12 +181,16 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("target_fps", CONFIG_DEFAULTS["target_fps"])),
                 disabled=disabled,
                 key="cfg_target_fps",
-                help=(
-                    "Frames per second used during processing.\n\n"
-                    "Lower values reduce processing time while higher values capture more motion detail but may take longer."
-                ),
+                label_visibility="collapsed",
             )
         with col_complexity:
+            complexity_help = (
+                "Higher complexity improves pose quality at the cost of speed.\n\n"
+                "0 = fastest with lower accuracy.\n\n"
+                "1 = balanced.\n\n"
+                "2 = most accurate but heavier."
+            )
+            _render_centered_label("Pose model complexity", complexity_help)
             complexity_options = [0, 1, 2]
             stored_complexity = int(
                 cfg_values.get("model_complexity", CONFIG_DEFAULTS["model_complexity"])
@@ -140,22 +202,19 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 index=selected_index,
                 disabled=disabled,
                 key="cfg_model_complexity",
-                help=(
-                    "Higher complexity improves pose quality at the cost of speed.\n\n"
-                    "0 = fastest with lower accuracy.\n\n"
-                    "1 = balanced.\n\n"
-                    "2 = most accurate but heavier."
-                ),
+                label_visibility="collapsed",
             )
         with col_debug:
+            debug_mode_help = (
+                "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
+            )
+            _render_centered_label("Debug mode", debug_mode_help)
             debug_mode = st.checkbox(
                 "Debug mode",
                 value=bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS["debug_mode"])),
                 disabled=disabled,
                 key="cfg_debug_mode",
-                help=(
-                    "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
-                ),
+                label_visibility="collapsed",
             )
 
         current_values = {
