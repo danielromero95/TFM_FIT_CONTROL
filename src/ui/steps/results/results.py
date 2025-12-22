@@ -888,16 +888,22 @@ def _results_panel() -> Dict[str, bool]:
                     "Speeds are computed from the primary angle so you can compare lowering and lifting tempos."
                 )
 
+                rep_chart_df = rep_speeds_df.melt(
+                    id_vars=["Repetition"],
+                    value_vars=["Down speed (units/s)", "Up speed (units/s)"],
+                    var_name="Phase",
+                    value_name="Speed",
+                )
                 chart = (
                     alt.Chart(rep_chart_df)
                     .mark_bar(size=28)
                     .encode(
                         x=alt.X("Repetition:O", title="Repetition"),
-                        y=alt.Y("Speed:Q", title=f"Speed ({speed_unit})"),
+                        y=alt.Y("Speed:Q", title="Speed (units/s)"),
                         color=alt.Color(
                             "Phase:N",
                             scale=alt.Scale(
-                                domain=[down_speed_col, up_speed_col],
+                                domain=["Down speed (units/s)", "Up speed (units/s)"],
                                 range=["#e4572e", "#2e86de"],
                             ),
                             title="Phase",
@@ -905,15 +911,10 @@ def _results_panel() -> Dict[str, bool]:
                         tooltip=[
                             alt.Tooltip("Repetition:O"),
                             alt.Tooltip("Phase:N", title="Phase"),
-                            alt.Tooltip("Speed:Q", title=f"Speed ({speed_unit})", format=".2f"),
-                            alt.Tooltip(
-                                "Phase duration (s):Q",
-                                title="Phase duration (s)",
-                                format=".2f",
-                            ),
-                            alt.Tooltip(
-                                "Cadence (reps/min):Q", title="Cadence (reps/min)", format=".1f"
-                            ),
+                            alt.Tooltip("Speed:Q", title="Speed (units/s)", format=".2f"),
+                            alt.Tooltip("Down duration (s):Q", title="Down duration (s)", format=".2f"),
+                            alt.Tooltip("Up duration (s):Q", title="Up duration (s)", format=".2f"),
+                            alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
                         ],
                     )
                     .properties(height=280)
