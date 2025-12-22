@@ -27,6 +27,24 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
         cfg_values["use_crop"] = True
 
+        st.markdown(
+            """
+            <style>
+            .step--configure [data-testid="stNumberInput"] > label,
+            .step--configure [data-testid="stSelectbox"] > label,
+            .step--configure [data-testid="stCheckbox"] > label {
+                width: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.35rem;
+                text-align: center;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         col1, col2, col3 = st.columns(3)
         with col1:
             low = st.number_input(
