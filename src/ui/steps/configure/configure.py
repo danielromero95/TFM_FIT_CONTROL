@@ -69,19 +69,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
         cfg_values["use_crop"] = True
 
-        thresholds_help = (
-            "Apply both upper and lower thresholds to filter repetitions."
-            " Turn off to ignore threshold filtering while counting."
-        )
-        lower_help = (
-            "Minimum primary angle needed to start counting a repetition."
-            " Adjust up to reduce false starts or down to capture smaller movements."
-        )
-        upper_help = (
-            "Maximum primary angle that finishes a repetition."
-            " Raise to allow deeper ranges or lower to flag overshooting reps."
-        )
-
         col1, col2, col3 = st.columns(3)
         with col1:
             _render_centered_label("Lower threshold (°)", lower_help, key="cfg_low")
@@ -96,7 +83,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 help=lower_help,
             )
         with col2:
-            _render_centered_label("Upper threshold (°)", upper_help, key="cfg_high")
             high = st.number_input(
                 "Upper threshold (°)",
                 min_value=0,
@@ -104,11 +90,8 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
                 disabled=disabled,
                 key="cfg_high",
-                label_visibility="hidden",
-                help=upper_help,
             )
         with col3:
-            _render_centered_label("Enable", thresholds_help, key="cfg_thresholds_enable")
             thresholds_enable = st.checkbox(
                 "Enable",
                 value=bool(
@@ -118,8 +101,10 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 ),
                 disabled=disabled,
                 key="cfg_thresholds_enable",
-                help=thresholds_help,
-                label_visibility="hidden",
+                help=(
+                    "Apply both upper and lower thresholds to filter repetitions."
+                    " Turn off to ignore threshold filtering while counting."
+                ),
             )
 
         # Primary angle is auto-selected downstream; show as read-only
@@ -174,20 +159,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             key="cfg_debug_video",
         )
 
-        fps_help = (
-            "Frames per second used during processing.\n\n"
-            "Lower values reduce processing time while higher values capture more motion detail but may take longer."
-        )
-        complexity_help = (
-            "Higher complexity improves pose quality at the cost of speed.\n\n"
-            "0 = fastest with lower accuracy.\n\n"
-            "1 = balanced.\n\n"
-            "2 = most accurate but heavier."
-        )
-        debug_help = (
-            "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
-        )
-
         col_fps, col_complexity, col_debug = st.columns(3)
         with col_fps:
             _render_centered_label("Target FPS", fps_help, key="cfg_target_fps")
@@ -226,6 +197,16 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 key="cfg_debug_mode",
                 help=debug_help,
                 label_visibility="hidden",
+            )
+        with col_debug:
+            debug_mode = st.checkbox(
+                "Debug mode",
+                value=bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS["debug_mode"])),
+                disabled=disabled,
+                key="cfg_debug_mode",
+                help=(
+                    "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
+                ),
             )
 
         current_values = {
