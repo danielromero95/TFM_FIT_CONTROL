@@ -659,26 +659,22 @@ def _compute_rep_speeds(
         first_phase_frames = max(1, bottom_frame - start_frame)
         second_phase_frames = max(1, end_frame - bottom_frame)
 
-        if any(math.isnan(v) for v in (start_val, bottom_val, end_val)):
-            start_delta = 0.0
-            end_delta = 0.0
-        else:
-            start_delta = start_val - bottom_val
-            end_delta = end_val - bottom_val
+        down_duration = first_phase_frames / fps
+        up_duration = second_phase_frames / fps
 
-        if abs(start_delta) >= abs(end_delta):
-            down_duration = first_phase_frames / fps
-            up_duration = second_phase_frames / fps
-            down_change = start_delta
-            up_change = end_delta
+        if any(math.isnan(v) for v in (start_val, bottom_val)):
+            down_speed = math.nan
         else:
-            down_duration = second_phase_frames / fps
-            up_duration = first_phase_frames / fps
-            down_change = end_delta
-            up_change = start_delta
+            down_speed = (
+                abs(start_val - bottom_val) / down_duration if down_duration > 0 else math.nan
+            )
 
-        down_speed = (abs(down_change) / down_duration) if down_duration > 0 else 0.0
-        up_speed = (abs(up_change) / up_duration) if up_duration > 0 else 0.0
+        if any(math.isnan(v) for v in (end_val, bottom_val)):
+            up_speed = math.nan
+        else:
+            up_speed = (
+                abs(end_val - bottom_val) / up_duration if up_duration > 0 else math.nan
+            )
 
         rows.append(
             {
@@ -690,8 +686,8 @@ def _compute_rep_speeds(
                 "Bottom frame": float(bottom_frame),
                 "Down duration (s)": down_duration,
                 "Up duration (s)": up_duration,
-                "Down speed (units/s)": down_speed,
-                "Up speed (units/s)": up_speed,
+                "Down speed (deg/s)": down_speed,
+                "Up speed (deg/s)": up_speed,
             }
         )
 
@@ -851,25 +847,55 @@ def _results_panel() -> Dict[str, bool]:
                 st.markdown("#### Repetition speed")
                 st.caption(
                     "Down = top to bottom of the rep. Up = bottom back to the top. "
-                    "Speeds are computed from the primary angle so you can compare lowering and lifting tempos."
+                    "Angular speeds (deg/s) are derived from the primary angle, so linear m/s values "
+                    "aren't available with the normalized pose coordinates."
                 )
 
-                rep_chart_df = rep_speeds_df.melt(
-                    id_vars=["Repetition"],
-                    value_vars=["Down speed (units/s)", "Up speed (units/s)"],
-                    var_name="Phase",
-                    value_name="Speed",
+                rep_chart_df = pd.concat(
+                    [
+                        rep_speeds_df[
+                            [
+                                "Repetition",
+                                "Down speed (deg/s)",
+                                "Down duration (s)",
+                                "Cadence (reps/min)",
+                            ]
+                        ]
+                        .rename(
+                            columns={
+                                "Down speed (deg/s)": "Speed",
+                                "Down duration (s)": "Phase duration (s)",
+                            }
+                        )
+                        .assign(Phase="Down"),
+                        rep_speeds_df[
+                            [
+                                "Repetition",
+                                "Up speed (deg/s)",
+                                "Up duration (s)",
+                                "Cadence (reps/min)",
+                            ]
+                        ]
+                        .rename(
+                            columns={
+                                "Up speed (deg/s)": "Speed",
+                                "Up duration (s)": "Phase duration (s)",
+                            }
+                        )
+                        .assign(Phase="Up"),
+                    ],
+                    ignore_index=True,
                 )
                 chart = (
                     alt.Chart(rep_chart_df)
                     .mark_bar(size=28)
                     .encode(
                         x=alt.X("Repetition:O", title="Repetition"),
-                        y=alt.Y("Speed:Q", title="Speed (units/s)"),
+                        y=alt.Y("Speed:Q", title="Angular speed (deg/s)"),
                         color=alt.Color(
                             "Phase:N",
                             scale=alt.Scale(
-                                domain=["Down speed (units/s)", "Up speed (units/s)"],
+                                domain=["Down", "Up"],
                                 range=["#e4572e", "#2e86de"],
                             ),
                             title="Phase",
@@ -877,9 +903,10 @@ def _results_panel() -> Dict[str, bool]:
                         tooltip=[
                             alt.Tooltip("Repetition:O"),
                             alt.Tooltip("Phase:N", title="Phase"),
-                            alt.Tooltip("Speed:Q", title="Speed (units/s)", format=".2f"),
-                            alt.Tooltip("Down duration (s):Q", title="Down duration (s)", format=".2f"),
-                            alt.Tooltip("Up duration (s):Q", title="Up duration (s)", format=".2f"),
+                            alt.Tooltip("Speed:Q", title="Speed (deg/s)", format=".2f"),
+                            alt.Tooltip(
+                                "Phase duration (s):Q", title="Phase duration (s)", format=".2f"
+                            ),
                             alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
                         ],
                     )
