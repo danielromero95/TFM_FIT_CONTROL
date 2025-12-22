@@ -27,7 +27,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
         cfg_values["use_crop"] = True
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             low = st.number_input(
                 "Lower threshold (°)",
@@ -38,31 +38,29 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                 key="cfg_low",
             )
         with col2:
-            high_col, enable_col = st.columns([2, 1])
-            with high_col:
-                high = st.number_input(
-                    "Upper threshold (°)",
-                    min_value=0,
-                    max_value=180,
-                    value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
-                    disabled=disabled,
-                    key="cfg_high",
-                )
-            with enable_col:
-                thresholds_enable = st.checkbox(
-                    "Enable",
-                    value=bool(
-                        cfg_values.get(
-                            "thresholds_enable", CONFIG_DEFAULTS["thresholds_enable"]
-                        )
-                    ),
-                    disabled=disabled,
-                    key="cfg_thresholds_enable",
-                    help=(
-                        "Apply both upper and lower thresholds to filter repetitions."
-                        " Turn off to ignore threshold filtering while counting."
-                    ),
-                )
+            high = st.number_input(
+                "Upper threshold (°)",
+                min_value=0,
+                max_value=180,
+                value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
+                disabled=disabled,
+                key="cfg_high",
+            )
+        with col3:
+            thresholds_enable = st.checkbox(
+                "Enable",
+                value=bool(
+                    cfg_values.get(
+                        "thresholds_enable", CONFIG_DEFAULTS["thresholds_enable"]
+                    )
+                ),
+                disabled=disabled,
+                key="cfg_thresholds_enable",
+                help=(
+                    "Apply both upper and lower thresholds to filter repetitions."
+                    " Turn off to ignore threshold filtering while counting."
+                ),
+            )
 
         # Primary angle is auto-selected downstream; show as read-only
         chosen_primary = None
@@ -116,7 +114,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             key="cfg_debug_video",
         )
 
-        col_fps, col_complexity = st.columns(2)
+        col_fps, col_complexity, col_debug = st.columns(3)
         with col_fps:
             target_fps = st.number_input(
                 "Target FPS",
@@ -149,6 +147,16 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
                     "2 = most accurate but heavier."
                 ),
             )
+        with col_debug:
+            debug_mode = st.checkbox(
+                "Debug mode",
+                value=bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS["debug_mode"])),
+                disabled=disabled,
+                key="cfg_debug_mode",
+                help=(
+                    "Toggle verbose diagnostics during processing to inspect detailed logs and checks."
+                ),
+            )
 
         current_values = {
             "low": float(low),
@@ -156,6 +164,7 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             "thresholds_enable": bool(thresholds_enable),
             "primary_angle": "auto",
             "debug_video": bool(debug_video),
+            "debug_mode": bool(debug_mode),
             "use_crop": True,
             "target_fps": float(target_fps),
             "model_complexity": int(model_complexity),

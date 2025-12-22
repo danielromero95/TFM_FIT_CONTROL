@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
 from src.config.settings import (
+    DEFAULT_DEBUG_MODE,
     DEFAULT_GENERATE_VIDEO,
     DEFAULT_PREVIEW_FPS,
     DEFAULT_USE_CROP,
@@ -33,6 +34,7 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "high": float(SQUAT_HIGH_THRESH),
     "primary_angle": "auto",
     "debug_video": bool(DEFAULT_GENERATE_VIDEO),
+    "debug_mode": bool(DEFAULT_DEBUG_MODE),
     "use_crop": bool(DEFAULT_USE_CROP),
     "target_fps": 10.0,
     "model_complexity": int(MODEL_COMPLEXITY),
