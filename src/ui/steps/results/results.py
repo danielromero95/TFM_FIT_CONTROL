@@ -38,29 +38,29 @@ def _counting_relation_text(
     primary_metric: str | None,
     *,
     is_primary: bool,
-) -> str:
-    primary_label = human_metric_name(primary_metric) if primary_metric else "the auto-selected primary angle"
-    primary_candidates = {
-        "squat": {"left_knee", "right_knee"},
-        "bench_press": {"left_elbow", "right_elbow"},
-        "deadlift": {"left_hip", "right_hip"},
-    }
-    if is_primary:
-        return (
-            "Reps are counted when this angle dips below the lower threshold and then rises past the upper threshold; "
-            "the upper threshold only filters reps when Strict upper threshold is enabled."
-        )
-    if primary_metric:
-        if metric in primary_candidates.get(exercise, set()):
+    ) -> str:
+        primary_label = human_metric_name(primary_metric) if primary_metric else "the auto-selected primary angle"
+        primary_candidates = {
+            "squat": {"left_knee", "right_knee"},
+            "bench_press": {"left_elbow", "right_elbow"},
+            "deadlift": {"left_hip", "right_hip"},
+        }
+        if is_primary:
             return (
-                f"Not used for counting in this run; reps are detected from the {primary_label} crossing the configured "
-                "thresholds (the upper threshold only filters reps when Strict upper threshold is enabled)."
+                "Reps are counted when this angle dips below the lower threshold and then rises past the upper threshold; "
+                "threshold filtering only applies when Enable is turned on."
             )
-        return (
-            f"Not used for counting; reps are detected from the {primary_label} crossing the configured thresholds (the upper "
-            "threshold only filters reps when Strict upper threshold is enabled)."
-        )
-    return "Not used for counting; the system will pick a primary angle automatically when enough data is available."
+        if primary_metric:
+            if metric in primary_candidates.get(exercise, set()):
+                return (
+                    f"Not used for counting in this run; reps are detected from the {primary_label} crossing the configured "
+                    "thresholds (filtering is applied only when Enable is turned on)."
+                )
+            return (
+                f"Not used for counting; reps are detected from the {primary_label} crossing the configured thresholds (the upper "
+                "threshold only filters reps when Enable is turned on)."
+            )
+        return "Not used for counting; the system will pick a primary angle automatically when enough data is available."
 
 
 def _build_metric_help(

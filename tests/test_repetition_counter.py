@@ -197,7 +197,7 @@ def test_threshold_filter_can_be_opted_out() -> None:
         enforce_low_thresh=False,
         enforce_high_thresh=False,
     )
-    strict_faults = config.FaultConfig(low_thresh=90.0, high_thresh=200.0)
+    strict_faults = config.FaultConfig(low_thresh=200.0, high_thresh=10.0)
 
     reps, debug = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=strict_faults)
 
@@ -224,6 +224,20 @@ def test_threshold_filter_applies_when_enabled() -> None:
     assert debug.raw_count == 2
     assert reps == 0
     assert debug.reps_rejected_threshold == 2
+
+
+def test_threshold_filter_applies_both_thresholds_when_enabled() -> None:
+    angles = np.array([190.0, 170.0, 190.0])
+    valley_indices = [1]
+    prominences = [10.0]
+
+    filtered, _, rejected, reasons = _filter_reps_by_thresholds(
+        angles, valley_indices, prominences, low_thresh=160.0, high_thresh=185.0
+    )
+
+    assert filtered == []
+    assert rejected == 1
+    assert any("above low_thresh" in reason for reason in reasons)
 
 
 def test_threshold_filter_requires_high_threshold_to_be_reached() -> None:
