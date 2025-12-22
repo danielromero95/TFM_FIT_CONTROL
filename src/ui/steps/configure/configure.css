@@ -1,0 +1,33 @@
+/* Center the first two configure column rows (thresholds and performance) */
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2) {
+  text-align: center;
+}
+
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2)
+  [data-testid="stWidgetLabel"] {
+  justify-content: center;
+  text-align: center;
+}
+
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2) label {
+  width: 100%;
+  text-align: center;
+}
+
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2)
+  [data-testid="stCheckbox"]
+  label {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fc-space-1, 0.35rem);
+}
+
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2)
+  [data-testid="stCheckbox"]
+  label
+  p {
+  width: 100%;
+  text-align: center;
+}
