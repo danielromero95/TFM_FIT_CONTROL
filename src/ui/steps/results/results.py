@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import html
 import io
 import json
 import math
@@ -158,33 +159,44 @@ def _build_debug_report_bundle(
     return bundle.read()
 
 
-def _run_parameters(stats: RunStats) -> List[Tuple[str, str]]:
+def _run_parameters(stats: RunStats) -> List[Tuple[str, str, str | None]]:
     """Build a compact list of run parameters to highlight in the UI."""
-
-    def _as_label(value: object | None) -> str:
-        if value is None:
-            return ""
-        label = getattr(value, "value", value)
-        return str(label)
-
-    params: List[Tuple[str, str]] = []
+    params: List[Tuple[str, str, str | None]] = []
 
     duration = _format_run_duration(getattr(stats, "t_total_ms", None))
     if duration:
-        params.append(("Analysis time", duration))
+        params.append(("Analysis time", duration, None))
 
     frames = getattr(stats, "frames", 0) or 0
     if frames > 0:
-        params.append(("Frames analyzed", f"{frames:,}"))
+        params.append(("Frames analyzed", f"{frames:,}", None))
 
     confidence = getattr(stats, "detection_confidence", 0.0) or 0.0
     if confidence > 0:
-        params.append(("Detection confidence", f"{confidence * 100:.0f}%"))
+        params.append(
+            (
+                "Detection confidence",
+                f"{confidence * 100:.0f}%",
+                (
+                    "How confident the system was when automatically detecting the exercise "
+                    "type and camera view for this video.\n\n"
+                    "1) The exercise classifier compares squat, deadlift, and bench scores "
+                    "from the detected poses, converts them into probabilities, and keeps the "
+                    "probability of the winning label.\n"
+                    "2) The camera-view classifier estimates how reliably the clip looks front "
+                    "or side based on shoulder width/tilt and frame reliability; its score is "
+                    "reduced if landmarks are unstable or few frames are trustworthy.\n\n"
+                    "The detection confidence shown here is the lower of those two scores, so "
+                    "it drops whenever either the exercise label or the inferred view is "
+                    "uncertain."
+                ),
+            )
+        )
 
     return params
 
 
-def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
+def _render_run_parameters(params: List[Tuple[str, str, str | None]]) -> None:
     st.markdown(
         """
         <style>
@@ -206,18 +218,48 @@ def _render_run_parameters(params: List[Tuple[str, str]]) -> None:
             color: rgba(255, 255, 255, 0.9);
             line-height: 1.2;
         }
+
+        .run-param-help {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 6px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            color: rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.08);
+            cursor: help;
+        }
+
+        @media (prefers-color-scheme: light) {
+            .run-param-help {
+                color: rgba(30, 30, 30, 0.8);
+                background: rgba(255, 255, 255, 0.95);
+                border-color: rgba(120, 120, 120, 0.5);
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
     cols = st.columns(min(3, len(params)))
-    for idx, (label, value) in enumerate(params):
+    for idx, (label, value, help_text) in enumerate(params):
+        help_icon = ""
+        if help_text:
+            escaped_help = html.escape(help_text, quote=True).replace("\n", "&#10;")
+            help_icon = f'<span class="run-param-help" title="{escaped_help}">?</span>'
+        label_html = f"{html.escape(label)}{help_icon}"
         with cols[idx % len(cols)]:
             st.markdown(
                 f"""
                 <div class="run-param-card">
-                    <div class="run-param-label">{label}</div>
+                    <div class="run-param-label">{label_html}</div>
                     <div class="run-param-value">{value}</div>
                 </div>
                 """,
