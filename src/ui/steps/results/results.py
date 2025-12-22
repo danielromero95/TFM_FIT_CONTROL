@@ -780,7 +780,7 @@ def _results_panel() -> Dict[str, bool]:
                         data=debug_bytes,
                         file_name=debug_path.name,
                         mime="video/mp4",
-                        use_container_width=True,
+                        width="stretch",
                     )
 
             metrics_data: str | None = None
@@ -820,7 +820,7 @@ def _results_panel() -> Dict[str, bool]:
                         "Includes effective config, run statistics, warnings, and a"
                         " metrics snapshot to help debug issues."
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
         else:
