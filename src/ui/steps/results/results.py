@@ -857,31 +857,25 @@ def _results_panel() -> Dict[str, bool]:
                 st.markdown("#### Repetition speed")
                 st.caption(
                     "Down = top to bottom of the rep. Up = bottom back to the top. "
-                    "Speeds use the primary angle units (e.g., degrees/sec for angles, normalized units/sec for distances) "
-                    "so you can compare lowering and lifting tempos."
+                    "Speeds are computed from the primary angle so you can compare lowering and lifting tempos."
                 )
 
-                rep_chart_df = rep_chart_source.melt(
-                    id_vars=["Repetition", "Down duration (s)", "Up duration (s)", "Cadence (reps/min)"],
-                    value_vars=list(renamed_cols.values()),
+                rep_chart_df = rep_speeds_df.melt(
+                    id_vars=["Repetition"],
+                    value_vars=["Down speed (units/s)", "Up speed (units/s)"],
                     var_name="Phase",
                     value_name="Speed",
                 )
-                rep_chart_df["Phase duration (s)"] = rep_chart_df.apply(
-                    lambda row: row["Down duration (s)"] if "Down" in row["Phase"] else row["Up duration (s)"],
-                    axis=1,
-                )
-
                 chart = (
                     alt.Chart(rep_chart_df)
                     .mark_bar(size=28)
                     .encode(
                         x=alt.X("Repetition:O", title="Repetition"),
-                        y=alt.Y("Speed:Q", title=f"Speed ({speed_unit})"),
+                        y=alt.Y("Speed:Q", title="Speed (units/s)"),
                         color=alt.Color(
                             "Phase:N",
                             scale=alt.Scale(
-                                domain=list(renamed_cols.values()),
+                                domain=["Down speed (units/s)", "Up speed (units/s)"],
                                 range=["#e4572e", "#2e86de"],
                             ),
                             title="Phase",
@@ -889,8 +883,9 @@ def _results_panel() -> Dict[str, bool]:
                         tooltip=[
                             alt.Tooltip("Repetition:O"),
                             alt.Tooltip("Phase:N", title="Phase"),
-                            alt.Tooltip("Speed:Q", title=f"Speed ({speed_unit})", format=".2f"),
-                            alt.Tooltip("Phase duration (s):Q", title="Phase duration (s)", format=".2f"),
+                            alt.Tooltip("Speed:Q", title="Speed (units/s)", format=".2f"),
+                            alt.Tooltip("Down duration (s):Q", title="Down duration (s)", format=".2f"),
+                            alt.Tooltip("Up duration (s):Q", title="Up duration (s)", format=".2f"),
                             alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
                         ],
                     )
