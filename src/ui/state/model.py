@@ -36,7 +36,7 @@ CONFIG_DEFAULTS: Dict[str, float | str | bool] = {
     "use_crop": bool(DEFAULT_USE_CROP),
     "target_fps": 10.0,
     "model_complexity": int(MODEL_COMPLEXITY),
-    "strict_high": True,
+    "thresholds_enable": True,
 }
 
 
