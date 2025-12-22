@@ -289,13 +289,12 @@ def run_pipeline(
             "Skipping repetition counting."
         ).format(frames_processed=frames_processed, min_frames=cfg.video.min_frames)
         warnings.append(skip_reason)
+
     if fps_effective < cfg.video.min_fps:
-        message = (
-            f"Effective FPS {fps_effective:.2f} below the recommended minimum "
-            f"({cfg.video.min_fps}). Repetition counting accuracy may be affected."
+        counting_accuracy_warning = (
+            f"Effective FPS {int(round(fps_effective))} below the recommended minimum "
+            f"({int(round(cfg.video.min_fps))}). Repetition counting accuracy may be affected."
         )
-        warnings.append(message)
-        counting_accuracy_warning = message
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")

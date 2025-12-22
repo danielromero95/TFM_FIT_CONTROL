@@ -2,7 +2,7 @@
 
 **Repositorio:** `TFM_FIT_CONTROL`
 **Autor:** Daniel Romero
-**Version:** 3.0 (18-12-2025)
+**Version:** 3.1 (22-12-2025)
 
 ---
 
@@ -54,11 +54,26 @@ streamlit run src/app.py
 
 1. Sube un vídeo de entrenamiento.
 2. Detecta ejercicio y vista (automático o manual).
-3. Configura parámetros (FPS, rotación, vídeo de depuración, etc.).
+3. Configura parámetros (FPS, Modelo de MediaPipe, rotación, vídeo de depuración, etc.).
 4. Ejecuta el análisis (asíncrono; se muestra el progreso).
-5. Resultados: conteo de repeticiones, métricas, vídeo de depuración opcional y descargas.
+5. Resultados: conteo y velocidad de repeticiones, métricas, vídeo de depuración opcional y descargas.
 
 ---
+## Novedades en 3.1
+
+- **Visualización de velocidad de repetición.** Los resultados incluyen una gráfica y tabla de cadencia
+  por repetición para contextualizar el ritmo del atleta y detectar ralentizaciones o aceleraciones
+  entre repeticiones.
+- **Controles de rendimiento y avisos de FPS.** La configuración permite ajustar la complejidad del
+  modelo de pose y los FPS objetivo con ayudas descriptivas multilínea; la pipeline advierte sobre
+  vídeos de bajo FPS sin descartar repeticiones si puede contarlas con fiabilidad.
+- **Depuración y descargas simplificadas.** El informe de depuración combina métricas, configuración
+  efectiva y overlays reducidos en un solo paquete descargable con nombres de sesión estampados en el
+  tiempo, eliminando columnas redundantes y archivos auxiliares innecesarios.
+- **UI más compacta y coherente.** Se centran el título y los parámetros de ejecución, se reduce el
+  espaciado entre bloques, se ajustan los botones y se modernizan los componentes Streamlit para
+  mantener la compatibilidad con las APIs actuales.
+
 
 ## Novedades en 3.0
 
