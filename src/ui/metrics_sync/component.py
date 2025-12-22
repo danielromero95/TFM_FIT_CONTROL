@@ -154,7 +154,9 @@ def render_video_with_metrics_sync(
         signature = inspect.signature(html)
     except Exception:
         signature = None
-    html_kwargs: dict[str, object] = {"height": 560, "scrolling": False}
+    iframe_height = 760 if show_video_final else 460
+    html_kwargs: dict[str, object] = {"height": iframe_height, "scrolling": False}
+    
     if signature and "key" in signature.parameters:
         html_kwargs["key"] = key
 

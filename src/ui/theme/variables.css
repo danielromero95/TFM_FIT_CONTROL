@@ -30,7 +30,7 @@
   --fc-gap: var(--fc-space-4);
 
   /* Layout tokens */
-  --fc-step-vspace: var(--fc-space-2);
+  --fc-step-vspace: var(--fc-space-1);
   --fc-form-row-gap: var(--fc-space-1);
   --fc-hstack-gap: var(--fc-space-1);
   --fc-heading-bottom: var(--fc-space-1);

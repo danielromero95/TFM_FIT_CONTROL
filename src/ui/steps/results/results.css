@@ -6,11 +6,11 @@
   margin-top: 0 !important;
 }
 .results-panel .results-metrics-block .element-container {
-  margin-bottom: var(--fc-space-2);
+  margin-bottom: var(--fc-space-0);
 }
 .results-panel .results-metrics-block .element-container:last-child {
   margin-bottom: 0;
 }
 .results-panel .results-metrics-block {
-  margin-bottom: var(--fc-space-2);
+  margin-bottom: var(--fc-space-0);
 }
