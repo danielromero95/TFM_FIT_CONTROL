@@ -3,7 +3,16 @@ from __future__ import annotations
 import streamlit as st
 
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
-from src.ui.state import CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step, get_state, go_to
+from src.ui.state import (
+    CONFIG_DEFAULTS,
+    DEFAULT_EXERCISE_LABEL,
+    EXERCISE_THRESHOLDS,
+    Step,
+    default_configure_values,
+    get_state,
+    go_to,
+    migrate_thresholds_config,
+)
 from src.ui.steps.detect import EXERCISE_TO_CONFIG
 from ..utils import step_container
 
@@ -22,29 +31,60 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         state = get_state()
         stored_cfg = state.configure_values
         if stored_cfg is None:
-            cfg_values = CONFIG_DEFAULTS.copy()
+            cfg_values = default_configure_values()
         else:
-            cfg_values = {**CONFIG_DEFAULTS, **dict(stored_cfg)}
+            cfg_values = default_configure_values()
+            cfg_values.update(dict(stored_cfg))
         cfg_values["use_crop"] = True
 
+        exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
+        ex_key = EXERCISE_TO_CONFIG.get(
+            exercise_label, EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat")
+        )
+
+        cfg_values = migrate_thresholds_config(cfg_values, ex_key)
+
+        defaults = EXERCISE_THRESHOLDS.get(ex_key, EXERCISE_THRESHOLDS["squat"])
+        thresholds_by_exercise = cfg_values.get("thresholds_by_exercise") or {}
+        exercise_thresholds = thresholds_by_exercise.get(ex_key)
+        if exercise_thresholds is None:
+            exercise_thresholds = {
+                "low": defaults["low"],
+                "high": defaults["high"],
+                "custom": False,
+            }
+            thresholds_by_exercise = {
+                **thresholds_by_exercise,
+                ex_key: exercise_thresholds,
+            }
+
+        low_value = float(exercise_thresholds.get("low", defaults["low"]))
+        high_value = float(exercise_thresholds.get("high", defaults["high"]))
+
+        cfg_values["low"] = low_value
+        cfg_values["high"] = high_value
+        cfg_values["thresholds_by_exercise"] = thresholds_by_exercise
+
         col1, col2, col3 = st.columns(3)
+        low_key = f"cfg_low_{ex_key}"
+        high_key = f"cfg_high_{ex_key}"
         with col1:
             low = st.number_input(
                 "Lower threshold (°)",
                 min_value=0,
                 max_value=180,
-                value=int(cfg_values.get("low", CONFIG_DEFAULTS["low"])),
+                value=int(low_value),
                 disabled=disabled,
-                key="cfg_low",
+                key=low_key,
             )
         with col2:
             high = st.number_input(
                 "Upper threshold (°)",
                 min_value=0,
                 max_value=180,
-                value=int(cfg_values.get("high", CONFIG_DEFAULTS["high"])),
+                value=int(high_value),
                 disabled=disabled,
-                key="cfg_high",
+                key=high_key,
             )
         with col3:
             thresholds_enable = st.checkbox(
@@ -69,10 +109,6 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
         ):
             chosen_primary = getattr(state.report.stats, "primary_angle", None)
 
-        exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
-        ex_key = EXERCISE_TO_CONFIG.get(
-            exercise_label, EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat")
-        )
         candidates = _primary_candidates_for(ex_key)
         primary_display_value = (
             str(chosen_primary) if chosen_primary else (" / ".join(candidates) if candidates else "auto")
@@ -162,6 +198,17 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             "low": float(low),
             "high": float(high),
             "thresholds_enable": bool(thresholds_enable),
+            "thresholds_by_exercise": {
+                **thresholds_by_exercise,
+                ex_key: {
+                    "low": float(low),
+                    "high": float(high),
+                    "custom": bool(
+                        float(low) != defaults["low"]
+                        or float(high) != defaults["high"]
+                    ),
+                },
+            },
             "primary_angle": "auto",
             "debug_video": bool(debug_video),
             "debug_mode": bool(debug_mode),

@@ -11,7 +11,10 @@ from src.ui.state import (
     AppState,
     CONFIG_DEFAULTS,
     DEFAULT_EXERCISE_LABEL,
+    EXERCISE_THRESHOLDS,
     get_state,
+    default_configure_values,
+    migrate_thresholds_config,
 )
 
 
@@ -58,10 +61,26 @@ def prepare_pipeline_inputs(
         raise ValueError("The video to process was not found.")
 
     cfg = config.load_default()
-    cfg_values = state.configure_values or CONFIG_DEFAULTS
+    cfg_values = default_configure_values()
+    cfg_values.update(state.configure_values or {})
 
-    cfg.faults.low_thresh = float(cfg_values.get("low", CONFIG_DEFAULTS["low"]))
-    cfg.faults.high_thresh = float(cfg_values.get("high", CONFIG_DEFAULTS["high"]))
+    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
+    ex_key = EXERCISE_TO_CONFIG.get(
+        exercise_label,
+        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
+    )
+    cfg_values = migrate_thresholds_config(cfg_values, ex_key)
+
+    defaults = EXERCISE_THRESHOLDS.get(ex_key, EXERCISE_THRESHOLDS["squat"])
+    thresholds_by_exercise = cfg_values.get("thresholds_by_exercise") or {}
+    exercise_thresholds = thresholds_by_exercise.get(ex_key) or {
+        "low": defaults["low"],
+        "high": defaults["high"],
+        "custom": False,
+    }
+
+    cfg.faults.low_thresh = float(exercise_thresholds.get("low", defaults["low"]))
+    cfg.faults.high_thresh = float(exercise_thresholds.get("high", defaults["high"]))
     thresholds_enable = bool(cfg_values.get("thresholds_enable", True))
     cfg.counting.enforce_low_thresh = thresholds_enable
     cfg.counting.enforce_high_thresh = thresholds_enable
@@ -75,11 +94,7 @@ def prepare_pipeline_inputs(
     cfg.debug.debug_mode = bool(cfg_values.get("debug_mode", CONFIG_DEFAULTS.get("debug_mode", True)))
     cfg.pose.use_crop = True
 
-    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
-    cfg.counting.exercise = EXERCISE_TO_CONFIG.get(
-        exercise_label,
-        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
-    )
+    cfg.counting.exercise = ex_key
 
     det = state.detect_result
     prefetched_detection: Optional[Tuple[str, str, float]] = None
