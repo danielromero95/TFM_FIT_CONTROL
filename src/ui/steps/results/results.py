@@ -694,6 +694,60 @@ def _compute_rep_speeds(
     return pd.DataFrame(rows)
 
 
+def _exercise_key_from_report(report: Report | None) -> str | None:
+    """Best-effort extraction of the exercise key for the current run."""
+
+    if report is None:
+        return None
+
+    try:
+        counting_cfg = getattr(report.config_used, "counting", None)
+        exercise_from_config = getattr(counting_cfg, "exercise", None)
+        if exercise_from_config:
+            return str(exercise_from_config)
+    except Exception:
+        pass
+
+    stats = getattr(report, "stats", None)
+    exercise_detected = getattr(stats, "exercise_detected", None)
+    if exercise_detected:
+        return str(getattr(exercise_detected, "value", exercise_detected))
+
+    return None
+
+
+def phase_order_for_exercise(exercise_key: str | None) -> Tuple[str, str]:
+    """Return the label order for the two phases of a repetition."""
+
+    if str(exercise_key).lower() == "deadlift":
+        return ("Up", "Down")
+    return ("Down", "Up")
+
+
+def _build_rep_speed_chart_df(
+    rep_speeds_df: pd.DataFrame, phase_order: Tuple[str, str]
+) -> pd.DataFrame:
+    """Reshape per-repetition speeds for charting with the requested phase order."""
+
+    def _phase_cols(label: str) -> Tuple[str, str]:
+        if label == "Up":
+            return ("Up speed (deg/s)", "Up duration (s)")
+        return ("Down speed (deg/s)", "Down duration (s)")
+
+    phase_frames = []
+    for label in phase_order:
+        speed_col, duration_col = _phase_cols(label)
+        phase_frames.append(
+            rep_speeds_df[
+                ["Repetition", speed_col, duration_col, "Cadence (reps/min)"]
+            ]
+            .rename(columns={speed_col: "Speed", duration_col: "Phase duration (s)"})
+            .assign(Phase=label)
+        )
+
+    return pd.concat(phase_frames, ignore_index=True)
+
+
 def _results_panel() -> Dict[str, bool]:
     with step_container("results"):
         st.markdown("### 5. Results")
@@ -710,6 +764,7 @@ def _results_panel() -> Dict[str, bool]:
         elif state.report is not None:
             report: Report = state.report
             stats: RunStats = report.stats
+            exercise_key = _exercise_key_from_report(report)
             repetitions = report.repetitions
             metrics_df = report.metrics
             if metrics_df is not None:
@@ -845,47 +900,22 @@ def _results_panel() -> Dict[str, bool]:
             )
             if not rep_speeds_df.empty:
                 st.markdown("#### Repetition speed")
-                st.caption(
-                    "Down = top to bottom of the rep. Up = bottom back to the top. "
-                    "Angular speeds (deg/s) are derived from the primary angle, so linear m/s values "
-                    "aren't available with the normalized pose coordinates."
-                )
+                phase_order = phase_order_for_exercise(exercise_key)
+                if phase_order[0] == "Up":
+                    caption = (
+                        "Up = bottom back to the top of the rep. Down = top to bottom. "
+                        "Angular speeds (deg/s) are derived from the primary angle, so linear m/s values "
+                        "aren't available with the normalized pose coordinates."
+                    )
+                else:
+                    caption = (
+                        "Down = top to bottom of the rep. Up = bottom back to the top. "
+                        "Angular speeds (deg/s) are derived from the primary angle, so linear m/s values "
+                        "aren't available with the normalized pose coordinates."
+                    )
+                st.caption(caption)
 
-                rep_chart_df = pd.concat(
-                    [
-                        rep_speeds_df[
-                            [
-                                "Repetition",
-                                "Down speed (deg/s)",
-                                "Down duration (s)",
-                                "Cadence (reps/min)",
-                            ]
-                        ]
-                        .rename(
-                            columns={
-                                "Down speed (deg/s)": "Speed",
-                                "Down duration (s)": "Phase duration (s)",
-                            }
-                        )
-                        .assign(Phase="Down"),
-                        rep_speeds_df[
-                            [
-                                "Repetition",
-                                "Up speed (deg/s)",
-                                "Up duration (s)",
-                                "Cadence (reps/min)",
-                            ]
-                        ]
-                        .rename(
-                            columns={
-                                "Up speed (deg/s)": "Speed",
-                                "Up duration (s)": "Phase duration (s)",
-                            }
-                        )
-                        .assign(Phase="Up"),
-                    ],
-                    ignore_index=True,
-                )
+                rep_chart_df = _build_rep_speed_chart_df(rep_speeds_df, phase_order)
                 chart = (
                     alt.Chart(rep_chart_df)
                     .mark_bar(size=28)
@@ -895,8 +925,11 @@ def _results_panel() -> Dict[str, bool]:
                         color=alt.Color(
                             "Phase:N",
                             scale=alt.Scale(
-                                domain=["Down", "Up"],
-                                range=["#e4572e", "#2e86de"],
+                                domain=list(phase_order),
+                                range=[
+                                    "#2e86de" if phase_order[0] == "Up" else "#e4572e",
+                                    "#e4572e" if phase_order[1] == "Down" else "#2e86de",
+                                ],
                             ),
                             title="Phase",
                         ),
