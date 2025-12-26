@@ -237,3 +237,16 @@ def test_make_web_safe_h264_handles_missing_ffmpeg(tmp_path, monkeypatch):
     assert not result.ok
     assert result.output_path is None
     assert not expected_path.exists()
+
+def test_mapping_global_landmarks_ignores_pixel_crop_box():
+    landmarks = [{"x": 0.5, "y": 0.5}]
+    crop_box = [100, 50, 200, 150]
+    points = _normalize_points_for_frame(
+        landmarks,
+        crop_box,
+        orig_w=640,
+        orig_h=360,
+        proc_w=256,
+        proc_h=256,
+    )
+    assert points[0] == (320, 180)
