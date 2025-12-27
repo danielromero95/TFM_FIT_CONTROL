@@ -642,6 +642,18 @@ def _compute_rep_intervals(
             lower_threshold = getattr(counting_cfg, "lower_threshold", None)
         if upper_threshold is None and counting_cfg is not None:
             upper_threshold = getattr(counting_cfg, "upper_threshold", None)
+        if lower_threshold is None and faults_cfg is not None:
+            lower_threshold = getattr(faults_cfg, "low_thresh", None)
+        if upper_threshold is None and faults_cfg is not None:
+            upper_threshold = getattr(faults_cfg, "high_thresh", None)
+        if lower_threshold is None and counting_cfg is not None:
+            lower_threshold = getattr(counting_cfg, "lower_thresh", None)
+        if upper_threshold is None and counting_cfg is not None:
+            upper_threshold = getattr(counting_cfg, "upper_thresh", None)
+        if lower_threshold is None and faults_cfg is not None:
+            lower_threshold = getattr(faults_cfg, "lower_thresh", None)
+        if upper_threshold is None and faults_cfg is not None:
+            upper_threshold = getattr(faults_cfg, "upper_thresh", None)
 
         def _threshold_intervals() -> List[Tuple[int, int]]:
             if lower_threshold is None or upper_threshold is None:
