@@ -429,3 +429,49 @@ def test_deadlift_threshold_intervals_match_reported_reps(monkeypatch):
 
     assert chart_df.shape[0] == 2 * len(rep_speeds_df)
     assert not chart_df[["Speed", "Phase duration (s)"]].isna().any().any()
+
+
+def test_deadlift_threshold_intervals_use_faults_config(monkeypatch):
+    monkeypatch.setattr("src.ui.steps.results.results.find_peaks", None)
+
+    angles = []
+    bottoms = [0.0, 0.5, 1.5]
+    for bottom in bottoms:
+        up = np.linspace(bottom, 10.0, 5)
+        down = np.linspace(10.0, bottom, 5)[1:]
+        angles.extend(up)
+        angles.extend(down)
+
+    frame_idx = np.arange(len(angles))
+    metrics_df = pd.DataFrame({"frame_idx": frame_idx, "angle": angles})
+    stats = _dummy_stats(exercise="deadlift")
+    report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
+    report.config_used.faults = SimpleNamespace(low_thresh=2.0, high_thresh=8.0)
+
+    rep_intervals, _, frame_values, primary_metric = _compute_rep_intervals(
+        metrics_df=metrics_df,
+        report=report,
+        stats=stats,
+        numeric_columns=["angle"],
+        exercise_key="deadlift",
+    )
+
+    assert len(rep_intervals) == report.repetitions
+    assert not getattr(report.stats, "counting_accuracy_warning", None)
+
+    rep_speeds_df = _compute_rep_speeds(
+        rep_intervals,
+        stats,
+        exercise_key="deadlift",
+        valley_frames=[],
+        frame_values=frame_values,
+        metrics_df=metrics_df,
+        primary_metric=primary_metric,
+    )
+
+    chart_df = _build_rep_speed_chart_df(
+        rep_speeds_df, phase_order_for_exercise("deadlift")
+    )
+
+    assert chart_df.shape[0] == 2 * len(rep_speeds_df)
+    assert not chart_df[["Speed", "Phase duration (s)"]].isna().any().any()
