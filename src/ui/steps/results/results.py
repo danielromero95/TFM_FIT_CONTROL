@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -519,19 +520,26 @@ def _compute_rep_intervals(
     report: Report,
     stats: RunStats,
     numeric_columns: List[str],
+    *,
+    exercise_key: str | None,
 ) -> Tuple[List[Tuple[int, int]], List[int], pd.Series, str | None]:
     if metrics_df.empty:
         return [], [], pd.Series(dtype=float), None
 
+    # Preserve frame_idx for time mapping but operate on a stable positional index
+    try:
+        metrics_df = metrics_df.reset_index(drop=True)
+    except Exception:
+        metrics_df = metrics_df.copy()
+
     fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
     fps = fps if fps > 0 else 1.0
 
-    df = metrics_df.reset_index(drop=True)
-    if "frame_idx" in df.columns:
-        frame_values = pd.to_numeric(df["frame_idx"], errors="coerce")
-        frame_values = frame_values.where(~frame_values.isna(), pd.Series(range(len(df))))
+    if "frame_idx" in metrics_df.columns:
+        frame_values = pd.to_numeric(metrics_df["frame_idx"], errors="coerce")
     else:
-        frame_values = pd.Series(range(len(df)))
+        frame_values = pd.Series(metrics_df.index.to_numpy(), index=metrics_df.index)
+    frame_values = frame_values.where(~frame_values.isna(), pd.Series(range(len(metrics_df)), index=metrics_df.index))
 
     if frame_values.empty:
         return [], [], frame_values, None
@@ -540,37 +548,48 @@ def _compute_rep_intervals(
     last_frame = int(frame_values.iloc[-1]) if len(frame_values) > 1 else first_frame + 1
 
     candidate = getattr(stats, "primary_angle", None)
-    if not candidate or candidate not in df.columns:
+    if not candidate or candidate not in metrics_df.columns:
         for fb in ("left_knee", "right_knee"):
-            if fb in df.columns:
+            if fb in metrics_df.columns:
                 candidate = fb
                 break
-    if not candidate or candidate not in df.columns:
+    if not candidate or candidate not in metrics_df.columns:
         candidate = numeric_columns[0] if numeric_columns else None
-    if not candidate or candidate not in df.columns:
+    if not candidate or candidate not in metrics_df.columns:
         return [], [], frame_values, None
 
     valley_indices: List[int] = []
+    rep_intervals_by_index: List[Tuple[int, int]] = []
     config_used = getattr(report, "config_used", None)
     counting_cfg = getattr(config_used, "counting", None)
     faults_cfg = getattr(config_used, "faults", None)
     if counting_cfg is not None:
         try:
             _, debug = count_repetitions_with_config(
-                df, counting_cfg, fps, faults_cfg=faults_cfg
+                metrics_df, counting_cfg, fps, faults_cfg=faults_cfg
             )
             valley_indices = list(getattr(debug, "valley_indices", []))
+            rep_intervals_by_index = list(getattr(debug, "rep_intervals", []) or [])
+            if not rep_intervals_by_index:
+                rep_starts = getattr(debug, "rep_start_frames", None)
+                rep_ends = getattr(debug, "rep_end_frames", None)
+                if rep_starts is not None and rep_ends is not None:
+                    rep_intervals_by_index = list(zip(rep_starts, rep_ends))
         except Exception:
             valley_indices = []
+            rep_intervals_by_index = []
 
     if not valley_indices and find_peaks is not None:
-        series = pd.to_numeric(df[candidate], errors="coerce").ffill().bfill().to_numpy()
-        if series.size:
+        series = pd.to_numeric(metrics_df[candidate], errors="coerce")
+        series_interp = series.interpolate(limit_direction="both")
+        if series_interp.size:
             prominence = float(getattr(stats, "min_prominence", 0.0) or 0.0)
             prominence_param = None if prominence <= 0 else prominence
             distance_sec = float(getattr(stats, "min_distance_sec", 0.0) or 0.0)
             distance_frames = max(1, int(round(distance_sec * fps)))
-            valleys, _ = find_peaks(-series, prominence=prominence_param, distance=distance_frames)
+            valleys, _ = find_peaks(
+                -series_interp.to_numpy(), prominence=prominence_param, distance=distance_frames
+            )
             valley_indices = [int(i) for i in valleys]
             refractory_sec = float(getattr(stats, "refractory_sec", 0.0) or 0.0)
             if refractory_sec > 0 and valley_indices:
@@ -582,66 +601,244 @@ def _compute_rep_intervals(
                     filtered.append(idx)
                 valley_indices = filtered
 
-    if not valley_indices:
-        return [], [], frame_values, candidate
-
     frame_count = len(frame_values)
-    valley_frames = []
-    for idx in valley_indices:
-        pos = min(max(idx, 0), frame_count - 1)
-        valley_frames.append(int(frame_values.iloc[pos]))
+    valley_indices = [min(max(int(idx), 0), frame_count - 1) for idx in valley_indices]
+    valley_indices = sorted(dict.fromkeys(valley_indices))
 
-    valley_frames = sorted(set(valley_frames))
-    if not valley_frames:
+    series_interp_full = pd.to_numeric(metrics_df[candidate], errors="coerce").interpolate(
+        limit_direction="both"
+    )
+
+    exercise = (exercise_key or "").lower()
+
+    if not valley_indices and not rep_intervals_by_index and exercise != "deadlift":
         return [], [], frame_values, candidate
 
-    total_frames = max(last_frame, first_frame)
-    if total_frames <= first_frame:
-        total_frames = first_frame + max(len(df) - 1, 1)
+    def _frame_at_index(pos: int) -> int:
+        pos = min(max(pos, 0), frame_count - 1)
+        try:
+            return int(frame_values.iloc[pos])
+        except Exception:
+            return int(frame_values.to_numpy()[pos])
+
+    valley_frames = [_frame_at_index(idx) for idx in valley_indices]
+    valley_frames = sorted(dict.fromkeys(valley_frames))
+
+    expected_reps = getattr(report, "repetitions", None)
+    expected_reps = int(expected_reps) if isinstance(expected_reps, (int, float)) and expected_reps > 0 else None
 
     intervals: List[Tuple[int, int]] = []
-    for i, frame in enumerate(valley_frames):
-        start_frame = first_frame if i == 0 else int(round((valley_frames[i - 1] + frame) / 2))
-        end_frame = total_frames if i == len(valley_frames) - 1 else int(round((frame + valley_frames[i + 1]) / 2))
-        start_frame = max(first_frame, start_frame)
-        end_frame = max(start_frame, end_frame)
-        intervals.append((start_frame, end_frame))
+
+    if rep_intervals_by_index:
+        for start_idx, end_idx in rep_intervals_by_index:
+            start_frame = _frame_at_index(int(start_idx))
+            end_frame = _frame_at_index(int(end_idx))
+            end_frame = max(start_frame + 1, end_frame)
+            intervals.append((start_frame, end_frame))
+    elif exercise == "deadlift":
+        lower_threshold = getattr(stats, "lower_threshold", None)
+        upper_threshold = getattr(stats, "upper_threshold", None)
+        if lower_threshold is None and counting_cfg is not None:
+            lower_threshold = getattr(counting_cfg, "lower_threshold", None)
+        if upper_threshold is None and counting_cfg is not None:
+            upper_threshold = getattr(counting_cfg, "upper_threshold", None)
+
+        def _threshold_intervals() -> List[Tuple[int, int]]:
+            if lower_threshold is None or upper_threshold is None:
+                return []
+            try:
+                lower_val = float(lower_threshold)
+                upper_val = float(upper_threshold)
+            except Exception:
+                return []
+            if not math.isfinite(lower_val) or not math.isfinite(upper_val):
+                return []
+            intervals_from_thresholds: List[Tuple[int, int]] = []
+            start_idx: int | None = None
+            above_seen = False
+            for idx, val in series_interp_full.items():
+                if not math.isfinite(val):
+                    continue
+                if val <= lower_val:
+                    if start_idx is None:
+                        start_idx = idx
+                    if above_seen and start_idx is not None:
+                        end_idx = idx
+                        start_frame = _frame_at_index(start_idx)
+                        end_frame = _frame_at_index(end_idx)
+                        end_frame = max(start_frame + 1, end_frame)
+                        intervals_from_thresholds.append((start_frame, end_frame))
+                        start_idx = idx
+                        above_seen = False
+                elif start_idx is not None and val >= upper_val:
+                    above_seen = True
+            return intervals_from_thresholds
+
+        intervals = _threshold_intervals()
+
+        if not intervals and valley_indices:
+            first_valley_idx = valley_indices[0]
+            if first_valley_idx > 0:
+                prefix = series_interp_full.iloc[: first_valley_idx + 1]
+                if not prefix.empty and not prefix.isna().all():
+                    inferred_idx = int(prefix.idxmin())
+                    if inferred_idx < first_valley_idx:
+                        valley_indices = [inferred_idx] + valley_indices
+                        valley_frames = [_frame_at_index(inferred_idx)] + valley_frames
+
+            last_valley_idx = valley_indices[-1]
+            if last_valley_idx < frame_count - 1:
+                suffix = series_interp_full.iloc[last_valley_idx:]
+                if not suffix.empty and not suffix.isna().all():
+                    inferred_end_idx = int(suffix.idxmin())
+                    if inferred_end_idx > last_valley_idx:
+                        valley_indices = valley_indices + [inferred_end_idx]
+                        valley_frames = valley_frames + [_frame_at_index(inferred_end_idx)]
+
+            valley_indices = sorted(dict.fromkeys(valley_indices))
+            valley_frames = sorted(dict.fromkeys(valley_frames))
+
+            for i in range(len(valley_indices) - 1):
+                start_idx = valley_indices[i]
+                end_idx = valley_indices[i + 1]
+                start_frame = _frame_at_index(start_idx)
+                end_frame = _frame_at_index(end_idx)
+                end_frame = max(start_frame + 1, end_frame)
+                intervals.append((start_frame, end_frame))
+    else:
+        if not rep_intervals_by_index and len(valley_indices) > 1:
+            rep_intervals_by_index = list(zip(valley_indices[:-1], valley_indices[1:]))
+        elif not rep_intervals_by_index and len(valley_indices) == 1:
+            rep_intervals_by_index = [(0, frame_count - 1)]
+        for start_idx, end_idx in rep_intervals_by_index:
+            start_frame = _frame_at_index(start_idx)
+            end_frame = _frame_at_index(end_idx)
+            end_frame = max(start_frame + 1, end_frame)
+            intervals.append((start_frame, end_frame))
+
+    if expected_reps is not None:
+        if len(intervals) > expected_reps:
+            intervals = intervals[:expected_reps]
+        elif len(intervals) < expected_reps:
+            warning_msg = (
+                f"Repetition speed uses {len(intervals)} intervals because only {len(valley_indices)} bottoms were detected; "
+                "some reps may be missing."
+            )
+            try:
+                if not getattr(stats, "counting_accuracy_warning", None):
+                    stats.counting_accuracy_warning = warning_msg
+            except Exception:
+                pass
+
     return intervals, valley_frames, frame_values, candidate
+
+
+def _metric_extreme(metric_name: str | None) -> str:
+    """Return the expected "bottom" extreme for the metric ("min" or "max")."""
+
+    if not metric_name:
+        return "min"
+
+    name = metric_name.lower()
+    if "trunk_inclination" in name or name.startswith("trunk_"):
+        return "max"
+    return "min"
 
 
 def _compute_rep_speeds(
     rep_intervals: List[Tuple[int, int]],
     stats: RunStats,
     *,
+    exercise_key: str | None,
     valley_frames: List[int],
     frame_values: pd.Series,
     metrics_df: pd.DataFrame | None,
     primary_metric: str | None,
-) -> pd.DataFrame:
+    ) -> pd.DataFrame:
     """Estimate per-rep cadence, duration, and phase speeds from frame intervals."""
 
     if not rep_intervals:
         return pd.DataFrame()
+
+    try:
+        metrics_df = metrics_df.reset_index(drop=True) if metrics_df is not None else None
+    except Exception:
+        metrics_df = metrics_df.copy() if metrics_df is not None else None
 
     fps = float(getattr(stats, "fps_effective", 0.0) or 0.0)
     fps = fps if fps > 0 else 1.0
 
     if metrics_df is None or metrics_df.empty or primary_metric not in metrics_df.columns:
         metrics_series = None
+        metrics_interp = None
     else:
         metrics_series = pd.to_numeric(metrics_df[primary_metric], errors="coerce")
+        metrics_interp = metrics_series.interpolate(limit_direction="both")
+
+    pose_ok = None
+    if metrics_df is not None and "pose_ok" in metrics_df.columns:
+        try:
+            pose_ok = pd.to_numeric(metrics_df["pose_ok"], errors="coerce").to_numpy(
+                copy=False
+            )
+        except Exception:
+            pose_ok = None
+
+    frame_arr = frame_values.to_numpy(copy=False)
+    raw_values = metrics_series.to_numpy(copy=False) if metrics_series is not None else None
 
     def _metric_at_frame(frame: int) -> float:
-        if metrics_series is None or frame_values.empty:
+        if frame_values.empty:
+            return math.nan
+        if metrics_interp is None and metrics_series is None:
             return math.nan
         try:
-            nearest_idx = (frame_values - frame).abs().idxmin()
+            nearest_pos = int(np.nanargmin(np.abs(frame_arr - frame)))
         except Exception:
             return math.nan
+        series_for_lookup = metrics_interp if metrics_interp is not None else metrics_series
         try:
-            return float(metrics_series.iloc[int(nearest_idx)])
+            return float(series_for_lookup.iloc[nearest_pos])
         except Exception:
             return math.nan
+
+    def _nearest_valid_frame(frame: int, start: int, end: int) -> int:
+        if raw_values is None or not len(raw_values) or frame_values.empty:
+            return frame
+        try:
+            interval_mask = (frame_arr >= start) & (frame_arr <= end)
+        except Exception:
+            return frame
+        if not interval_mask.any():
+            return frame
+        valid_mask = interval_mask & np.isfinite(raw_values)
+        if pose_ok is not None:
+            try:
+                valid_mask = valid_mask & (pose_ok >= 0.5)
+            except Exception:
+                pass
+        if not valid_mask.any():
+            return frame
+        candidate_positions = np.nonzero(valid_mask)[0]
+        if candidate_positions.size == 0:
+            return frame
+        candidate_frames = frame_arr[candidate_positions]
+        finite_mask = np.isfinite(candidate_frames)
+        if not finite_mask.any():
+            return frame
+        candidate_positions = candidate_positions[finite_mask]
+        candidate_frames = candidate_frames[finite_mask]
+        try:
+            pos = int(candidate_positions[np.nanargmin(np.abs(candidate_frames - frame))])
+            return int(frame_arr[pos])
+        except Exception:
+            return frame
+
+    exercise = (exercise_key or "").lower()
+    first_phase_label, second_phase_label = (
+        ("Up", "Down") if exercise == "deadlift" else ("Down", "Up")
+    )
+    bottom_extreme = _metric_extreme(primary_metric)
 
     rows: List[Dict[str, float]] = []
     for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
@@ -649,32 +846,71 @@ def _compute_rep_speeds(
         duration_s = span_frames / fps
         cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
 
-        bottom_frame = valley_frames[i - 1] if i - 1 < len(valley_frames) else int(round((start_frame + end_frame) / 2))
-        bottom_frame = min(max(bottom_frame, start_frame), end_frame)
+        def _turning_point(
+            start: int, end: int, *, use_max: bool
+        ) -> Tuple[int, float]:
+            if metrics_interp is None or frame_values.empty:
+                return start, math.nan
+            mask = (frame_values >= start) & (frame_values <= end)
+            try:
+                masked = metrics_interp[mask]
+            except Exception:
+                masked = metrics_interp.iloc[0:0]
+            if masked.empty or masked.isna().all():
+                return start, math.nan
+            idx = masked.idxmax() if use_max else masked.idxmin()
+            try:
+                frame_at_turn = int(frame_values.loc[idx])
+            except Exception:
+                try:
+                    pos = metrics_interp.index.get_loc(idx)
+                    frame_at_turn = int(frame_values.iloc[pos])
+                except Exception:
+                    frame_at_turn = start
+            frame_at_turn = min(max(frame_at_turn, start), end)
+            return frame_at_turn, float(masked.loc[idx])
 
-        start_val = _metric_at_frame(start_frame)
-        bottom_val = _metric_at_frame(bottom_frame)
-        end_val = _metric_at_frame(end_frame)
+        use_max_turning = bottom_extreme == "min" if exercise == "deadlift" else bottom_extreme == "max"
+        turning_frame, turning_val = _turning_point(start_frame, end_frame, use_max=use_max_turning)
 
-        first_phase_frames = max(1, bottom_frame - start_frame)
-        second_phase_frames = max(1, end_frame - bottom_frame)
+        start_sample_frame = _nearest_valid_frame(start_frame, start_frame, turning_frame)
+        end_sample_frame = _nearest_valid_frame(end_frame, turning_frame, end_frame)
 
-        down_duration = first_phase_frames / fps
-        up_duration = second_phase_frames / fps
+        start_val = _metric_at_frame(start_sample_frame)
+        end_val = _metric_at_frame(end_sample_frame)
 
-        if any(math.isnan(v) for v in (start_val, bottom_val)):
-            down_speed = math.nan
+        first_phase_frames = max(1, turning_frame - start_frame)
+        second_phase_frames = max(1, end_frame - turning_frame)
+
+        first_duration = first_phase_frames / fps
+        second_duration = second_phase_frames / fps
+
+        if any(math.isnan(v) for v in (start_val, turning_val)):
+            first_speed = math.nan
         else:
-            down_speed = (
-                abs(start_val - bottom_val) / down_duration if down_duration > 0 else math.nan
+            first_speed = (
+                abs(start_val - turning_val) / first_duration if first_duration > 0 else math.nan
             )
 
-        if any(math.isnan(v) for v in (end_val, bottom_val)):
-            up_speed = math.nan
+        if any(math.isnan(v) for v in (end_val, turning_val)):
+            second_speed = math.nan
         else:
-            up_speed = (
-                abs(end_val - bottom_val) / up_duration if up_duration > 0 else math.nan
+            second_speed = (
+                abs(end_val - turning_val) / second_duration if second_duration > 0 else math.nan
             )
+
+        missing_data = math.isnan(first_speed) or math.isnan(second_speed)
+
+        if first_phase_label == "Up":
+            up_duration = first_duration
+            up_speed = first_speed
+            down_duration = second_duration
+            down_speed = second_speed
+        else:
+            down_duration = first_duration
+            down_speed = first_speed
+            up_duration = second_duration
+            up_speed = second_speed
 
         rows.append(
             {
@@ -683,11 +919,12 @@ def _compute_rep_speeds(
                 "End frame": float(end_frame),
                 "Duration (s)": duration_s,
                 "Cadence (reps/min)": cadence_rps * 60.0,
-                "Bottom frame": float(bottom_frame),
+                "Bottom frame": float(turning_frame),
                 "Down duration (s)": down_duration,
                 "Up duration (s)": up_duration,
                 "Down speed (deg/s)": down_speed,
                 "Up speed (deg/s)": up_speed,
+                "Missing data": missing_data,
             }
         )
 
@@ -729,18 +966,24 @@ def _build_rep_speed_chart_df(
 ) -> pd.DataFrame:
     """Reshape per-repetition speeds for charting with the requested phase order."""
 
+    if rep_speeds_df.empty:
+        return pd.DataFrame(columns=["Repetition", "Speed", "Phase duration (s)", "Phase"])
+
     def _phase_cols(label: str) -> Tuple[str, str]:
         if label == "Up":
             return ("Up speed (deg/s)", "Up duration (s)")
         return ("Down speed (deg/s)", "Down duration (s)")
 
     phase_frames = []
+    base_cols = ["Repetition", "Cadence (reps/min)"]
+    if "Missing data" in rep_speeds_df.columns:
+        base_cols.append("Missing data")
+
     for label in phase_order:
         speed_col, duration_col = _phase_cols(label)
+        use_cols = base_cols + [speed_col, duration_col]
         phase_frames.append(
-            rep_speeds_df[
-                ["Repetition", speed_col, duration_col, "Cadence (reps/min)"]
-            ]
+            rep_speeds_df[use_cols]
             .rename(columns={speed_col: "Speed", duration_col: "Phase duration (s)"})
             .assign(Phase=label)
         )
@@ -766,9 +1009,11 @@ def _results_panel() -> Dict[str, bool]:
             stats: RunStats = report.stats
             exercise_key = _exercise_key_from_report(report)
             repetitions = report.repetitions
-            metrics_df = report.metrics
-            if metrics_df is not None:
-                metrics_df = metrics_df.reset_index(drop=True)
+            metrics_df_raw = report.metrics
+            try:
+                metrics_df = metrics_df_raw.reset_index(drop=True) if metrics_df_raw is not None else None
+            except Exception:
+                metrics_df = metrics_df_raw
 
             numeric_columns: List[str] = []
             if metrics_df is not None:
@@ -806,6 +1051,7 @@ def _results_panel() -> Dict[str, bool]:
                     report=report,
                     stats=stats,
                     numeric_columns=(numeric_columns if numeric_columns else metric_options),
+                    exercise_key=exercise_key,
                 )
                 if metric_options:
                     # Prefer exercise-specific metrics for defaults
@@ -893,6 +1139,7 @@ def _results_panel() -> Dict[str, bool]:
             rep_speeds_df = _compute_rep_speeds(
                 rep_intervals,
                 stats,
+                exercise_key=exercise_key,
                 valley_frames=valley_frames,
                 frame_values=frame_values,
                 metrics_df=metrics_df,
