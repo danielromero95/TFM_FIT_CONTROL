@@ -602,7 +602,13 @@ def _compute_rep_intervals(
                 valley_indices = filtered
 
     frame_count = len(frame_values)
-    valley_indices = [min(max(int(idx), 0), frame_count - 1) for idx in valley_indices]
+    frame_set = set(
+        pd.to_numeric(frame_values, errors="coerce").dropna().astype(int).tolist()
+    )
+    try:
+        valley_indices = [int(idx) for idx in valley_indices]
+    except Exception:
+        valley_indices = []
     valley_indices = sorted(dict.fromkeys(valley_indices))
 
     series_interp_full = pd.to_numeric(metrics_df[candidate], errors="coerce").interpolate(
@@ -621,7 +627,15 @@ def _compute_rep_intervals(
         except Exception:
             return int(frame_values.to_numpy()[pos])
 
-    valley_frames = [_frame_at_index(idx) for idx in valley_indices]
+    def _to_frame(v: int) -> int:
+        v = int(v)
+        if v in frame_set:
+            return v
+        if 0 <= v < frame_count:
+            return _frame_at_index(v)
+        return v
+
+    valley_frames = [_to_frame(idx) for idx in valley_indices]
     valley_frames = sorted(dict.fromkeys(valley_frames))
 
     expected_reps = getattr(report, "repetitions", None)
@@ -629,104 +643,142 @@ def _compute_rep_intervals(
 
     intervals: List[Tuple[int, int]] = []
 
-    if rep_intervals_by_index:
-        for start_idx, end_idx in rep_intervals_by_index:
-            start_frame = _frame_at_index(int(start_idx))
-            end_frame = _frame_at_index(int(end_idx))
+    def _midpoint_intervals_from_valleys() -> List[Tuple[int, int]]:
+        intervals_from_valleys: List[Tuple[int, int]] = []
+        if not valley_frames:
+            return intervals_from_valleys
+
+        total_frames = last_frame
+        if total_frames <= first_frame:
+            total_frames = first_frame + 1
+
+        def _midpoint(a: int, b: int) -> int:
+            return int((a + b) / 2)
+
+        for i, valley_frame in enumerate(valley_frames):
+            if i == 0:
+                start_frame = first_frame
+            else:
+                start_frame = _midpoint(valley_frames[i - 1], valley_frame)
+
+            if i == len(valley_frames) - 1:
+                end_frame = total_frames
+            else:
+                end_frame = _midpoint(valley_frame, valley_frames[i + 1])
+
             end_frame = max(start_frame + 1, end_frame)
-            intervals.append((start_frame, end_frame))
-    elif exercise == "deadlift":
-        lower_threshold = getattr(stats, "lower_threshold", None)
-        upper_threshold = getattr(stats, "upper_threshold", None)
-        if lower_threshold is None and counting_cfg is not None:
-            lower_threshold = getattr(counting_cfg, "lower_threshold", None)
-        if upper_threshold is None and counting_cfg is not None:
-            upper_threshold = getattr(counting_cfg, "upper_threshold", None)
-        if lower_threshold is None and faults_cfg is not None:
-            lower_threshold = getattr(faults_cfg, "low_thresh", None)
-        if upper_threshold is None and faults_cfg is not None:
-            upper_threshold = getattr(faults_cfg, "high_thresh", None)
-        if lower_threshold is None and counting_cfg is not None:
-            lower_threshold = getattr(counting_cfg, "lower_thresh", None)
-        if upper_threshold is None and counting_cfg is not None:
-            upper_threshold = getattr(counting_cfg, "upper_thresh", None)
-        if lower_threshold is None and faults_cfg is not None:
-            lower_threshold = getattr(faults_cfg, "lower_thresh", None)
-        if upper_threshold is None and faults_cfg is not None:
-            upper_threshold = getattr(faults_cfg, "upper_thresh", None)
+            intervals_from_valleys.append((start_frame, end_frame))
 
-        def _threshold_intervals() -> List[Tuple[int, int]]:
-            if lower_threshold is None or upper_threshold is None:
-                return []
-            try:
-                lower_val = float(lower_threshold)
-                upper_val = float(upper_threshold)
-            except Exception:
-                return []
-            if not math.isfinite(lower_val) or not math.isfinite(upper_val):
-                return []
-            intervals_from_thresholds: List[Tuple[int, int]] = []
-            start_idx: int | None = None
-            above_seen = False
-            for idx, val in series_interp_full.items():
-                if not math.isfinite(val):
-                    continue
-                if val <= lower_val:
-                    if start_idx is None:
-                        start_idx = idx
-                    if above_seen and start_idx is not None:
-                        end_idx = idx
-                        start_frame = _frame_at_index(start_idx)
-                        end_frame = _frame_at_index(end_idx)
-                        end_frame = max(start_frame + 1, end_frame)
-                        intervals_from_thresholds.append((start_frame, end_frame))
-                        start_idx = idx
-                        above_seen = False
-                elif start_idx is not None and val >= upper_val:
-                    above_seen = True
-            return intervals_from_thresholds
+        return intervals_from_valleys
 
-        intervals = _threshold_intervals()
-
-        if not intervals and valley_indices:
-            first_valley_idx = valley_indices[0]
-            if first_valley_idx > 0:
-                prefix = series_interp_full.iloc[: first_valley_idx + 1]
-                if not prefix.empty and not prefix.isna().all():
-                    inferred_idx = int(prefix.idxmin())
-                    if inferred_idx < first_valley_idx:
-                        valley_indices = [inferred_idx] + valley_indices
-                        valley_frames = [_frame_at_index(inferred_idx)] + valley_frames
-
-            last_valley_idx = valley_indices[-1]
-            if last_valley_idx < frame_count - 1:
-                suffix = series_interp_full.iloc[last_valley_idx:]
-                if not suffix.empty and not suffix.isna().all():
-                    inferred_end_idx = int(suffix.idxmin())
-                    if inferred_end_idx > last_valley_idx:
-                        valley_indices = valley_indices + [inferred_end_idx]
-                        valley_frames = valley_frames + [_frame_at_index(inferred_end_idx)]
-
-            valley_indices = sorted(dict.fromkeys(valley_indices))
-            valley_frames = sorted(dict.fromkeys(valley_frames))
-
-            for i in range(len(valley_indices) - 1):
-                start_idx = valley_indices[i]
-                end_idx = valley_indices[i + 1]
-                start_frame = _frame_at_index(start_idx)
-                end_frame = _frame_at_index(end_idx)
+    if exercise == "deadlift":
+        if rep_intervals_by_index:
+            for start_idx, end_idx in rep_intervals_by_index:
+                start_frame = _to_frame(start_idx)
+                end_frame = _to_frame(end_idx)
                 end_frame = max(start_frame + 1, end_frame)
                 intervals.append((start_frame, end_frame))
+        else:
+            lower_threshold = getattr(stats, "lower_threshold", None)
+            upper_threshold = getattr(stats, "upper_threshold", None)
+            if lower_threshold is None and counting_cfg is not None:
+                lower_threshold = getattr(counting_cfg, "lower_threshold", None)
+            if upper_threshold is None and counting_cfg is not None:
+                upper_threshold = getattr(counting_cfg, "upper_threshold", None)
+            if lower_threshold is None and faults_cfg is not None:
+                lower_threshold = getattr(faults_cfg, "low_thresh", None)
+            if upper_threshold is None and faults_cfg is not None:
+                upper_threshold = getattr(faults_cfg, "high_thresh", None)
+            if lower_threshold is None and counting_cfg is not None:
+                lower_threshold = getattr(counting_cfg, "lower_thresh", None)
+            if upper_threshold is None and counting_cfg is not None:
+                upper_threshold = getattr(counting_cfg, "upper_thresh", None)
+            if lower_threshold is None and faults_cfg is not None:
+                lower_threshold = getattr(faults_cfg, "lower_thresh", None)
+            if upper_threshold is None and faults_cfg is not None:
+                upper_threshold = getattr(faults_cfg, "upper_thresh", None)
+
+            def _threshold_intervals() -> List[Tuple[int, int]]:
+                if lower_threshold is None or upper_threshold is None:
+                    return []
+                try:
+                    lower_val = float(lower_threshold)
+                    upper_val = float(upper_threshold)
+                except Exception:
+                    return []
+                if not math.isfinite(lower_val) or not math.isfinite(upper_val):
+                    return []
+                intervals_from_thresholds: List[Tuple[int, int]] = []
+                start_idx: int | None = None
+                above_seen = False
+                for idx, val in series_interp_full.items():
+                    if not math.isfinite(val):
+                        continue
+                    if val <= lower_val:
+                        if start_idx is None:
+                            start_idx = idx
+                        if above_seen and start_idx is not None:
+                            end_idx = idx
+                            start_frame = _to_frame(start_idx)
+                            end_frame = _to_frame(end_idx)
+                            end_frame = max(start_frame + 1, end_frame)
+                            intervals_from_thresholds.append((start_frame, end_frame))
+                            start_idx = idx
+                            above_seen = False
+                    elif start_idx is not None and val >= upper_val:
+                        above_seen = True
+                return intervals_from_thresholds
+
+            intervals = _threshold_intervals()
+
+            if not intervals and valley_indices:
+                first_valley_idx = valley_indices[0]
+                if first_valley_idx > 0:
+                    prefix = series_interp_full.iloc[: first_valley_idx + 1]
+                    if not prefix.empty and not prefix.isna().all():
+                        inferred_idx = int(prefix.idxmin())
+                        if inferred_idx < first_valley_idx:
+                            valley_indices = [inferred_idx] + valley_indices
+                            valley_frames = [_to_frame(inferred_idx)] + valley_frames
+                last_valley_idx = valley_indices[-1]
+                if last_valley_idx < frame_count - 1:
+                    suffix = series_interp_full.iloc[last_valley_idx:]
+                    if not suffix.empty and not suffix.isna().all():
+                        inferred_end_idx = int(suffix.idxmin())
+                        if inferred_end_idx > last_valley_idx:
+                            valley_indices = valley_indices + [inferred_end_idx]
+                            valley_frames = valley_frames + [_to_frame(inferred_end_idx)]
+
+                valley_indices = sorted(dict.fromkeys(valley_indices))
+                valley_frames = sorted(dict.fromkeys(valley_frames))
+
+                for i in range(len(valley_indices) - 1):
+                    start_idx = valley_indices[i]
+                    end_idx = valley_indices[i + 1]
+                    start_frame = _to_frame(start_idx)
+                    end_frame = _to_frame(end_idx)
+                    end_frame = max(start_frame + 1, end_frame)
+                    intervals.append((start_frame, end_frame))
     else:
-        if not rep_intervals_by_index and len(valley_indices) > 1:
-            rep_intervals_by_index = list(zip(valley_indices[:-1], valley_indices[1:]))
-        elif not rep_intervals_by_index and len(valley_indices) == 1:
-            rep_intervals_by_index = [(0, frame_count - 1)]
-        for start_idx, end_idx in rep_intervals_by_index:
-            start_frame = _frame_at_index(start_idx)
-            end_frame = _frame_at_index(end_idx)
-            end_frame = max(start_frame + 1, end_frame)
-            intervals.append((start_frame, end_frame))
+        midpoint_intervals = _midpoint_intervals_from_valleys()
+        debug_intervals: List[Tuple[int, int]] = []
+
+        if rep_intervals_by_index:
+            for start_idx, end_idx in rep_intervals_by_index:
+                start_frame = _to_frame(start_idx)
+                end_frame = _to_frame(end_idx)
+                end_frame = max(start_frame + 1, end_frame)
+                debug_intervals.append((start_frame, end_frame))
+
+        if rep_intervals_by_index and expected_reps is not None:
+            if len(debug_intervals) < expected_reps and len(midpoint_intervals) == expected_reps:
+                intervals = midpoint_intervals
+            else:
+                intervals = debug_intervals
+        elif rep_intervals_by_index:
+            intervals = debug_intervals
+        else:
+            intervals = midpoint_intervals
 
     if expected_reps is not None:
         if len(intervals) > expected_reps:
