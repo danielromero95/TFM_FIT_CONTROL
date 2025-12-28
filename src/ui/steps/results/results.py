@@ -148,8 +148,17 @@ def _build_debug_report_bundle(
     metrics_csv: str | None,
     effective_config_bytes: bytes | None,
     video_name: str | None,
+    rep_intervals: List[Tuple[int, int]] | None = None,
+    valley_frames: List[int] | None = None,
+    rep_speeds_df: pd.DataFrame | None = None,
+    rep_chart_df: pd.DataFrame | None = None,
+    exercise_key: str | None = None,
+    primary_metric: str | None = None,
+    phase_order: Tuple[str, str] | None = None,
+    interval_strategy: str | None = None,
+    thresholds_used: Tuple[float, float] | None = None,
 ) -> bytes:
-    """Package run data, config, and metrics into a portable debug report."""
+    """Package run data, config, metrics, and rep-speed artifacts into a report."""
 
     bundle = io.BytesIO()
     generated_at = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -180,6 +189,59 @@ def _build_debug_report_bundle(
             zf.writestr("metrics.csv", metrics_csv)
         if effective_config:
             zf.writestr("effective_config.json", effective_config)
+
+        rep_intervals = rep_intervals or []
+        valley_frames = valley_frames or []
+        rep_speeds_df = rep_speeds_df if rep_speeds_df is not None else pd.DataFrame()
+        rep_chart_df = rep_chart_df if rep_chart_df is not None else pd.DataFrame()
+        phase_order = phase_order or phase_order_for_exercise(exercise_key)
+
+        def _bottom_for_interval(start: int, end: int) -> int | None:
+            if not valley_frames:
+                return None
+            candidates = [v for v in valley_frames if start <= v <= end]
+            if not candidates:
+                return None
+            mid = (start + end) / 2.0
+            return min(candidates, key=lambda v: abs(v - mid))
+
+        rep_interval_rows: List[Dict[str, int | None]] = []
+        for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
+            rep_interval_rows.append(
+                {
+                    "rep": i,
+                    "start_frame": int(start_frame),
+                    "end_frame": int(end_frame),
+                    "bottom_frame": _bottom_for_interval(start_frame, end_frame),
+                }
+            )
+
+        intervals_df = pd.DataFrame(
+            rep_interval_rows,
+            columns=["rep", "start_frame", "end_frame", "bottom_frame"],
+        )
+
+        zf.writestr("rep_intervals.csv", intervals_df.to_csv(index=False))
+        zf.writestr("rep_speeds.csv", rep_speeds_df.to_csv(index=False))
+        zf.writestr("rep_speed_long.csv", rep_chart_df.to_csv(index=False))
+
+        speed_meta = {
+            "exercise_key": exercise_key,
+            "primary_metric": primary_metric,
+            "phase_order": list(phase_order or ()),
+            "expected_reps": getattr(report, "repetitions", None),
+            "interval_count": len(rep_intervals),
+            "valley_frames": valley_frames,
+            "interval_strategy": interval_strategy,
+            "thresholds_used":
+                {"lower": thresholds_used[0], "upper": thresholds_used[1]}
+                if thresholds_used
+                else None,
+        }
+
+        zf.writestr(
+            "rep_speed_meta.json", json.dumps(speed_meta, indent=2, ensure_ascii=False)
+        )
 
     bundle.seek(0)
     return bundle.read()
@@ -522,9 +584,16 @@ def _compute_rep_intervals(
     numeric_columns: List[str],
     *,
     exercise_key: str | None,
-) -> Tuple[List[Tuple[int, int]], List[int], pd.Series, str | None]:
+) -> Tuple[
+    List[Tuple[int, int]],
+    List[int],
+    pd.Series,
+    str | None,
+    str | None,
+    Tuple[float, float] | None,
+]:
     if metrics_df.empty:
-        return [], [], pd.Series(dtype=float), None
+        return [], [], pd.Series(dtype=float), None, None, None
 
     # Preserve frame_idx for time mapping but operate on a stable positional index
     try:
@@ -542,7 +611,7 @@ def _compute_rep_intervals(
     frame_values = frame_values.where(~frame_values.isna(), pd.Series(range(len(metrics_df)), index=metrics_df.index))
 
     if frame_values.empty:
-        return [], [], frame_values, None
+        return [], [], frame_values, None, None, None
 
     first_frame = int(frame_values.iloc[0])
     last_frame = int(frame_values.iloc[-1]) if len(frame_values) > 1 else first_frame + 1
@@ -556,7 +625,7 @@ def _compute_rep_intervals(
     if not candidate or candidate not in metrics_df.columns:
         candidate = numeric_columns[0] if numeric_columns else None
     if not candidate or candidate not in metrics_df.columns:
-        return [], [], frame_values, None
+        return [], [], frame_values, None, None, None
 
     valley_indices: List[int] = []
     rep_intervals_by_index: List[Tuple[int, int]] = []
@@ -618,7 +687,7 @@ def _compute_rep_intervals(
     exercise = (exercise_key or "").lower()
 
     if not valley_indices and not rep_intervals_by_index and exercise != "deadlift":
-        return [], [], frame_values, candidate
+        return [], [], frame_values, candidate, None, None
 
     def _frame_at_index(pos: int) -> int:
         pos = min(max(pos, 0), frame_count - 1)
@@ -642,6 +711,8 @@ def _compute_rep_intervals(
     expected_reps = int(expected_reps) if isinstance(expected_reps, (int, float)) and expected_reps > 0 else None
 
     intervals: List[Tuple[int, int]] = []
+    interval_strategy: str | None = None
+    thresholds_used: Tuple[float, float] | None = None
 
     def _midpoint_intervals_from_valleys() -> List[Tuple[int, int]]:
         intervals_from_valleys: List[Tuple[int, int]] = []
@@ -678,6 +749,7 @@ def _compute_rep_intervals(
                 end_frame = _to_frame(end_idx)
                 end_frame = max(start_frame + 1, end_frame)
                 intervals.append((start_frame, end_frame))
+            interval_strategy = "debug_intervals"
         else:
             lower_threshold = getattr(stats, "lower_threshold", None)
             upper_threshold = getattr(stats, "upper_threshold", None)
@@ -699,6 +771,7 @@ def _compute_rep_intervals(
                 upper_threshold = getattr(faults_cfg, "upper_thresh", None)
 
             def _threshold_intervals() -> List[Tuple[int, int]]:
+                nonlocal thresholds_used
                 if lower_threshold is None or upper_threshold is None:
                     return []
                 try:
@@ -708,6 +781,7 @@ def _compute_rep_intervals(
                     return []
                 if not math.isfinite(lower_val) or not math.isfinite(upper_val):
                     return []
+                thresholds_used = (lower_val, upper_val)
                 intervals_from_thresholds: List[Tuple[int, int]] = []
                 start_idx: int | None = None
                 above_seen = False
@@ -730,6 +804,9 @@ def _compute_rep_intervals(
                 return intervals_from_thresholds
 
             intervals = _threshold_intervals()
+
+            if intervals:
+                interval_strategy = "thresholds"
 
             if not intervals and valley_indices:
                 first_valley_idx = valley_indices[0]
@@ -759,6 +836,9 @@ def _compute_rep_intervals(
                     end_frame = _to_frame(end_idx)
                     end_frame = max(start_frame + 1, end_frame)
                     intervals.append((start_frame, end_frame))
+
+                if intervals:
+                    interval_strategy = "valley_pairs"
     else:
         midpoint_intervals = _midpoint_intervals_from_valleys()
         debug_intervals: List[Tuple[int, int]] = []
@@ -773,12 +853,16 @@ def _compute_rep_intervals(
         if rep_intervals_by_index and expected_reps is not None:
             if len(debug_intervals) < expected_reps and len(midpoint_intervals) == expected_reps:
                 intervals = midpoint_intervals
+                interval_strategy = "midpoint_valleys"
             else:
                 intervals = debug_intervals
+                interval_strategy = "debug_intervals"
         elif rep_intervals_by_index:
             intervals = debug_intervals
+            interval_strategy = "debug_intervals"
         else:
             intervals = midpoint_intervals
+            interval_strategy = "midpoint_valleys"
 
     if expected_reps is not None:
         if len(intervals) > expected_reps:
@@ -794,7 +878,7 @@ def _compute_rep_intervals(
             except Exception:
                 pass
 
-    return intervals, valley_frames, frame_values, candidate
+    return intervals, valley_frames, frame_values, candidate, interval_strategy, thresholds_used
 
 
 def _metric_extreme(metric_name: str | None) -> str:
@@ -1092,6 +1176,10 @@ def _results_panel() -> Dict[str, bool]:
             valley_frames: List[int] = []
             frame_values = pd.Series(dtype=float)
             primary_metric: str | None = None
+            interval_strategy: str | None = None
+            thresholds_used: Tuple[float, float] | None = None
+            phase_order = phase_order_for_exercise(exercise_key)
+            rep_chart_df = pd.DataFrame()
 
             st.markdown(f"**Detected repetitions:** {repetitions}")
 
@@ -1110,7 +1198,14 @@ def _results_panel() -> Dict[str, bool]:
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
-                rep_intervals, valley_frames, frame_values, primary_metric = _compute_rep_intervals(
+                (
+                    rep_intervals,
+                    valley_frames,
+                    frame_values,
+                    primary_metric,
+                    interval_strategy,
+                    thresholds_used,
+                ) = _compute_rep_intervals(
                     metrics_df=metrics_df,
                     report=report,
                     stats=stats,
@@ -1209,9 +1304,10 @@ def _results_panel() -> Dict[str, bool]:
                 metrics_df=metrics_df,
                 primary_metric=primary_metric,
             )
+            rep_chart_df = _build_rep_speed_chart_df(rep_speeds_df, phase_order)
+
             if not rep_speeds_df.empty:
                 st.markdown("#### Repetition speed")
-                phase_order = phase_order_for_exercise(exercise_key)
                 if phase_order[0] == "Up":
                     caption = (
                         "Up = bottom back to the top of the rep. Down = top to bottom. "
@@ -1347,6 +1443,15 @@ def _results_panel() -> Dict[str, bool]:
                     metrics_csv=metrics_data,
                     effective_config_bytes=eff_bytes,
                     video_name=Path(state.video_path).name if state.video_path else None,
+                    rep_intervals=rep_intervals,
+                    valley_frames=valley_frames,
+                    rep_speeds_df=rep_speeds_df,
+                    rep_chart_df=rep_chart_df,
+                    exercise_key=exercise_key,
+                    primary_metric=primary_metric,
+                    phase_order=phase_order,
+                    interval_strategy=interval_strategy,
+                    thresholds_used=thresholds_used,
                 )
             except Exception as exc:
                 st.error(f"Could not assemble debug report: {exc}")
