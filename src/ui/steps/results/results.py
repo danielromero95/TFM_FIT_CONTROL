@@ -1256,7 +1256,7 @@ def _results_panel() -> Dict[str, bool]:
                     )
                     .properties(height=280)
                 )
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width='stretch')
 
             stats_rows = [
                 {"Field": "CONFIG_SHA1", "Value": stats.config_sha1},
