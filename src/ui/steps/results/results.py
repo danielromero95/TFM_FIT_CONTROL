@@ -27,7 +27,7 @@ from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
 from src.ui.metrics_sync import render_video_with_metrics_sync
-from src.ui.state import get_state
+from src.ui.state import AppState, get_state
 from ..utils import step_container
 
 
@@ -138,6 +138,39 @@ def _session_name_from_paths(*candidates: object | None) -> str | None:
         if parent and parent.name:
             return parent.name
     return None
+
+
+def _metrics_run_token(state: AppState, stats: RunStats | None = None) -> str:
+    """Return a stable token for the current run to scope widget state."""
+
+    session_name = _session_name_from_paths(
+        getattr(state, "metrics_path", None),
+        getattr(stats, "config_path", None),
+    )
+    if session_name:
+        return session_name
+
+    if getattr(state, "video_path", None):
+        try:
+            stem = Path(state.video_path).stem
+        except Exception:
+            stem = ""
+        if stem:
+            return stem
+
+    if stats and getattr(stats, "config_sha1", None):
+        frames_val = getattr(stats, "frames", None)
+        if frames_val is not None:
+            return f"{stats.config_sha1}-{frames_val}"
+        return stats.config_sha1
+
+    return "run"
+
+
+def _metrics_chart_key(run_token: str) -> str:
+    """Build the Streamlit chart key for the metrics widget."""
+
+    return f"results_video_metrics_sync_{run_token}"
 
 
 def _build_debug_report_bundle(
@@ -1267,11 +1300,8 @@ def _results_panel() -> Dict[str, bool]:
                             if not math.isfinite(value):
                                 continue
                             thresholds.append(value)
-                        sync_channel = None
-                        if getattr(stats, "config_sha1", None):
-                            frames_val = getattr(stats, "frames", None)
-                            if frames_val is not None:
-                                sync_channel = f"vmx-sync-{stats.config_sha1}-{frames_val}"
+                        run_token = _metrics_run_token(state, stats)
+                        sync_channel = f"vmx-sync-{run_token}"
 
                         render_video_with_metrics_sync(
                             video_path=None,
@@ -1282,7 +1312,7 @@ def _results_panel() -> Dict[str, bool]:
                             thresholds=thresholds,
                             start_at_s=None,
                             scroll_zoom=True,
-                            key="results_video_metrics_sync",
+                            key=_metrics_chart_key(run_token),
                             max_width_px=720,
                             show_video=False,
                             sync_channel=sync_channel,
