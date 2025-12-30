@@ -73,6 +73,9 @@ Es opcional: la generación de resultados sigue funcionando con la información 
 - **Trazabilidad del nombre original en la UI/pipeline.** Se conserva `video_original_name` durante la subida y el análisis para que el reporte y las exportaciones reflejen el nombre real del vídeo.
 - **RunStats enriquecido para auditoría.** Se registran campos como `rotation_applied`, `sample_rate`, `sampling_strategy`, `file_size_bytes` y `frame_count_input`, además de los FPS y contadores existentes, para entender las decisiones de rendimiento y muestreo.
 - **Metadatos más robustos (OpenCV + ffprobe).** El sistema obtiene metadatos con OpenCV y, cuando está disponible, amplía la información con `ffprobe` de forma tolerante. Nota: `ffprobe` es opcional; si no está instalado, el reporte se genera con los datos disponibles.
+- **Gráfica de velocidad por repetición con fases y cálculos corregidos.** La visualización de cadencia ahora desglosa velocidad y duración de fase **Down/Up** (o **Up/Down** en peso muerto), corrige el cálculo de intervalos, FPS y cadencias por repetición, y muestra intervalos y bottoms coherentes con las señales de conteo.
+- **Conteo y umbrales afinados según ejercicio.** Se adoptan valores por defecto específicos de sentadilla/peso muerto/press banca, se habilita un único conmutador de activación de filtros, se añade un modo de umbral superior estricto y se reorganiza la UI con un layout más compacto y un bloque dedicado a depuración/configuración avanzada.
+- **Artefactos de depuración en las descargas.** El `.zip` incluye `rep_intervals.csv`, `rep_speeds.csv`, `rep_speed_long.csv` y `rep_speed_meta.json` para auditar intervalos, fases y velocidades usadas en la gráfica y en las decisiones de conteo.
 
 ## Novedades en 3.1
 
