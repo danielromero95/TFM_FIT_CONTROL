@@ -13,6 +13,7 @@ from src.config.settings import MODEL_COMPLEXITY
 
 from ..constants import LANDMARK_COUNT
 from ..estimators import CroppedPoseEstimator, PoseEstimator, PoseEstimatorBase, RoiPoseEstimator
+from ..roi_state import RoiDebugRecorder
 from ..types import PoseResult
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ def extract_landmarks_from_frames(
     landmark_smoothing_alpha: float | None = None,
     reliability_min_visibility: Optional[float] = None,
     include_pose_ok: bool = False,
+    debug_export_path: str | None = None,
+    debug_max_frames: int = 50,
 ) -> pd.DataFrame:
     """Extrae marcadores de pose fotograma a fotograma y devuelve un DataFrame sin procesar."""
 
@@ -46,6 +49,12 @@ def extract_landmarks_from_frames(
 
     rows: list[dict[str, float]] = []
     reliability_threshold = min_visibility if reliability_min_visibility is None else reliability_min_visibility
+    debug_recorder = (
+        RoiDebugRecorder(path=debug_export_path, max_frames=debug_max_frames)
+        if debug_export_path
+        else None
+    )
+
     with estimator_cls(
         static_image_mode=False,
         model_complexity=model_complexity,
@@ -55,6 +64,7 @@ def extract_landmarks_from_frames(
         enable_segmentation=enable_segmentation,
         reliability_min_visibility=reliability_threshold,
         landmark_smoothing_alpha=landmark_smoothing_alpha,
+        debug_recorder=debug_recorder,
     ) as estimator:
         for index, image in enumerate(frames):
             height, width = image.shape[:2]
