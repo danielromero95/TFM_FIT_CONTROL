@@ -192,7 +192,7 @@ streamlit run src/app.py
 
 ---
 
-## Estructura del proyecto (v3.0)
+## Estructura del proyecto
 
 | Ruta | Descripción |
 | --- | --- |
