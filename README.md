@@ -2,7 +2,7 @@
 
 **Repositorio:** `TFM_FIT_CONTROL`
 **Autor:** Daniel Romero
-**Version:** 3.1 (22-12-2025)
+**Versión:** 3.2 (30-12-2025)
 
 ---
 
@@ -50,15 +50,33 @@ pip install -e .
 streamlit run src/app.py
 ~~~
 
+### Opcional — ffprobe (FFmpeg)
+
+Si está disponible en el sistema, `ffprobe` permite enriquecer los metadatos de vídeo incluidos en el reporte.
+Es opcional: la generación de resultados sigue funcionando con la información proporcionada por OpenCV si no está instalado.
+
 ## Pasos en la interfaz
 
 1. Sube un vídeo de entrenamiento.
 2. Detecta ejercicio y vista (automático o manual).
 3. Configura parámetros (FPS, Modelo de MediaPipe, rotación, vídeo de depuración, etc.).
 4. Ejecuta el análisis (asíncrono; se muestra el progreso).
-5. Resultados: conteo y velocidad de repeticiones, métricas, vídeo de depuración opcional y descargas.
+5. Resultados: conteo y velocidad de repeticiones, métricas, vídeo de depuración opcional y descargas; el paquete `.zip` incluye
+   también `video_data.csv`/`video_data.json` con metadatos del vídeo de entrada junto con la configuración efectiva, estadísticas,
+   métricas y resto de artefactos.
 
----
+
+## Novedades en 3.2
+
+- **Reporte ampliado con metadatos del vídeo de entrada.** El paquete descargable ahora incluye `video_data.csv` (formato clave/valor en texto para máxima compatibilidad) y `video_data.json` (preserva tipos como int/float/bool donde aplica) con container/codec, resolución, FPS, duración, rotación, presencia de audio y otros metadatos del input. Ambos incorporan un bloque `preprocessing_decisions` que expone la rotación aplicada, la estrategia de muestreo, el FPS efectivo, los frames analizados y avisos relevantes.
+- **Nombre del bundle estable y trazable.** El archivo descargable se denomina `<Nombre_archivo_input>-YYYY_MM_DD-HH_MM.zip`, reutilizando el nombre original subido en lugar de nombres temporales del sistema.
+- **Trazabilidad del nombre original en la UI/pipeline.** Se conserva `video_original_name` durante la subida y el análisis para que el reporte y las exportaciones reflejen el nombre real del vídeo.
+- **RunStats enriquecido para auditoría.** Se registran campos como `rotation_applied`, `sample_rate`, `sampling_strategy`, `file_size_bytes` y `frame_count_input`, además de los FPS y contadores existentes, para entender las decisiones de rendimiento y muestreo.
+- **Metadatos más robustos (OpenCV + ffprobe).** El sistema obtiene metadatos con OpenCV y, cuando está disponible, amplía la información con `ffprobe` de forma tolerante. Nota: `ffprobe` es opcional; si no está instalado, el reporte se genera con los datos disponibles.
+- **Gráfica de velocidad por repetición con fases y cálculos corregidos.** La visualización de cadencia ahora desglosa velocidad y duración de fase **Down/Up** (o **Up/Down** en peso muerto), corrige el cálculo de intervalos, FPS y cadencias por repetición, y muestra intervalos y bottoms coherentes con las señales de conteo.
+- **Conteo y umbrales afinados según ejercicio.** Se adoptan valores por defecto específicos de sentadilla/peso muerto/press banca, se habilita un único conmutador de activación de filtros, se añade un modo de umbral superior estricto y se reorganiza la UI con un layout más compacto y un bloque dedicado a depuración/configuración avanzada.
+- **Artefactos de depuración en las descargas.** El `.zip` incluye `rep_intervals.csv`, `rep_speeds.csv`, `rep_speed_long.csv` y `rep_speed_meta.json` para auditar intervalos, fases y velocidades usadas en la gráfica y en las decisiones de conteo.
+
 ## Novedades en 3.1
 
 - **Visualización de velocidad de repetición.** Los resultados incluyen una gráfica y tabla de cadencia
