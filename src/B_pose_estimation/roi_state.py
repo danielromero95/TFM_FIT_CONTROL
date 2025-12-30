@@ -107,7 +107,6 @@ class RoiState:
         pose_ok: bool,
         warmup_active: bool,
         fallback_to_full: bool,
-        letterbox: Optional[dict[str, object]] = None,
     ) -> None:
         if not self.recorder:
             return
@@ -122,7 +121,6 @@ class RoiState:
                 "fail_streak": int(self.fail_streak),
                 "warmup_active": bool(warmup_active),
                 "fallback_to_full": bool(fallback_to_full),
-                "letterbox": letterbox,
             }
         )
 

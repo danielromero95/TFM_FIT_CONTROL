@@ -33,33 +33,11 @@ REQUIRED_RELIABILITY_LANDMARKS: Tuple[int, ...] = (
 )
 
 
-@dataclass(frozen=True)
-class LetterboxTransform:
-    target_width: int
-    target_height: int
-    scale: float
-    pad_x: int
-    pad_y: int
-    new_w: int
-    new_h: int
-
-
-def _resize_with_letterbox(
-    image: np.ndarray, target_size: Tuple[int, int]
-) -> tuple[np.ndarray, LetterboxTransform]:
+def _resize_with_letterbox(image: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
     target_width, target_height = target_size
     height, width = image.shape[:2]
     if width == target_width and height == target_height:
-        transform = LetterboxTransform(
-            target_width=target_width,
-            target_height=target_height,
-            scale=1.0,
-            pad_x=0,
-            pad_y=0,
-            new_w=width,
-            new_h=height,
-        )
-        return image, transform
+        return image
 
     scale = min(target_width / max(width, 1), target_height / max(height, 1))
     new_w = max(int(round(width * scale)), 1)
@@ -72,29 +50,21 @@ def _resize_with_letterbox(
         resized = image[ys[:, None], xs]
     h_resized, w_resized = resized.shape[:2]
 
-    pad_x = max((target_width - w_resized) // 2, 0)
-    pad_y = max((target_height - h_resized) // 2, 0)
+    x_offset = max((target_width - w_resized) // 2, 0)
+    y_offset = max((target_height - h_resized) // 2, 0)
+    right = target_width - w_resized - x_offset
+    bottom = target_height - h_resized - y_offset
 
     canvas = np.zeros((target_height, target_width, *image.shape[2:]), dtype=image.dtype)
-    x_start = max(pad_x, 0)
-    y_start = max(pad_y, 0)
+    x_start = max(x_offset, 0)
+    y_start = max(y_offset, 0)
     x_end = min(x_start + w_resized, target_width)
     y_end = min(y_start + h_resized, target_height)
 
     src_x_end = x_end - x_start
     src_y_end = y_end - y_start
     canvas[y_start:y_end, x_start:x_end] = resized[:src_y_end, :src_x_end]
-
-    transform = LetterboxTransform(
-        target_width=target_width,
-        target_height=target_height,
-        scale=float(scale),
-        pad_x=int(pad_x),
-        pad_y=int(pad_y),
-        new_w=int(new_w),
-        new_h=int(new_h),
-    )
-    return canvas, transform
+    return canvas
 
 
 def pose_reliable(
@@ -463,23 +433,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         used_crop = False
         frame_idx = self._frame_idx
 
-        def _record_debug(
-            pose_ok_value: bool,
-            crop_box_value: Optional[Sequence[int]],
-            *,
-            roi_used: Optional[Sequence[int]],
-            letterbox: LetterboxTransform | None,
-        ) -> None:
+        def _record_debug(pose_ok_value: bool, crop_box_value: Optional[Sequence[int]], *, roi_used: Optional[Sequence[int]]) -> None:
             if self._debug_recorder:
-                letterbox_info = None
-                if letterbox is not None:
-                    letterbox_info = {
-                        "scale": float(letterbox.scale),
-                        "pad_x": int(letterbox.pad_x),
-                        "pad_y": int(letterbox.pad_y),
-                        "new_w": int(letterbox.new_w),
-                        "new_h": int(letterbox.new_h),
-                    }
                 self._debug_recorder.record(
                     {
                         "frame_idx": int(frame_idx),
@@ -491,7 +446,6 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                         "fail_streak": int(self._misses_crop),
                         "warmup_active": False,
                         "fallback_to_full": not used_crop,
-                        "letterbox": letterbox_info,
                     }
                 )
         results_full = _process_with_recovery(
@@ -512,7 +466,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self._smoothed_bbox = None
             if self._smoother is not None:
                 self._smoother.reset()
-            _record_debug(False, None, roi_used=None, letterbox=None)
+            _record_debug(False, None, roi_used=None)
             self._frame_idx += 1
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
 
@@ -524,7 +478,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self._smoothed_bbox = None
             if self._smoother is not None:
                 self._smoother.reset()
-            _record_debug(False, None, roi_used=None, letterbox=None)
+            _record_debug(False, None, roi_used=None)
             self._frame_idx += 1
             return PoseResult(landmarks=None, annotated_image=image_bgr, crop_box=None, pose_ok=False)
 
@@ -549,11 +503,11 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 crop_box=(0, 0, width, height),
                 pose_ok=pose_ok_full,
             )
-            _record_debug(pose_ok_full, pose_result.crop_box, roi_used=crop_box, letterbox=None)
+            _record_debug(pose_ok_full, pose_result.crop_box, roi_used=crop_box)
             self._frame_idx += 1
             return pose_result
 
-        crop_resized, letterbox = _resize_with_letterbox(crop, self.target_size)
+        crop_resized = _resize_with_letterbox(crop, self.target_size)
         crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
         used_crop = True
         results_crop = _process_with_recovery(
@@ -603,6 +557,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self.mp_drawing.draw_landmarks(
                 annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
             )
+            self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
         else:
             if self._smoother is not None:
                 self._smoother.reset()
@@ -614,7 +569,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             crop_box=(0, 0, width, height),
             pose_ok=pose_ok,
         )
-        _record_debug(pose_ok, pose_result.crop_box, roi_used=pose_roi, letterbox=letterbox if used_crop else None)
+        _record_debug(pose_ok, pose_result.crop_box, roi_used=pose_roi)
         self._frame_idx += 1
         return pose_result
 
@@ -730,7 +685,6 @@ class RoiPoseEstimator(PoseEstimatorBase):
         pose_ok = False
         landmarks_output: Optional[List[Landmark]] = None
         crop_box: Optional[Sequence[int]] = None
-        letterbox_transform: Optional[LetterboxTransform] = None
 
         if use_full_frame:
             results_full = _process_with_recovery(
@@ -789,7 +743,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     self._smoother.reset()
                 self.roi_state.update_failure(width, height)
             else:
-                crop_resized, letterbox_transform = _resize_with_letterbox(crop, self.target_size)
+                crop_resized = _resize_with_letterbox(crop, self.target_size)
                 crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
                 results_crop = _process_with_recovery(
                     self.pose_crop,
@@ -856,15 +810,6 @@ class RoiPoseEstimator(PoseEstimatorBase):
         )
 
         warmup_active = self.frame_idx < self.roi_state.warmup_frames or not self.roi_state.has_pose
-        letterbox_info = None
-        if letterbox_transform is not None:
-            letterbox_info = {
-                "scale": float(letterbox_transform.scale),
-                "pad_x": int(letterbox_transform.pad_x),
-                "pad_y": int(letterbox_transform.pad_y),
-                "new_w": int(letterbox_transform.new_w),
-                "new_h": int(letterbox_transform.new_h),
-            }
         self.roi_state.emit_debug(
             frame_idx=self.frame_idx,
             input_size=(width, height),
@@ -874,7 +819,6 @@ class RoiPoseEstimator(PoseEstimatorBase):
             pose_ok=pose_ok,
             warmup_active=warmup_active,
             fallback_to_full=use_full_frame,
-            letterbox=letterbox_info,
         )
 
         self.frame_idx += 1
