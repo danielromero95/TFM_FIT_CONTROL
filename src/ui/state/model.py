@@ -110,6 +110,7 @@ class AppState:
     active_upload_token: Optional[Tuple[str, int, str]] = None
     ui_rev: int = 0
     video_path: Optional[str] = None
+    video_original_name: Optional[str] = None
     exercise: str = DEFAULT_EXERCISE_LABEL
     exercise_pending_update: Optional[str] = None
     view: str = ""  # "", "front", "side"

@@ -197,6 +197,47 @@ def _metrics_run_token(state: AppState, stats: RunStats | None = None) -> str:
     return "run"
 
 
+def _preferred_video_base_name(
+    video_original_name: str | None,
+    video_path: str | Path | None,
+    *,
+    fallback_token: str | None = None,
+) -> str | None:
+    """Chooses the best available base name for artifacts.
+
+    Preference order: original upload name (stem) -> video_path stem -> fallback token.
+    """
+
+    if video_original_name:
+        try:
+            stem = Path(video_original_name).stem
+        except Exception:
+            stem = video_original_name
+        if stem:
+            return stem
+
+    if video_path:
+        try:
+            stem = Path(video_path).stem
+        except Exception:
+            stem = None
+        if stem:
+            return stem
+
+    return fallback_token
+
+
+def _report_bundle_file_name(
+    base_name: str | None, timestamp: datetime.datetime | None = None
+) -> str:
+    """Builds a consistent report bundle filename using the provided base."""
+
+    ts = timestamp or datetime.datetime.now()
+    ts_str = ts.strftime("%Y_%m_%d-%H_%M")
+    base = base_name or "analysis_report"
+    return f"{base}-{ts_str}.zip"
+
+
 def _metrics_chart_key(run_token: str) -> str:
     """Build the Streamlit chart key for the metrics widget."""
 
@@ -248,7 +289,9 @@ def _build_debug_report_bundle(
 
     try:
         video_metadata: Dict[str, object] = (
-            get_video_metadata(Path(video_path)) if video_path else {}
+            get_video_metadata(Path(video_path), original_name=video_name)
+            if video_path
+            else {}
         )
     except Exception as exc:
         video_metadata = {
@@ -1543,6 +1586,14 @@ def _results_panel() -> Dict[str, bool]:
                 except OSError as exc:
                     st.error(f"Could not read metrics: {exc}")
                 
+            video_original_name = getattr(state, "video_original_name", None)
+            video_name_for_report = video_original_name
+            if not video_name_for_report and state.video_path:
+                try:
+                    video_name_for_report = Path(state.video_path).name
+                except Exception:
+                    video_name_for_report = None
+
             try:
                 report_bundle = _build_debug_report_bundle(
                     report=report,
@@ -1550,7 +1601,7 @@ def _results_panel() -> Dict[str, bool]:
                     metrics_df=metrics_df,
                     metrics_csv=metrics_data,
                     effective_config_bytes=eff_bytes,
-                    video_name=Path(state.video_path).name if state.video_path else None,
+                    video_name=video_name_for_report,
                     video_path=Path(state.video_path) if state.video_path else None,
                     rep_intervals=rep_intervals,
                     valley_frames=valley_frames,
@@ -1565,22 +1616,17 @@ def _results_panel() -> Dict[str, bool]:
             except Exception as exc:
                 st.error(f"Could not assemble debug report: {exc}")
             else:
-                timestamp = datetime.datetime.now().strftime("%Y_%m_%d-%H_%M")
-                base_name = None
-                if state.video_path:
-                    try:
-                        base_name = Path(state.video_path).stem
-                    except Exception:
-                        base_name = None
-                if not base_name:
-                    base_name = _session_name_from_paths(
-                        state.metrics_path,
-                        getattr(report.stats, "config_path", None),
-                        getattr(report, "metrics_path", None),
-                    )
-                report_name = (
-                    f"{base_name}-{timestamp}.zip" if base_name else f"analysis_report-{timestamp}.zip"
+                fallback_token = _session_name_from_paths(
+                    state.metrics_path,
+                    getattr(report.stats, "config_path", None),
+                    getattr(report, "metrics_path", None),
                 )
+                base_name = _preferred_video_base_name(
+                    video_original_name,
+                    state.video_path,
+                    fallback_token=fallback_token,
+                )
+                report_name = _report_bundle_file_name(base_name)
                 st.download_button(
                     "📑 Download report",
                     data=report_bundle,
