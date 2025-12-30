@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import cv2
@@ -153,6 +154,7 @@ def _rescale_landmarks_from_crop(
     image_width: int,
     image_height: int,
     landmark_pb2_module,
+    letterbox_transform: LetterboxTransform | None = None,
 ) -> tuple[list[Landmark], object]:
     """Reescala *landmarks* normalizados del recorte al fotograma completo.
 
@@ -173,10 +175,25 @@ def _rescale_landmarks_from_crop(
     mp_landmarks_full = []
 
     for lm in mp_landmarks:
-        x_full = (float(lm.x) * scale_x + x1) / image_width if scale_x > 0 else 0.0
-        y_full = (float(lm.y) * scale_y + y1) / image_height if scale_y > 0 else 0.0
+        if letterbox_transform is None:
+            x_crop = float(lm.x) * scale_x if scale_x > 0 else 0.0
+            y_crop = float(lm.y) * scale_y if scale_y > 0 else 0.0
+            x_crop_clipped = x_crop
+            y_crop_clipped = y_crop
+        else:
+            x_lb = float(lm.x) * letterbox_transform.target_width
+            y_lb = float(lm.y) * letterbox_transform.target_height
+            x_crop = (x_lb - letterbox_transform.pad_x) / max(letterbox_transform.scale, 1e-6)
+            y_crop = (y_lb - letterbox_transform.pad_y) / max(letterbox_transform.scale, 1e-6)
+
+            x_crop_clipped = float(np.clip(x_crop, 0.0, scale_x)) if scale_x > 0 else 0.0
+            y_crop_clipped = float(np.clip(y_crop, 0.0, scale_y)) if scale_y > 0 else 0.0
+
+        x_full = (x_crop_clipped + x1) / image_width if image_width > 0 else 0.0
+        y_full = (y_crop_clipped + y1) / image_height if image_height > 0 else 0.0
         x_clipped = float(np.clip(x_full, 0.0, 1.0))
         y_clipped = float(np.clip(y_full, 0.0, 1.0))
+
         landmark = Landmark(
             x=x_clipped,
             y=y_clipped,
@@ -511,17 +528,34 @@ class CroppedPoseEstimator(PoseEstimatorBase):
 
         if results_crop.pose_landmarks:
             self._misses_crop = 0
-            landmarks_crop = landmarks_from_proto(results_crop.pose_landmarks.landmark)
-            pose_ok = pose_reliable(landmarks_crop, visibility_threshold=self.reliability_min_visibility)
-            landmarks_crop = (
-                self._smoother(landmarks_crop) if self._smoother is not None else landmarks_crop
-            )
-            landmarks_full, landmark_list = _rescale_landmarks_from_crop(
+            landmarks_full_raw, landmark_list = _rescale_landmarks_from_crop(
                 results_crop.pose_landmarks.landmark,
                 crop_box,
                 width,
                 height,
                 self.landmark_pb2,
+                letterbox_transform=letterbox,
+            )
+            pose_ok = pose_reliable(
+                landmarks_full_raw, visibility_threshold=self.reliability_min_visibility
+            )
+            landmarks_full = (
+                self._smoother(landmarks_full_raw)
+                if self._smoother is not None
+                else landmarks_full_raw
+            )
+            landmark_list_to_draw = landmark_list
+            if self._smoother is not None:
+                landmark_list_to_draw = self.landmark_pb2.NormalizedLandmarkList(
+                    landmark=[
+                        self.landmark_pb2.NormalizedLandmark(
+                            x=lm.x, y=lm.y, z=lm.z, visibility=lm.visibility
+                        )
+                        for lm in landmarks_full
+                    ]
+                )
+            self.mp_drawing.draw_landmarks(
+                annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
             )
             self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
         else:
@@ -732,6 +766,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                         width,
                         height,
                         self.landmark_pb2,
+                        letterbox_transform=letterbox_transform,
                     )
                     pose_ok = pose_reliable(landmarks_full, visibility_threshold=self.reliability_min_visibility)
                     landmarks_output = (
