@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+import json
 import logging
 import math
 import shutil
 import subprocess
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
 
 import cv2
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VideoInfo", "read_video_file_info"]
+__all__ = ["VideoInfo", "get_video_metadata", "read_video_file_info"]
 
 
 @dataclass(slots=True)
@@ -81,6 +83,22 @@ def _estimate_duration_seconds(cap: cv2.VideoCapture, frame_count: int) -> float
         except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
             pass
     return 0.0
+
+
+def _safe_fraction_to_float(value: str | None) -> float | None:
+    """Convert fraction-like strings (e.g., ``"30000/1001"``) to floats."""
+
+    if not value:
+        return None
+    try:
+        if "/" in value:
+            num, den = value.split("/", maxsplit=1)
+            den_val = float(den)
+            if den_val != 0:
+                return float(num) / den_val
+        return float(value)
+    except Exception:  # pragma: no cover - defensive
+        return None
 
 
 def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) -> VideoInfo:
@@ -192,3 +210,193 @@ def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) 
                 cap_local.set(cv2.CAP_PROP_POS_FRAMES, 0)
             except Exception:  # pragma: no cover - dependiente del backend (ruta de respaldo)
                 pass
+
+
+def _run_ffprobe(path: Path) -> dict[str, Any]:
+    """Recupera metadatos detallados usando ``ffprobe`` si está disponible."""
+
+    if shutil.which("ffprobe") is None:
+        return {}
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_entries",
+            (
+                "format=format_name,format_long_name,duration,size:format_tags=creation_time:"
+                "stream=codec_name,codec_long_name,profile,pix_fmt,width,height,"
+                "nb_frames,avg_frame_rate,r_frame_rate,tags,codec_type"
+            ),
+            str(path),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            return {}
+        return json.loads(res.stdout or "{}")
+    except Exception as exc:  # pragma: no cover - dependiente de entorno
+        logger.warning("ffprobe metadata check failed: %s", exc)
+        return {}
+
+
+def _safe_relative_path(path: Path) -> str:
+    """Construye una ruta relativa sin exponer directorios del usuario."""
+
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except Exception:
+        return path.name
+
+
+def get_video_metadata(path: Path) -> dict[str, Any]:
+    """Extrae un diccionario amplio de metadatos del archivo de vídeo.
+
+    Se apoya en OpenCV y, si está disponible, en ``ffprobe`` para rellenar
+    información adicional. Los campos que no se puedan determinar quedarán
+    en ``None`` o cadenas vacías.
+    """
+
+    p = Path(path)
+    metadata: dict[str, Any] = {
+        "input_file_name": p.name,
+        "input_file_path": _safe_relative_path(p),
+        "file_size_bytes": None,
+        "container_format": None,
+        "video_codec": None,
+        "video_codec_long_name": None,
+        "profile": None,
+        "pixel_format": None,
+        "width": None,
+        "height": None,
+        "rotation": None,
+        "duration_s": None,
+        "fps_r_frame_rate": None,
+        "fps_avg_frame_rate": None,
+        "total_frames_estimated": None,
+        "audio_present": None,
+        "audio_codec": None,
+        "creation_time": None,
+        "timestamp_extracted_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "debug_opencv": {},
+    }
+
+    try:
+        metadata["file_size_bytes"] = int(p.stat().st_size)
+    except Exception:
+        metadata["file_size_bytes"] = None
+
+    try:
+        info = read_video_file_info(p)
+    except Exception as exc:  # pragma: no cover - defensivo
+        logger.warning("Could not read video info via OpenCV: %s", exc)
+        info = None
+
+    if info:
+        metadata.update(
+            {
+                "width": info.width,
+                "height": info.height,
+                "rotation": info.rotation,
+                "duration_s": info.duration_sec,
+                "total_frames_estimated": info.frame_count,
+            }
+        )
+
+        metadata["debug_opencv"] = {
+            "fps_metadata": info.fps,
+            "fps_source": info.fps_source,
+            "codec_fourcc": info.codec,
+        }
+
+        if metadata.get("fps_avg_frame_rate") is None and info.fps:
+            metadata["fps_avg_frame_rate"] = info.fps
+        if metadata.get("fps_r_frame_rate") is None and info.fps:
+            metadata["fps_r_frame_rate"] = info.fps
+
+    ffprobe_data = _run_ffprobe(p)
+    format_data = ffprobe_data.get("format", {}) if isinstance(ffprobe_data, dict) else {}
+    streams = ffprobe_data.get("streams", []) if isinstance(ffprobe_data, dict) else []
+
+    video_stream = None
+    audio_stream = None
+    for stream in streams or []:
+        if not isinstance(stream, dict):
+            continue
+        if stream.get("codec_type") == "video" and video_stream is None:
+            video_stream = stream
+        if stream.get("codec_type") == "audio" and audio_stream is None:
+            audio_stream = stream
+
+    if format_data:
+        metadata["container_format"] = format_data.get("format_name") or metadata.get(
+            "container_format"
+        )
+        metadata["duration_s"] = (
+            float(format_data["duration"])
+            if format_data.get("duration") not in (None, "N/A")
+            else metadata.get("duration_s")
+        )
+        if format_data.get("size"):
+            try:
+                metadata["file_size_bytes"] = int(format_data["size"])
+            except Exception:
+                pass
+        creation_time = None
+        tags = format_data.get("tags") or {}
+        if isinstance(tags, dict):
+            creation_time = tags.get("creation_time")
+        metadata["creation_time"] = creation_time or metadata.get("creation_time")
+
+    if video_stream:
+        metadata.update(
+            {
+                "video_codec": video_stream.get("codec_name")
+                or metadata.get("video_codec"),
+                "video_codec_long_name": video_stream.get("codec_long_name")
+                or metadata.get("video_codec_long_name"),
+                "profile": video_stream.get("profile") or metadata.get("profile"),
+                "pixel_format": video_stream.get("pix_fmt")
+                or metadata.get("pixel_format"),
+                "width": video_stream.get("width") or metadata.get("width"),
+                "height": video_stream.get("height") or metadata.get("height"),
+                "fps_r_frame_rate": video_stream.get("r_frame_rate")
+                or metadata.get("fps_r_frame_rate"),
+                "fps_avg_frame_rate": video_stream.get("avg_frame_rate")
+                or metadata.get("fps_avg_frame_rate"),
+                "total_frames_estimated": video_stream.get("nb_frames")
+                or metadata.get("total_frames_estimated"),
+            }
+        )
+
+        rotation_tag = None
+        tags = video_stream.get("tags") or {}
+        if isinstance(tags, dict):
+            rotation_tag = tags.get("rotate")
+            creation_time = tags.get("creation_time")
+            metadata["creation_time"] = creation_time or metadata.get("creation_time")
+        if rotation_tag is not None:
+            try:
+                metadata["rotation"] = _normalize_rotation(int(float(rotation_tag)))
+            except Exception:
+                metadata["rotation"] = metadata.get("rotation")
+
+        fps_avg = _safe_fraction_to_float(metadata.get("fps_avg_frame_rate"))
+        if metadata.get("total_frames_estimated") in (None, "") and fps_avg and metadata.get("duration_s"):
+            try:
+                metadata["total_frames_estimated"] = int(
+                    round(float(metadata["duration_s"]) * fps_avg)
+                )
+            except Exception:
+                pass
+
+    if audio_stream:
+        metadata["audio_present"] = True
+        metadata["audio_codec"] = audio_stream.get("codec_name") or metadata.get(
+            "audio_codec"
+        )
+    elif metadata.get("audio_present") is None:
+        metadata["audio_present"] = False
+
+    return metadata

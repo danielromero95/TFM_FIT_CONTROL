@@ -39,6 +39,11 @@ class RunStats:
     min_prominence: float
     min_distance_sec: float
     refractory_sec: float
+    rotation_applied: Optional[int] = None
+    sample_rate: Optional[int] = None
+    sampling_strategy: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    frame_count_input: Optional[int] = None
     reps_detected_raw: int = 0
     reps_detected_final: int = 0
     reps_rejected_threshold: int = 0
