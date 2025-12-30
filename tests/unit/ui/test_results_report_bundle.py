@@ -1,6 +1,10 @@
+import csv
 import io
 import json
+import tempfile
 import zipfile
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -168,3 +172,74 @@ def test_debug_bundle_handles_missing_metrics():
         assert "rep_speeds.csv" in names
         assert "rep_speed_long.csv" in names
         assert "rep_speed_meta.json" in names
+
+
+def test_bundle_contains_video_metadata_csv():
+    fake_metadata = {
+        "input_file_name": "sample.mp4",
+        "input_file_path": "videos/sample.mp4",
+        "width": 64,
+        "height": 48,
+        "duration_s": 2.0,
+        "fps_avg_frame_rate": "5/1",
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir, patch(
+        "src.ui.steps.results.results.get_video_metadata", return_value=fake_metadata
+    ):
+        video_path = Path(tmpdir) / "sample.mp4"
+        video_path.write_bytes(b"fakevideo")
+
+        stats = RunStats(
+            config_sha1="sha1",
+            fps_original=5.0,
+            fps_effective=5.0,
+            frames=10,
+            exercise_selected=None,
+            exercise_detected="squat",
+            view_detected="side",
+            detection_confidence=1.0,
+            primary_angle="angle",
+            angle_range_deg=0.0,
+            min_prominence=0.0,
+            min_distance_sec=0.0,
+            refractory_sec=0.0,
+            rotation_applied=90,
+            sample_rate=1,
+            sampling_strategy="index_sampling",
+        )
+        report = _dummy_report(stats, repetitions=0, metrics=None)
+        stats_df = pd.DataFrame([
+            {"Field": "metric", "Value": "angle"},
+        ])
+
+        bundle_bytes = _build_debug_report_bundle(
+            report=report,
+            stats_df=stats_df,
+            metrics_df=None,
+            metrics_csv=None,
+            effective_config_bytes=None,
+            video_name=video_path.name,
+            video_path=video_path,
+        )
+
+        with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as zf:
+            names = set(zf.namelist())
+            assert "video_data.csv" in names
+            assert "video_data.json" in names
+
+            csv_reader = csv.DictReader(
+                io.StringIO(zf.read("video_data.csv").decode("utf-8"))
+            )
+            data = {row["key"]: row["value"] for row in csv_reader}
+
+            for field in ["width", "height", "duration_s", "fps_avg_frame_rate"]:
+                assert field in data
+                assert str(data[field]).strip() != ""
+
+            assert data.get("input_file_name") == video_path.name
+
+            metadata_json = json.loads(zf.read("video_data.json"))
+            assert isinstance(metadata_json.get("width"), int)
+            assert isinstance(metadata_json.get("height"), int)
+            assert not isinstance(metadata_json.get("duration_s"), str)

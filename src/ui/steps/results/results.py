@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import datetime
 import html
 import io
@@ -23,6 +24,7 @@ try:
 except Exception:
     find_peaks = None  # pragma: no cover
 
+from src.A_preprocessing.video_metadata import get_video_metadata
 from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
@@ -125,6 +127,34 @@ def _serialize_stats(stats: RunStats) -> Dict[str, object]:
     return serialized
 
 
+def _metadata_to_csv(metadata: Dict[str, object]) -> str:
+    """Serializa un diccionario de metadatos a un CSV clave-valor.
+
+    Todos los valores se convierten a ``str`` para máxima compatibilidad; la
+    versión JSON conserva los tipos nativos.
+    """
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["key", "value"])
+    for key in sorted(metadata.keys()):
+        value = metadata[key]
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False)
+        if value is None:
+            serialized = ""
+        else:
+            serialized = str(value)
+        writer.writerow([key, serialized])
+    return buffer.getvalue()
+
+
+def _metadata_to_json_bytes(metadata: Dict[str, object]) -> bytes:
+    """Convierte un diccionario en JSON UTF-8 con sangría, preservando tipos."""
+
+    return json.dumps(metadata, indent=2, ensure_ascii=False).encode("utf-8")
+
+
 def _session_name_from_paths(*candidates: object | None) -> str | None:
     """Return the session directory name from the first valid candidate path."""
 
@@ -181,6 +211,7 @@ def _build_debug_report_bundle(
     metrics_csv: str | None,
     effective_config_bytes: bytes | None,
     video_name: str | None,
+    video_path: str | Path | None = None,
     rep_intervals: List[Tuple[int, int]] | None = None,
     valley_frames: List[int] | None = None,
     rep_speeds_df: pd.DataFrame | None = None,
@@ -215,9 +246,56 @@ def _build_debug_report_bundle(
     if metrics_df is not None:
         payload["metrics_preview"] = metrics_df.head(20).to_dict(orient="records")
 
+    try:
+        video_metadata: Dict[str, object] = (
+            get_video_metadata(Path(video_path)) if video_path else {}
+        )
+    except Exception as exc:
+        video_metadata = {
+            "error": str(exc),
+            "timestamp_extracted_utc": datetime.datetime.utcnow().isoformat(
+                timespec="seconds"
+            )
+            + "Z",
+        }
+
+    if not video_metadata:
+        video_metadata = {
+            "timestamp_extracted_utc": datetime.datetime.utcnow().isoformat(
+                timespec="seconds"
+            )
+            + "Z",
+            "video_name": video_name,
+        }
+    elif video_name and "video_name" not in video_metadata:
+        video_metadata["video_name"] = video_name
+
+    rotation_applied = getattr(report.stats, "rotation_applied", None)
+    if rotation_applied is None or rotation_applied == 0:
+        orientation_handling = "none"
+    else:
+        orientation_handling = f"rotate={rotation_applied} applied"
+
+    preprocessing_decisions = {
+        "orientation_handling": orientation_handling,
+        "fps_effective_used": getattr(report.stats, "fps_effective", None),
+        "frames_analyzed": getattr(report.stats, "frames", None),
+        "sampling_strategy": getattr(report.stats, "sampling_strategy", None),
+        "sample_rate": getattr(report.stats, "sample_rate", None),
+        "warnings_related_to_video": list(getattr(report.stats, "warnings", [])),
+    }
+    if getattr(report.stats, "fps_original", None) is not None:
+        preprocessing_decisions["fps_original"] = getattr(
+            report.stats, "fps_original", None
+        )
+
+    video_metadata["preprocessing_decisions"] = preprocessing_decisions
+
     with zipfile.ZipFile(bundle, "w") as zf:
         zf.writestr("report.json", json.dumps(payload, indent=2, ensure_ascii=False))
         zf.writestr("run_stats.csv", stats_df.to_csv(index=False))
+        zf.writestr("video_data.csv", _metadata_to_csv(video_metadata))
+        zf.writestr("video_data.json", _metadata_to_json_bytes(video_metadata))
         if metrics_csv:
             zf.writestr("metrics.csv", metrics_csv)
         if effective_config:
@@ -1473,6 +1551,7 @@ def _results_panel() -> Dict[str, bool]:
                     metrics_csv=metrics_data,
                     effective_config_bytes=eff_bytes,
                     video_name=Path(state.video_path).name if state.video_path else None,
+                    video_path=Path(state.video_path) if state.video_path else None,
                     rep_intervals=rep_intervals,
                     valley_frames=valley_frames,
                     rep_speeds_df=rep_speeds_df,
@@ -1486,14 +1565,22 @@ def _results_panel() -> Dict[str, bool]:
             except Exception as exc:
                 st.error(f"Could not assemble debug report: {exc}")
             else:
-                report_name = _session_name_from_paths(
-                    state.metrics_path,
-                    getattr(report.stats, "config_path", None),
-                    getattr(report, "metrics_path", None),
+                timestamp = datetime.datetime.now().strftime("%Y_%m_%d-%H_%M")
+                base_name = None
+                if state.video_path:
+                    try:
+                        base_name = Path(state.video_path).stem
+                    except Exception:
+                        base_name = None
+                if not base_name:
+                    base_name = _session_name_from_paths(
+                        state.metrics_path,
+                        getattr(report.stats, "config_path", None),
+                        getattr(report, "metrics_path", None),
+                    )
+                report_name = (
+                    f"{base_name}-{timestamp}.zip" if base_name else f"analysis_report-{timestamp}.zip"
                 )
-                if not report_name:
-                    report_name = Path(state.video_path).stem if state.video_path else None
-                report_name = f"{report_name}.zip" if report_name else "analysis_report.zip"
                 st.download_button(
                     "📑 Download report",
                     data=report_bundle,

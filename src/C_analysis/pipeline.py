@@ -105,6 +105,7 @@ def run_pipeline(
     fps_from_reader = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     fps_effective = 0.0
     sample_rate = 1
+    sampling_strategy = "index_sampling"
     frames_processed = 0
     df_raw_landmarks: Optional[pd.DataFrame] = None
     fps_original = 0.0
@@ -126,6 +127,7 @@ def run_pipeline(
     is_heavy_by_size = False
     is_heavy_by_mp = False
     is_heavy_media = False
+    frame_count_input: Optional[int] = None
 
     try:
         info, fps_original, fps_warning, prefer_reader_fps = read_info_and_initial_sampling(cap, video_path)
@@ -139,6 +141,7 @@ def run_pipeline(
         width = int(info.width or 0)
         height = int(info.height or 0)
         megapixels = (width * height) / 1e6 if (width > 0 and height > 0) else 0.0
+        frame_count_input = int(info.frame_count) if info.frame_count is not None else None
 
         is_heavy_by_size = (
             cfg.debug.overlay_disable_over_bytes > 0
@@ -185,6 +188,7 @@ def run_pipeline(
             target_fps_for_sampling = float(cfg.video.target_fps)
 
         if target_fps_for_sampling and target_fps_for_sampling > 0:
+            sampling_strategy = "time_sampling"
             raw_iter = extract_processed_frames_stream(
                 video_path=video_path,
                 rotate=processing_rotate,
@@ -204,6 +208,7 @@ def run_pipeline(
                     fps_warning,
                 )
         else:
+            sampling_strategy = "index_sampling"
             raw_iter = extract_processed_frames_stream(
                 video_path=video_path,
                 rotate=processing_rotate,
@@ -535,6 +540,11 @@ def run_pipeline(
         debug_notes=debug_notes,
         skip_reason=skip_reason,
         config_path=config_path,
+        rotation_applied=int(processing_rotate) if processing_rotate is not None else None,
+        sample_rate=int(sample_rate) if sample_rate else None,
+        sampling_strategy=sampling_strategy,
+        file_size_bytes=int(file_size_bytes) if file_size_bytes else None,
+        frame_count_input=frame_count_input,
         t_extract_ms=float(extract_ms),
         t_pose_ms=float(pose_ms),
         t_filter_ms=float(filter_ms),
