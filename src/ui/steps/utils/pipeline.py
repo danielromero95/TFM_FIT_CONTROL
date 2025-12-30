@@ -45,6 +45,7 @@ def ensure_video_path() -> None:
     tmp_file.close()
 
     state.video_path = tmp_file.name
+    state.video_original_name = upload_data.get("name") or Path(tmp_file.name).name
     state.detect_result = None
     state.upload_data = None
 

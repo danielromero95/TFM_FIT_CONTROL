@@ -39,6 +39,7 @@ def _upload_step() -> None:
                 state = get_state()
                 # Persistimos el binario en el estado para que los pasos posteriores lo usen.
                 state.upload_data = {"name": uploaded.name, "bytes": data_bytes}
+                state.video_original_name = uploaded.name
                 state.upload_token = new_token
                 state.active_upload_token = new_token
                 ensure_video_path()

@@ -1,4 +1,5 @@
 import csv
+import datetime
 import io
 import json
 import tempfile
@@ -15,6 +16,8 @@ from src.ui.steps.results.results import (
     _build_rep_speed_chart_df,
     _compute_rep_intervals,
     _compute_rep_speeds,
+    _preferred_video_base_name,
+    _report_bundle_file_name,
     phase_order_for_exercise,
 )
 
@@ -182,6 +185,10 @@ def test_bundle_contains_video_metadata_csv():
         "height": 48,
         "duration_s": 2.0,
         "fps_avg_frame_rate": "5/1",
+        "fps_avg_frame_rate_float": 5.0,
+        "fps_r_frame_rate": "5.0",
+        "fps_r_frame_rate_float": 5.0,
+        "debug_opencv": {},
     }
 
     with tempfile.TemporaryDirectory() as tmpdir, patch(
@@ -243,3 +250,20 @@ def test_bundle_contains_video_metadata_csv():
             assert isinstance(metadata_json.get("width"), int)
             assert isinstance(metadata_json.get("height"), int)
             assert not isinstance(metadata_json.get("duration_s"), str)
+            assert isinstance(metadata_json.get("debug_opencv"), dict)
+            assert isinstance(metadata_json.get("fps_avg_frame_rate"), str)
+            avg_float = metadata_json.get("fps_avg_frame_rate_float")
+            assert isinstance(avg_float, float) or avg_float is None
+
+
+def test_report_bundle_name_prefers_original_upload_name():
+    base_name = _preferred_video_base_name(
+        "SQ_Front_Daniel_Amarillo_5.mp4", 
+        "/tmp/tmpzcxuvdl7.mp4", 
+        fallback_token="fallback",
+    )
+    assert base_name == "SQ_Front_Daniel_Amarillo_5"
+
+    fixed_ts = datetime.datetime(2025, 12, 30, 11, 14)
+    file_name = _report_bundle_file_name(base_name, fixed_ts)
+    assert file_name == "SQ_Front_Daniel_Amarillo_5-2025_12_30-11_14.zip"

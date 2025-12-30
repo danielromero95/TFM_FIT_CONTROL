@@ -101,6 +101,21 @@ def _safe_fraction_to_float(value: str | None) -> float | None:
         return None
 
 
+def _frame_rate_to_str(value: Any) -> str | None:
+    """Normaliza valores de FPS a cadena, descartando valores no finitos."""
+
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            if not math.isfinite(float(value)):
+                return None
+            return str(float(value))
+    except Exception:  # pragma: no cover - defensivo
+        return None
+    return str(value)
+
+
 def read_video_file_info(path: str | Path, cap: cv2.VideoCapture | None = None) -> VideoInfo:
     """
     Obtiene metadatos completos usando OpenCV y, si existe, ffprobe.
@@ -250,7 +265,7 @@ def _safe_relative_path(path: Path) -> str:
         return path.name
 
 
-def get_video_metadata(path: Path) -> dict[str, Any]:
+def get_video_metadata(path: Path, original_name: str | None = None) -> dict[str, Any]:
     """Extrae un diccionario amplio de metadatos del archivo de vídeo.
 
     Se apoya en OpenCV y, si está disponible, en ``ffprobe`` para rellenar
@@ -259,9 +274,13 @@ def get_video_metadata(path: Path) -> dict[str, Any]:
     """
 
     p = Path(path)
+    temp_file_name = p.name
+    temp_file_path = _safe_relative_path(p)
+    input_name = original_name or temp_file_name
+    input_path = original_name or temp_file_path
     metadata: dict[str, Any] = {
-        "input_file_name": p.name,
-        "input_file_path": _safe_relative_path(p),
+        "input_file_name": input_name,
+        "input_file_path": input_path,
         "file_size_bytes": None,
         "container_format": None,
         "video_codec": None,
@@ -280,6 +299,12 @@ def get_video_metadata(path: Path) -> dict[str, Any]:
         "creation_time": None,
         "timestamp_extracted_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "debug_opencv": {},
+        "debug_internal": {
+            "temp_file_name": temp_file_name,
+            "temp_file_path": temp_file_path,
+        },
+        "fps_avg_frame_rate_float": None,
+        "fps_r_frame_rate_float": None,
     }
 
     try:
@@ -311,9 +336,9 @@ def get_video_metadata(path: Path) -> dict[str, Any]:
         }
 
         if metadata.get("fps_avg_frame_rate") is None and info.fps:
-            metadata["fps_avg_frame_rate"] = info.fps
+            metadata["fps_avg_frame_rate"] = _frame_rate_to_str(info.fps)
         if metadata.get("fps_r_frame_rate") is None and info.fps:
-            metadata["fps_r_frame_rate"] = info.fps
+            metadata["fps_r_frame_rate"] = _frame_rate_to_str(info.fps)
 
     ffprobe_data = _run_ffprobe(p)
     format_data = ffprobe_data.get("format", {}) if isinstance(ffprobe_data, dict) else {}
@@ -361,10 +386,13 @@ def get_video_metadata(path: Path) -> dict[str, Any]:
                 or metadata.get("pixel_format"),
                 "width": video_stream.get("width") or metadata.get("width"),
                 "height": video_stream.get("height") or metadata.get("height"),
-                "fps_r_frame_rate": video_stream.get("r_frame_rate")
-                or metadata.get("fps_r_frame_rate"),
-                "fps_avg_frame_rate": video_stream.get("avg_frame_rate")
-                or metadata.get("fps_avg_frame_rate"),
+                "fps_r_frame_rate": _frame_rate_to_str(
+                    video_stream.get("r_frame_rate") or metadata.get("fps_r_frame_rate")
+                ),
+                "fps_avg_frame_rate": _frame_rate_to_str(
+                    video_stream.get("avg_frame_rate")
+                    or metadata.get("fps_avg_frame_rate")
+                ),
                 "total_frames_estimated": video_stream.get("nb_frames")
                 or metadata.get("total_frames_estimated"),
             }
@@ -398,5 +426,18 @@ def get_video_metadata(path: Path) -> dict[str, Any]:
         )
     elif metadata.get("audio_present") is None:
         metadata["audio_present"] = False
+
+    metadata["fps_avg_frame_rate"] = _frame_rate_to_str(
+        metadata.get("fps_avg_frame_rate")
+    )
+    metadata["fps_r_frame_rate"] = _frame_rate_to_str(
+        metadata.get("fps_r_frame_rate")
+    )
+    metadata["fps_avg_frame_rate_float"] = _safe_fraction_to_float(
+        metadata.get("fps_avg_frame_rate")
+    )
+    metadata["fps_r_frame_rate_float"] = _safe_fraction_to_float(
+        metadata.get("fps_r_frame_rate")
+    )
 
     return metadata
