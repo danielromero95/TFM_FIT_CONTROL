@@ -33,11 +33,22 @@ REQUIRED_RELIABILITY_LANDMARKS: Tuple[int, ...] = (
 )
 
 
-def _resize_with_letterbox(image: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
+@dataclass
+class LetterboxTransform:
+    target_width: int
+    target_height: int
+    scale: float
+    pad_x: int
+    pad_y: int
+
+
+def _resize_with_letterbox(
+    image: np.ndarray, target_size: Tuple[int, int]
+) -> tuple[np.ndarray, LetterboxTransform | None]:
     target_width, target_height = target_size
     height, width = image.shape[:2]
     if width == target_width and height == target_height:
-        return image
+        return image, None
 
     scale = min(target_width / max(width, 1), target_height / max(height, 1))
     new_w = max(int(round(width * scale)), 1)
@@ -52,8 +63,6 @@ def _resize_with_letterbox(image: np.ndarray, target_size: Tuple[int, int]) -> n
 
     x_offset = max((target_width - w_resized) // 2, 0)
     y_offset = max((target_height - h_resized) // 2, 0)
-    right = target_width - w_resized - x_offset
-    bottom = target_height - h_resized - y_offset
 
     canvas = np.zeros((target_height, target_width, *image.shape[2:]), dtype=image.dtype)
     x_start = max(x_offset, 0)
@@ -64,7 +73,15 @@ def _resize_with_letterbox(image: np.ndarray, target_size: Tuple[int, int]) -> n
     src_x_end = x_end - x_start
     src_y_end = y_end - y_start
     canvas[y_start:y_end, x_start:x_end] = resized[:src_y_end, :src_x_end]
-    return canvas
+
+    transform = LetterboxTransform(
+        target_width=target_width,
+        target_height=target_height,
+        scale=scale,
+        pad_x=x_offset,
+        pad_y=y_offset,
+    )
+    return canvas, transform
 
 
 def pose_reliable(
@@ -431,6 +448,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         height, width = image_bgr.shape[:2]
         rgb_image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         used_crop = False
+        letterbox_transform: Optional[LetterboxTransform] = None
         frame_idx = self._frame_idx
 
         def _record_debug(pose_ok_value: bool, crop_box_value: Optional[Sequence[int]], *, roi_used: Optional[Sequence[int]]) -> None:
@@ -507,7 +525,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self._frame_idx += 1
             return pose_result
 
-        crop_resized = _resize_with_letterbox(crop, self.target_size)
+        crop_resized, letterbox_transform = _resize_with_letterbox(crop, self.target_size)
         crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
         used_crop = True
         results_crop = _process_with_recovery(
@@ -534,7 +552,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 width,
                 height,
                 self.landmark_pb2,
-                letterbox_transform=letterbox,
+                letterbox_transform=letterbox_transform,
             )
             pose_ok = pose_reliable(
                 landmarks_full_raw, visibility_threshold=self.reliability_min_visibility
@@ -557,7 +575,6 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             self.mp_drawing.draw_landmarks(
                 annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
             )
-            self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
         else:
             if self._smoother is not None:
                 self._smoother.reset()
@@ -685,6 +702,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
         pose_ok = False
         landmarks_output: Optional[List[Landmark]] = None
         crop_box: Optional[Sequence[int]] = None
+        letterbox_transform: Optional[LetterboxTransform] = None
 
         if use_full_frame:
             results_full = _process_with_recovery(
@@ -743,7 +761,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     self._smoother.reset()
                 self.roi_state.update_failure(width, height)
             else:
-                crop_resized = _resize_with_letterbox(crop, self.target_size)
+                crop_resized, letterbox_transform = _resize_with_letterbox(crop, self.target_size)
                 crop_rgb = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2RGB)
                 results_crop = _process_with_recovery(
                     self.pose_crop,

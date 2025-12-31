@@ -7,10 +7,13 @@ import types
 import numpy as np
 import pytest
 
+import src.B_pose_estimation.estimators.mediapipe_estimators as mediapipe_estimators
 from src.B_pose_estimation.estimators.mediapipe_estimators import (
     CroppedPoseEstimator,
     LandmarkSmoother,
+    LetterboxTransform,
     PoseEstimator,
+    _resize_with_letterbox,
     _rescale_landmarks_from_crop,
     pose_reliable,
     reliability_score,
@@ -92,6 +95,46 @@ def test_rescale_landmarks_from_crop_respects_bounds_and_scaling(crop_box, lm, e
     assert 0.0 <= proto_list.landmark[0].y <= 1.0
 
 
+def test_resize_with_letterbox_returns_image_and_transform():
+    image = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    resized, transform = _resize_with_letterbox(image, (4, 4))
+
+    assert resized.shape == (4, 4, 3)
+    assert transform is not None
+    assert transform.target_width == 4
+    assert transform.target_height == 4
+    assert math.isclose(transform.scale, 2.0)
+    assert transform.pad_x == 0
+    assert transform.pad_y == 0
+
+
+def test_rescale_landmarks_from_letterboxed_crop():
+    transform = LetterboxTransform(
+        target_width=256,
+        target_height=256,
+        scale=1.28,
+        pad_x=0,
+        pad_y=64,
+    )
+    crop_box = (10, 20, 210, 120)
+    landmark = _FakeNormalizedLandmark(0.5, 0.5, z=0.2, visibility=0.8)
+
+    landmarks, _ = _rescale_landmarks_from_crop(
+        [landmark],
+        crop_box,
+        image_width=400,
+        image_height=300,
+        landmark_pb2_module=_FakePb2,
+        letterbox_transform=transform,
+    )
+
+    assert math.isclose(landmarks[0].x, 110 / 400)
+    assert math.isclose(landmarks[0].y, 70 / 300)
+    assert math.isclose(landmarks[0].z, 0.2)
+    assert math.isclose(landmarks[0].visibility, 0.8)
+
+
 def test_rescale_landmarks_from_crop_requires_complete_box():
     with pytest.raises(ValueError):
         _rescale_landmarks_from_crop(
@@ -164,6 +207,52 @@ def test_cropped_estimator_draws_full_frame_landmarks(monkeypatch):
     assert pytest.approx(drawn_landmarks.landmark[0].y) == pytest.approx(0.375)
 
 
+def test_cropped_estimator_passes_letterbox_transform(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+
+    dummy_transform = LetterboxTransform(
+        target_width=4, target_height=2, scale=0.5, pad_x=1, pad_y=0
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_resize(image, target_size):
+        return np.zeros((target_size[1], target_size[0], 3), dtype=image.dtype), dummy_transform
+
+    def _fake_rescale(mp_landmarks, crop_box, image_width, image_height, landmark_pb2_module, letterbox_transform=None):
+        captured["letterbox_transform"] = letterbox_transform
+        return [Landmark(0.0, 0.0, 0.0, visibility=1.0)], _FakeNormalizedLandmarkList(
+            [_FakeNormalizedLandmark(0.0, 0.0)]
+        )
+
+    poses = [_FakePose([_FakeNormalizedLandmark(0.25, 0.25, visibility=1.0)]), _FakePose([_FakeNormalizedLandmark(0.5, 0.5, visibility=1.0)])]
+
+    monkeypatch.setattr(mediapipe_estimators, "_resize_with_letterbox", _fake_resize)
+    monkeypatch.setattr(mediapipe_estimators, "_rescale_landmarks_from_crop", _fake_rescale)
+    monkeypatch.setattr(
+        mediapipe_estimators, "bounding_box_from_landmarks", lambda *_args, **_kwargs: (0, 0, 4, 2)
+    )
+    monkeypatch.setattr(mediapipe_estimators, "smooth_bounding_box", lambda *_args, **_kwargs: (0, 0, 4, 2))
+    monkeypatch.setattr(mediapipe_estimators, "expand_and_clip_box", lambda bbox, *_args, **_kwargs: bbox)
+
+    def _fake_acquire(**_kwargs):
+        return poses.pop(0), (False, 2, 0.5, 0.5)
+
+    drawing = _FakeDrawing()
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs)))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
+
+    estimator = CroppedPoseEstimator(target_size=(4, 2), crop_margin=0.0)
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    estimator.estimate(image)
+
+    assert captured["letterbox_transform"] is dummy_transform
+
+
 def test_pose_estimator_reuses_pose_instance(monkeypatch):
     _install_fake_mediapipe(monkeypatch)
     drawing = _FakeDrawing()
@@ -199,7 +288,45 @@ def test_pose_estimator_reuses_pose_instance(monkeypatch):
     estimator.estimate(image)
     estimator.close()
 
-    assert len(calls) == 1
+
+def test_roi_estimator_passes_letterbox_transform(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+
+    dummy_transform = LetterboxTransform(
+        target_width=6, target_height=4, scale=0.5, pad_x=1, pad_y=1
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_resize(image, target_size):
+        return np.zeros((target_size[1], target_size[0], 3), dtype=image.dtype), dummy_transform
+
+    def _fake_rescale(mp_landmarks, crop_box, image_width, image_height, landmark_pb2_module, letterbox_transform=None):
+        captured["letterbox_transform"] = letterbox_transform
+        return [Landmark(0.0, 0.0, 0.0, visibility=1.0)], _FakeNormalizedLandmarkList(
+            [_FakeNormalizedLandmark(0.0, 0.0)]
+        )
+
+    poses = [_FakePose([_FakeNormalizedLandmark(0.2, 0.2, visibility=1.0)]), _FakePose([_FakeNormalizedLandmark(0.4, 0.4, visibility=1.0)])]
+
+    monkeypatch.setattr(mediapipe_estimators, "_resize_with_letterbox", _fake_resize)
+    monkeypatch.setattr(mediapipe_estimators, "_rescale_landmarks_from_crop", _fake_rescale)
+    monkeypatch.setattr(mediapipe_estimators, "_process_with_recovery", lambda pose_graph, *_args, **_kwargs: pose_graph.process(None))
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: (poses.pop(0), (False, 2, 0.5, 0.5))))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", _FakeDrawing())
+
+    estimator = mediapipe_estimators.RoiPoseEstimator(target_size=(6, 4), refresh_period=100, warmup_frames=0, max_misses=1)
+    estimator.frame_idx = 1
+    estimator.roi_state.next_roi = lambda _w, _h: ([0, 0, 3, 3], False)
+
+    image = np.zeros((6, 6, 3), dtype=np.uint8)
+
+    estimator.estimate(image)
+
+    assert captured["letterbox_transform"] is dummy_transform
 
 
 def test_pose_estimator_resets_smoother_on_miss(monkeypatch):

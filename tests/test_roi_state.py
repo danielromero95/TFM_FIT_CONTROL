@@ -43,8 +43,9 @@ def test_vertical_video_roi_has_minimum_size():
 def test_letterbox_preserves_aspect_ratio():
     image = np.zeros((200, 400, 3), dtype=np.uint8)
     image[:, :] = 255
-    resized = _resize_with_letterbox(image, (256, 256))
+    resized, transform = _resize_with_letterbox(image, (256, 256))
     assert resized.shape == (256, 256, 3)
+    assert transform is not None
     non_zero_mask = np.any(resized != 0, axis=2)
     ys, xs = np.where(non_zero_mask)
     height = ys.max() - ys.min() + 1
