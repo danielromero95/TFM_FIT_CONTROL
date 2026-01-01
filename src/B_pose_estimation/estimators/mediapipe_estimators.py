@@ -232,6 +232,25 @@ def _rescale_landmarks_from_crop(
     )
 
 
+def _to_landmark_list_pb2(
+    landmarks: Sequence[Landmark],
+    landmark_pb2_module,
+) -> object:
+    """Convierte una secuencia de ``Landmark`` en ``NormalizedLandmarkList``."""
+
+    return landmark_pb2_module.NormalizedLandmarkList(
+        landmark=[
+            landmark_pb2_module.NormalizedLandmark(
+                x=float(lm.x),
+                y=float(lm.y),
+                z=float(lm.z),
+                visibility=float(lm.visibility),
+            )
+            for lm in landmarks
+        ]
+    )
+
+
 def _process_with_recovery(
     pose_graph: object,
     rgb_image: np.ndarray,
@@ -306,6 +325,14 @@ class PoseEstimator(PoseEstimatorBase):
             if landmark_smoothing_alpha is not None
             else None
         )
+        if self._smoother is not None:
+            try:
+                from mediapipe.framework.formats import landmark_pb2
+            except ImportError as exc:  # pragma: no cover - entorno sin MediaPipe
+                raise RuntimeError("MediaPipe landmark protobufs are not available") from exc
+            self.landmark_pb2 = landmark_pb2
+        else:
+            self.landmark_pb2 = None
         self.pose = None
         self._key: Optional[Tuple[bool, int, float, float, bool, bool]] = None
         self._misses = 0
@@ -354,7 +381,12 @@ class PoseEstimator(PoseEstimatorBase):
             self._smoother(raw_landmarks) if self._smoother is not None else raw_landmarks
         )
         annotated_image = image_bgr.copy()
-        self.mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, POSE_CONNECTIONS)
+        landmark_list_to_draw = (
+            results.pose_landmarks
+            if self._smoother is None
+            else _to_landmark_list_pb2(landmarks, self.landmark_pb2)
+        )
+        self.mp_drawing.draw_landmarks(annotated_image, landmark_list_to_draw, POSE_CONNECTIONS)
         return PoseResult(
             landmarks=landmarks,
             annotated_image=annotated_image,
@@ -562,16 +594,11 @@ class CroppedPoseEstimator(PoseEstimatorBase):
                 if self._smoother is not None
                 else landmarks_full_raw
             )
-            landmark_list_to_draw = landmark_list
-            if self._smoother is not None:
-                landmark_list_to_draw = self.landmark_pb2.NormalizedLandmarkList(
-                    landmark=[
-                        self.landmark_pb2.NormalizedLandmark(
-                            x=lm.x, y=lm.y, z=lm.z, visibility=lm.visibility
-                        )
-                        for lm in landmarks_full
-                    ]
-                )
+            landmark_list_to_draw = (
+                landmark_list
+                if self._smoother is None
+                else _to_landmark_list_pb2(landmarks_full, self.landmark_pb2)
+            )
             self.mp_drawing.draw_landmarks(
                 annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
             )
@@ -726,7 +753,14 @@ class RoiPoseEstimator(PoseEstimatorBase):
                     self._smoother(landmarks_raw) if self._smoother is not None else landmarks_raw
                 )
                 annotated_image = image_bgr.copy()
-                self.mp_drawing.draw_landmarks(annotated_image, results_full.pose_landmarks, POSE_CONNECTIONS)
+                landmark_list_to_draw = (
+                    results_full.pose_landmarks
+                    if self._smoother is None
+                    else _to_landmark_list_pb2(landmarks_output, self.landmark_pb2)
+                )
+                self.mp_drawing.draw_landmarks(
+                    annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
+                )
                 bbox = bounding_box_from_landmarks(landmarks_output, width, height)
                 if bbox is not None:
                     smoothed_bbox = smooth_bounding_box(
@@ -791,7 +825,14 @@ class RoiPoseEstimator(PoseEstimatorBase):
                         self._smoother(landmarks_full) if self._smoother is not None else landmarks_full
                     )
                     annotated_image = image_bgr.copy()
-                    self.mp_drawing.draw_landmarks(annotated_image, landmark_list, POSE_CONNECTIONS)
+                    landmark_list_to_draw = (
+                        landmark_list
+                        if self._smoother is None
+                        else _to_landmark_list_pb2(landmarks_output, self.landmark_pb2)
+                    )
+                    self.mp_drawing.draw_landmarks(
+                        annotated_image, landmark_list_to_draw, POSE_CONNECTIONS
+                    )
                     bbox = bounding_box_from_landmarks(landmarks_output, width, height)
                     if bbox is not None:
                         smoothed_bbox = smooth_bounding_box(
@@ -857,6 +898,7 @@ __all__ = [
     "CroppedPoseEstimator",
     "RoiPoseEstimator",
     "LandmarkSmoother",
+    "_to_landmark_list_pb2",
     "pose_reliable",
     "reliability_score",
 ]

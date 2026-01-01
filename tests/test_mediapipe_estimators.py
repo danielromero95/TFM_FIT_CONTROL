@@ -368,6 +368,47 @@ def test_pose_estimator_resets_smoother_on_miss(monkeypatch):
     assert estimator._smoother._state is None
 
 
+def test_pose_estimator_draws_smoothed_landmarks_when_smoothing_enabled(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+
+    drawing = _FakeDrawing()
+
+    class _SequentialPose:
+        def __init__(self):
+            self._frames = [
+                [_FakeNormalizedLandmark(0.0, 0.0, visibility=1.0)],
+                [_FakeNormalizedLandmark(1.0, 1.0, visibility=1.0)],
+            ]
+
+        def process(self, _image):
+            landmarks = self._frames.pop(0)
+            return types.SimpleNamespace(
+                pose_landmarks=_FakeNormalizedLandmarkList(landmarks)
+            )
+
+    def _fake_acquire(**kwargs):
+        return _SequentialPose(), (False, 2, 0.6, 0.6, True, False)
+
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs)))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
+
+    estimator = PoseEstimator(landmark_smoothing_alpha=0.5)
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    estimator.estimate(image)
+    estimator.estimate(image)
+
+    assert drawing.calls, "Landmarks should be drawn"
+    smoothed_landmarks = drawing.calls[-1][1]
+    assert isinstance(smoothed_landmarks, _FakeNormalizedLandmarkList)
+    assert smoothed_landmarks.landmark[0].x == pytest.approx(0.5)
+    assert smoothed_landmarks.landmark[0].y == pytest.approx(0.5)
+
+
 def test_pose_reliable_requires_visible_core_landmarks():
     landmarks = [Landmark(x=0.0, y=0.0, z=0.0, visibility=1.0) for _ in range(33)]
 
@@ -431,3 +472,73 @@ def test_landmark_smoother_skips_non_finite_values():
     assert second[0].x == pytest.approx(first[0].x)
     assert second[0].y == pytest.approx(first[0].y)
     assert second[0].z == pytest.approx(first[0].z)
+
+
+def test_roi_estimator_draws_smoothed_landmarks_when_smoothing_enabled(monkeypatch):
+    _install_fake_mediapipe(monkeypatch)
+
+    drawing = _FakeDrawing()
+
+    class _SequentialPose:
+        def __init__(self, sequence):
+            self._sequence = list(sequence)
+
+        def process(self, _image):
+            landmarks = self._sequence.pop(0)
+            return types.SimpleNamespace(
+                pose_landmarks=_FakeNormalizedLandmarkList(landmarks)
+            )
+
+    full_pose = _SequentialPose(
+        [[_FakeNormalizedLandmark(0.25, 0.25, visibility=1.0)]]
+    )
+    crop_pose = _SequentialPose(
+        [
+            [_FakeNormalizedLandmark(0.0, 0.0, visibility=1.0)],
+            [_FakeNormalizedLandmark(1.0, 1.0, visibility=1.0)],
+        ]
+    )
+
+    poses = [full_pose, crop_pose]
+
+    def _fake_acquire(**_kwargs):
+        return poses.pop(0), (False, 2, 0.5, 0.5)
+
+    monkeypatch.setattr(PoseGraphPool, "acquire", classmethod(lambda cls, **kwargs: _fake_acquire(**kwargs)))
+    monkeypatch.setattr(PoseGraphPool, "release", classmethod(lambda cls, inst, key: None))
+    monkeypatch.setattr(PoseGraphPool, "_imported", True)
+    monkeypatch.setattr(PoseGraphPool, "_ensure_imports", classmethod(lambda cls: None))
+    monkeypatch.setattr(PoseGraphPool, "mp_pose", types.SimpleNamespace(Pose=None))
+    monkeypatch.setattr(PoseGraphPool, "mp_drawing", drawing)
+    monkeypatch.setattr(
+        mediapipe_estimators, "_process_with_recovery", lambda pose_graph, *_args, **_kwargs: pose_graph.process(None)
+    )
+    monkeypatch.setattr(
+        mediapipe_estimators, "bounding_box_from_landmarks", lambda *_args, **_kwargs: (0, 0, 4, 4)
+    )
+    monkeypatch.setattr(
+        mediapipe_estimators, "smooth_bounding_box", lambda _prev, bbox, *_args, **_kwargs: bbox
+    )
+    monkeypatch.setattr(mediapipe_estimators, "expand_and_clip_box", lambda bbox, *_args, **_kwargs: bbox)
+    monkeypatch.setattr(
+        mediapipe_estimators,
+        "_resize_with_letterbox",
+        lambda image, target_size: (np.zeros((target_size[1], target_size[0], 3), dtype=image.dtype), None),
+    )
+
+    estimator = mediapipe_estimators.RoiPoseEstimator(
+        target_size=(4, 4), refresh_period=100, warmup_frames=0, max_misses=1, landmark_smoothing_alpha=0.5
+    )
+    estimator.frame_idx = 1
+    estimator.roi_state.next_roi = lambda _w, _h: ([0, 0, 4, 4], False)
+
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    estimator.estimate(image)
+    estimator.estimate(image)
+
+    assert len(drawing.calls) == 2
+    smoothed_landmarks = drawing.calls[-1][1]
+    assert isinstance(smoothed_landmarks, _FakeNormalizedLandmarkList)
+    assert smoothed_landmarks.landmark[0].x == pytest.approx(0.5)
+    assert smoothed_landmarks.landmark[0].y == pytest.approx(0.5)
