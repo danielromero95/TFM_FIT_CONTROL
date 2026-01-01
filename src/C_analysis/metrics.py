@@ -35,7 +35,9 @@ class AutoTuneResult:
     multipliers: Dict[str, float] = field(default_factory=dict)
 
 
-def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame | np.ndarray, object, pd.Series]:
+def filter_landmarks(
+    df_raw: pd.DataFrame,
+) -> tuple[pd.DataFrame | np.ndarray, object, pd.Series, pd.Series]:
     """Aplicar filtrado e interpolación a los *landmarks* detectados.
 
     Returns:
@@ -48,7 +50,11 @@ def filter_landmarks(df_raw: pd.DataFrame) -> tuple[pd.DataFrame | np.ndarray, o
     # cajas de recorte y una máscara de calidad. Los convertimos a tipos
     # homogéneos para el resto del pipeline.
     sequence, crops, quality = filter_and_interpolate_landmarks(df_raw)
-    return sequence, crops, pd.Series(quality)
+    kept_indices = pd.Series(
+        df_raw["analysis_frame_idx"] if "analysis_frame_idx" in df_raw.columns else df_raw.index,
+        copy=False,
+    )
+    return sequence, crops, pd.Series(quality), kept_indices
 
 
 def choose_primary_angle(
@@ -288,13 +294,23 @@ def compute_metrics_and_angle(
     exercise: ExerciseType | str = ExerciseType.UNKNOWN,
     view: ViewType | str = ViewType.UNKNOWN,
     quality_mask: Optional[pd.Series] = None,
-) -> tuple[pd.DataFrame, float, list[str], Optional[str], Optional[str]]:
+    analysis_frame_idx: Optional[pd.Series | np.ndarray | list[int]] = None,
+) -> tuple[pd.DataFrame, float, list[str], Optional[str], Optional[str], pd.Series]:
     """Calcular métricas biomecánicas y derivar la excursión del ángulo principal."""
 
     warnings: list[str] = []
     skip_reason: Optional[str] = None
 
     df_metrics = calculate_metrics_from_sequence(df_seq, fps_effective, quality_mask=quality_mask)
+
+    if analysis_frame_idx is None:
+        analysis_idx = pd.Series(np.arange(len(df_metrics), dtype=int))
+    else:
+        analysis_idx = pd.Series(analysis_frame_idx, copy=False).reset_index(drop=True)
+        if len(analysis_idx) != len(df_metrics):
+            raise ValueError(
+                "analysis_frame_idx length does not match metrics length"
+            )
     angle_range = 0.0
 
     chosen_primary = primary_angle
@@ -324,7 +340,7 @@ def compute_metrics_and_angle(
             warnings.append("No valid primary angle column could be determined from the metrics.")
         skip_reason = "The primary angle column was not found in the metrics."
 
-    return df_metrics, angle_range, warnings, skip_reason, chosen_primary
+    return df_metrics, angle_range, warnings, skip_reason, chosen_primary, analysis_idx
 
 
 def maybe_count_reps(
