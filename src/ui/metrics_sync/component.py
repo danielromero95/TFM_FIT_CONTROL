@@ -39,19 +39,33 @@ def _build_payload(
 
     idx = np.arange(0, n, stride, dtype=int)
 
-    if "frame_idx" in df.columns:
-        frames = pd.to_numeric(df["frame_idx"], errors="coerce").to_numpy(
+    def _safe_numeric(series_like: object, fallback: np.ndarray) -> np.ndarray:
+        values = pd.to_numeric(pd.Series(series_like), errors="coerce").to_numpy(
             dtype="float64", copy=False
         )
-        if not np.isfinite(frames).any():
-            frames = np.arange(n, dtype="float64")
-        times_arr = frames[idx] / fps
+        if not np.isfinite(values).any():
+            return fallback
+        return values
+
+    analysis_frames = _safe_numeric(df.get("analysis_frame_idx", df.index), np.arange(n, dtype="float64"))
+    frame_idx = _safe_numeric(df.get("frame_idx", df.index), np.arange(n, dtype="float64"))
+    source_frames = _safe_numeric(df.get("source_frame_idx", df.index), np.arange(n, dtype="float64"))
+
+    if "time_s" in df.columns:
+        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps)
+        times_arr = times_base[idx]
+        x_mode = "time"
+    elif "frame_idx" in df.columns:
+        times_arr = frame_idx[idx] / fps
         x_mode = "time"
     else:
         times_arr = idx.astype("float64", copy=False)
         x_mode = "frame"
 
     times = times_arr.tolist()
+    frames_for_plot = frame_idx[idx].tolist()
+    analysis_for_plot = analysis_frames[idx].tolist()
+    source_for_plot = source_frames[idx].tolist()
 
     present = [c for c in selected if c in df.columns]
     series: dict[str, list[float | None]] = {}
@@ -64,7 +78,15 @@ def _build_payload(
         for j, name in enumerate(present):
             series[name] = obj[:, j].tolist()
 
-    return {"times": times, "series": series, "fps": fps, "x_mode": x_mode}
+    payload = {
+        "times": times,
+        "series": series,
+        "fps": fps,
+        "x_mode": x_mode,
+        "frames": analysis_for_plot,
+        "source_frames": source_for_plot,
+    }
+    return payload
 
 
 @st.cache_data(show_spinner=False)

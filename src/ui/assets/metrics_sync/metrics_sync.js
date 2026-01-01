@@ -15,6 +15,7 @@
     ? new BroadcastChannel(SYNC_CHANNEL) : null;
 
   const x = DATA.times.slice();
+  const frames = Array.isArray(DATA.frames) ? DATA.frames.slice() : x.map((_, idx) => idx);
   const names = Object.keys(DATA.series || {});
   const thr = Array.isArray(DATA.thr)
     ? DATA.thr.filter((v) => Number.isFinite(v))
@@ -57,12 +58,7 @@
     layer: "above",
     line: { width: 1, dash: "dot", color: "rgba(255,255,255,0.7)" }
   }));
-  const bands = (DATA.rep || []).map(([f0, f1]) => ({
-    type: "rect", xref: "x", yref: "paper",
-    x0: (DATA.x_mode === "time") ? (f0 / fps) : f0,
-    x1: (DATA.x_mode === "time") ? (f1 / fps) : f1,
-    y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.15)", line: {width: 0}
-  }));
+  const bands = [];
 
   const layout = {
     margin: { l: 40, r: 10, t: 10, b: 90 },
@@ -110,82 +106,98 @@
   const hasTimeAxis = DATA.x_mode === "time";
   const xMin = x.length ? x[0] : 0;
   const xMax = x.length ? x[x.length - 1] : xMin;
-  const frameMaxFromData = hasTimeAxis ? Math.round(xMax * fps) : Math.round(xMax);
   const EPS = (xMax - xMin) * 1e-3 || 1e-6;
-  const videoFrameLimit = (video && Number.isFinite(video.duration))
-    ? Math.round(video.duration * fps)
-    : frameMaxFromData;
-  const frameUpperBound = Number.isFinite(videoFrameLimit)
-    ? Math.max(0, videoFrameLimit)
-    : frameMaxFromData;
 
   let lastT = -1;
 
-  function clampFrame(frame) {
-    if (!Number.isFinite(frame)) return 0;
-    if (frameUpperBound > 0) {
-      return Math.min(frameUpperBound, Math.max(0, Math.round(frame)));
+  function nearestIndex(target, arr) {
+    if (!arr.length) return 0;
+    let lo = 0;
+    let hi = arr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid] < target) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
     }
-    return Math.max(0, Math.round(frame));
-  }
-
-  function frameFromX(xVal) {
-    const rawFrame = hasTimeAxis ? Math.round(xVal * fps) : Math.round(xVal);
-    return clampFrame(rawFrame);
-  }
-
-  function xFromFrame(frame) {
-    const clamped = clampFrame(frame);
-    return hasTimeAxis ? clamped / fps : clamped;
-  }
-
-  function setCursorForFrame(frame) {
-    const clamped = clampFrame(frame);
-    const time = clamped / fps;
-    if (Math.abs(time - lastT) < 1e-6) {
-      return { frame: clamped, time, x: xFromFrame(clamped) };
+    if (lo > 0 && Math.abs(arr[lo - 1] - target) <= Math.abs(arr[lo] - target)) {
+      return lo - 1;
     }
-    lastT = time;
-    const axisValue = xFromFrame(clamped);
-    const nextCursor = { ...cursor, x0: axisValue, x1: axisValue };
+    return lo;
+  }
+
+  function stateFromAxis(axisValue) {
+    if (!x.length) return { frame: 0, time: 0, x: 0, idx: 0 };
+    const idx = nearestIndex(axisValue, x);
+    const frameVal = Number.isFinite(frames[idx]) ? frames[idx] : idx;
+    const timeVal = hasTimeAxis
+      ? x[idx]
+      : (Number.isFinite(frameVal) && fps > 0 ? frameVal / fps : 0);
+    return { frame: frameVal, time: timeVal, x: x[idx], idx };
+  }
+
+  function timeForFrame(frameVal) {
+    if (!hasTimeAxis || !x.length || !frames.length) return null;
+    const idx = nearestIndex(frameVal, frames);
+    const t = x[idx];
+    return Number.isFinite(t) ? t : null;
+  }
+
+  if (Array.isArray(DATA.rep)) {
+    DATA.rep.forEach(([f0, f1]) => {
+      const start = hasTimeAxis ? (timeForFrame(f0) ?? f0 / fps) : f0;
+      const end = hasTimeAxis ? (timeForFrame(f1) ?? f1 / fps) : f1;
+      bands.push({
+        type: "rect", xref: "x", yref: "paper",
+        x0: start, x1: end,
+        y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.15)", line: { width: 0 }
+      });
+    });
+    if (bands.length) {
+      const shapes = [cursor, ...thrShapes, ...bands];
+      Plotly.relayout(plot, { shapes });
+    }
+  }
+
+  function setCursorForAxis(axisValue) {
+    const state = stateFromAxis(axisValue);
+    if (Math.abs(state.time - lastT) < 1e-6) {
+      return state;
+    }
+    lastT = state.time;
+    const nextCursor = { ...cursor, x0: state.x, x1: state.x };
     const shapes = plot.layout && Array.isArray(plot.layout.shapes) ? plot.layout.shapes.slice() : [];
     shapes[CURSOR_INDEX] = nextCursor;
     Plotly.relayout(plot, { shapes });
-    return { frame: clamped, time, x: axisValue };
+    return state;
   }
 
-  function seekVideoToFrame(frame, { pause = true } = {}) {
-    if (!video) return;
-    const { time } = setCursorForFrame(frame);
-    if (!Number.isFinite(time)) return;
-    try {
-      if (pause && !video.paused) {
-        video.pause();
-      }
-      if (Math.abs((video.currentTime || 0) - time) > 1 / fps) {
-        video.currentTime = Math.max(0, time);
-      }
-    } catch (err) {
-      console.warn("Seek error:", err);
-    }
-  }
-
-  function seekVideoToAxis(xVal, opts) {
+  function seekVideoToAxis(xVal, opts = {}) {
     const clampedX = Math.min(xMax, Math.max(xMin, xVal));
-    const frame = frameFromX(clampedX);
-    const state = setCursorForFrame(frame);
-    if (video) seekVideoToFrame(frame, opts);
+    const state = setCursorForAxis(clampedX);
+    if (video) {
+      try {
+        if (opts.pause && !video.paused) {
+          video.pause();
+        }
+        if (Math.abs((video.currentTime || 0) - state.time) > 1 / fps) {
+          video.currentTime = Math.max(0, state.time);
+        }
+      } catch (err) {
+        console.warn("Seek error:", err);
+      }
+    }
     if (bc) bc.postMessage({ type: "seek", t: state.time, origin: "metrics" });
   }
 
   function updateCursorFromVideo() {
     if (!video) return;
     const rawT = video.currentTime || 0;
-    const frame = Math.max(0, Math.round(rawT * fps));
-    const t = frame / fps;
-    if (Math.abs(t - lastT) < 0.01) return;
-    setCursorForFrame(frame);
-    if (bc) bc.postMessage({ type: "time", t });
+    const axisValue = hasTimeAxis ? rawT : rawT * fps;
+    const state = setCursorForAxis(axisValue);
+    if (bc) bc.postMessage({ type: "time", t: state.time });
   }
 
   if (video) {
@@ -200,7 +212,7 @@
   } else {
     // Evita el borde exacto del eje para que sea visible
     const initialX = x.length ? Math.min(xMax - EPS, Math.max(xMin + EPS, x[0])) : 0;
-    setCursorForFrame(frameFromX(initialX));
+    setCursorForAxis(initialX);
   }
 
   let rafId = null;
@@ -281,15 +293,15 @@
       const msg = ev && ev.data ? ev.data : null;
       if (!msg || typeof msg !== "object") return;
       if (msg.type === "time" && Number.isFinite(msg.t)) {
-        const frame = Math.max(0, Math.round(msg.t * fps));
-        setCursorForFrame(frame);
+        const axisValue = hasTimeAxis ? msg.t : msg.t * fps;
+        setCursorForAxis(axisValue);
       } else if (msg.type === "seek" && Number.isFinite(msg.t)) {
         const target = Math.max(0, msg.t);
         if (video) {
           try { if (!video.paused) video.pause(); video.currentTime = target; } catch (e) {}
         } else {
-          const frame = Math.max(0, Math.round(target * fps));
-          setCursorForFrame(frame);
+          const axisValue = hasTimeAxis ? target : target * fps;
+          setCursorForAxis(axisValue);
         }
       }
     };

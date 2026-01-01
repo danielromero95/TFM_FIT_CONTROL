@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from src import config
-from src.A_preprocessing.frame_extraction import extract_processed_frames_stream
+from src.A_preprocessing.frame_extraction import extract_frames_stream
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
@@ -53,6 +53,51 @@ def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> N
         cb(progress, message)
     except TypeError:
         cb(progress)
+
+
+def _attach_temporal_columns(
+    df_metrics: pd.DataFrame, df_raw_landmarks: Optional[pd.DataFrame]
+) -> pd.DataFrame:
+    """Propagar metadatos de tiempo/índices al dataframe de métricas.
+
+    Se fusiona el *dataframe* de métricas con los índices temporales de
+    ``df_raw_landmarks`` utilizando ``analysis_frame_idx`` como clave. Esto
+    preserva huecos internos cuando se filtran cuadros intermedios y garantiza
+    que el eje temporal en UI coincide con el vídeo.
+    """
+
+    if df_metrics is None or df_metrics.empty:
+        return df_metrics
+
+    if df_raw_landmarks is None or df_raw_landmarks.empty:
+        enriched = df_metrics.copy()
+        if "analysis_frame_idx" not in enriched.columns:
+            enriched.insert(0, "analysis_frame_idx", np.arange(len(enriched), dtype=int))
+        enriched["frame_idx"] = enriched["analysis_frame_idx"]
+        return enriched
+
+    base_meta = df_raw_landmarks.copy()
+    if "analysis_frame_idx" not in base_meta.columns:
+        base_meta["analysis_frame_idx"] = np.arange(len(base_meta), dtype=int)
+    if "source_frame_idx" not in base_meta.columns:
+        base_meta["source_frame_idx"] = base_meta["analysis_frame_idx"]
+    meta_cols = ["analysis_frame_idx", "source_frame_idx"]
+    if "time_s" in base_meta.columns:
+        meta_cols.append("time_s")
+    base_meta = base_meta[meta_cols]
+    base_meta = (
+        base_meta.drop_duplicates(subset=["analysis_frame_idx"])
+        .sort_values("analysis_frame_idx")
+        .reset_index(drop=True)
+    )
+
+    metrics_with_idx = df_metrics.copy()
+    if "analysis_frame_idx" not in metrics_with_idx.columns:
+        metrics_with_idx.insert(0, "analysis_frame_idx", np.arange(len(metrics_with_idx), dtype=int))
+
+    merged = base_meta.merge(metrics_with_idx, on="analysis_frame_idx", how="left", sort=True)
+    merged["frame_idx"] = merged["analysis_frame_idx"]
+    return merged
 
 
 def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> OutputPaths:
@@ -189,14 +234,15 @@ def run_pipeline(
 
         if target_fps_for_sampling and target_fps_for_sampling > 0:
             sampling_strategy = "time_sampling"
-            raw_iter = extract_processed_frames_stream(
+            raw_iter = extract_frames_stream(
                 video_path=video_path,
+                sampling="time",
+                target_fps=target_fps_for_sampling,
                 rotate=processing_rotate,
                 resize_to=target_size,
                 cap=cap,
                 prefetched_info=info,
                 progress_callback=None,
-                target_fps=target_fps_for_sampling,
             )
             fps_effective = float(target_fps_for_sampling)
             if fps_original > 0:
@@ -209,14 +255,15 @@ def run_pipeline(
                 )
         else:
             sampling_strategy = "index_sampling"
-            raw_iter = extract_processed_frames_stream(
+            raw_iter = extract_frames_stream(
                 video_path=video_path,
+                sampling="index",
+                every_n=sample_rate,
                 rotate=processing_rotate,
                 resize_to=target_size,
                 cap=cap,
                 prefetched_info=info,
                 progress_callback=None,
-                every_n=sample_rate,
             )
 
         t1 = time.perf_counter()
@@ -304,7 +351,7 @@ def run_pipeline(
 
     t2 = time.perf_counter()
     notify(50, "STAGE 3: Filtering and interpolating landmarks...")
-    filtered_sequence, crop_boxes, quality_mask = filter_landmarks(df_raw_landmarks)
+    filtered_sequence, crop_boxes, quality_mask, kept_indices = filter_landmarks(df_raw_landmarks)
     overlay_rotate_cw = normalize_rotation_deg(
         infer_upright_quadrant_from_sequence(filtered_sequence)
     )
@@ -403,11 +450,12 @@ def run_pipeline(
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
     (
-        df_metrics,
+        df_metrics_valid,
         angle_range,
         metrics_warnings,
         metrics_skip_reason,
         chosen_primary,
+        used_analysis_frame_idx,
     ) = compute_metrics_and_angle(
         filtered_sequence,
         cfg.counting.primary_angle,
@@ -415,7 +463,16 @@ def run_pipeline(
         exercise=detected_label,
         view=detected_view,
         quality_mask=quality_mask,
+        analysis_frame_idx=kept_indices,
     )
+    if df_metrics_valid is not None and not df_metrics_valid.empty:
+        idx_series = pd.Series(used_analysis_frame_idx, copy=False).reset_index(drop=True)
+        if len(idx_series) != len(df_metrics_valid):
+            raise ValueError(
+                "analysis_frame_idx length mismatch between metrics and kept indices"
+            )
+        df_metrics_valid["analysis_frame_idx"] = idx_series
+    df_metrics = _attach_temporal_columns(df_metrics_valid, df_raw_landmarks)
     warnings.extend(metrics_warnings)
     if skip_reason is None and metrics_skip_reason is not None:
         skip_reason = metrics_skip_reason

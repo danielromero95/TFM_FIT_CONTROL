@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
+from src.A_preprocessing.frame_extraction.state import FrameInfo
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDENCE
 from src.config.settings import (
@@ -62,11 +63,14 @@ def downcast_landmarks_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return df
 
-    if "frame_idx" in df.columns:
-        # Usamos int32 porque basta para indexar cuadros sin desperdiciar memoria.
-        df["frame_idx"] = df["frame_idx"].astype(np.int32, copy=False)
+    for col in ("frame_idx", "analysis_frame_idx", "source_frame_idx"):
+        if col in df.columns:
+            # Usamos int32 porque basta para indexar cuadros sin desperdiciar memoria.
+            df[col] = df[col].astype(np.int32, copy=False)
 
     float_cols = [c for c in df.columns if c.startswith(("x", "y", "z", "v", "crop_"))]
+    if "time_s" in df.columns:
+        float_cols.append("time_s")
     for column in float_cols:
         df[column] = df[column].astype(np.float32, copy=False)
     return df
@@ -139,7 +143,7 @@ def infer_upright_quadrant_from_sequence(
 
 
 def stream_pose_and_detection(
-    frames: Iterable[np.ndarray],
+    frames: Iterable[np.ndarray | FrameInfo],
     cfg: "config.Config",
     *,
     detection_enabled: bool,
@@ -220,25 +224,40 @@ def stream_pose_and_detection(
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:
-            for frame_idx, frame in enumerate(frames):
+            for analysis_idx, frame_info in enumerate(frames):
                 frames_processed += 1
+                if isinstance(frame_info, FrameInfo):
+                    frame = frame_info.array
+                    source_frame_idx = int(getattr(frame_info, "index", analysis_idx))
+                    ts_sec = float(getattr(frame_info, "timestamp_sec", float("nan")))
+                else:
+                    frame = frame_info
+                    source_frame_idx = int(analysis_idx)
+                    ts_sec = float("nan")
+
                 height, width = frame.shape[:2]
 
                 if processed_size is None:
                     processed_size = (int(width), int(height))
 
-                ts_ms = (
-                    (frame_idx / detection_ts_fps) * 1000.0
-                    if detection_ts_fps > 0
-                    else float(frame_idx) * 1000.0
-                )
-                emit_preview = preview_active and (frame_idx % stride_preview == 0)
+                if not np.isfinite(ts_sec):
+                    if detection_ts_fps > 0:
+                        ts_sec = source_frame_idx / float(detection_ts_fps)
+                    else:
+                        ts_sec = analysis_idx / float(max(detection_ts_fps, 1.0))
+                ts_ms = float(ts_sec * 1000.0)
+                emit_preview = preview_active and (analysis_idx % stride_preview == 0)
                 overlay_points_needed = emit_preview or debug_video_path is not None
 
                 result = estimator.estimate(frame)
                 landmarks = result.landmarks
                 crop_box = result.crop_box
-                row: dict[str, float] = {"frame_idx": int(frame_idx)}
+                row: dict[str, float] = {
+                    "analysis_frame_idx": int(analysis_idx),
+                    "frame_idx": int(analysis_idx),
+                    "source_frame_idx": int(source_frame_idx),
+                    "time_s": float(ts_sec),
+                }
                 overlay_points: dict[int, tuple[int, int]] = {}
 
                 if landmarks:
@@ -296,7 +315,7 @@ def stream_pose_and_detection(
                 if detection_extractor is not None and not detection_error:
                     try:
                         if getattr(detection_extractor, "_done", False) or not detection_extractor.wants_frame(
-                            frame_idx
+                            analysis_idx
                         ):
                             pass
                         else:
@@ -315,7 +334,7 @@ def stream_pose_and_detection(
                                 arr[landmark_index, 3] = _coerce(row[f"v{landmark_index}"])
 
                             detection_extractor.add_landmarks(
-                                frame_idx,
+                                analysis_idx,
                                 arr,
                                 width,
                                 height,
@@ -352,7 +371,7 @@ def stream_pose_and_detection(
                 if emit_preview and preview_active and preview_callback is not None:
                     try:
                         frame_for_preview = ensure_overlay_frame()
-                        preview_callback(frame_for_preview, int(frame_idx), float(ts_ms))
+                        preview_callback(frame_for_preview, int(analysis_idx), float(ts_ms))
                     except Exception:  # pragma: no cover - mejor esfuerzo desde la UI
                         preview_active = False
                         logger.exception("Preview callback failed; disabling previews for this run")
