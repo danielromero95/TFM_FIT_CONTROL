@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.core.types import ExerciseType
 from src.exercise_detection.exercise_detector import detect_exercise
+from src.ui.metrics_sync.run_tokens import metrics_run_token, sync_channel_for_run
 from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, safe_rerun
 from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 
@@ -102,11 +103,8 @@ def _build_sync_channel(state) -> str | None:
 
     report = getattr(state, "report", None)
     stats = getattr(report, "stats", None)
-    if stats and getattr(stats, "config_sha1", None):
-        frames_val = getattr(stats, "frames", None)
-        if frames_val is not None:
-            return f"vmx-sync-{stats.config_sha1}-{frames_val}"
-    return None
+    run_token = metrics_run_token(state, stats)
+    return sync_channel_for_run(run_token)
 
 
 def _current_widget_labels(state) -> tuple[str, str]:
