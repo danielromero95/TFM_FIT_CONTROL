@@ -29,7 +29,13 @@ from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
 from src.ui.metrics_sync import render_video_with_metrics_sync
+from src.ui.metrics_sync.run_tokens import (
+    metrics_chart_key as _metrics_chart_key,
+    metrics_run_token as _metrics_run_token,
+    sync_channel_for_run,
+)
 from src.ui.state import AppState, get_state
+from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 from ..utils import step_container
 
 
@@ -155,48 +161,6 @@ def _metadata_to_json_bytes(metadata: Dict[str, object]) -> bytes:
     return json.dumps(metadata, indent=2, ensure_ascii=False).encode("utf-8")
 
 
-def _session_name_from_paths(*candidates: object | None) -> str | None:
-    """Return the session directory name from the first valid candidate path."""
-
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            parent = Path(candidate).expanduser().parent
-        except Exception:
-            continue
-        if parent and parent.name:
-            return parent.name
-    return None
-
-
-def _metrics_run_token(state: AppState, stats: RunStats | None = None) -> str:
-    """Return a stable token for the current run to scope widget state."""
-
-    session_name = _session_name_from_paths(
-        getattr(state, "metrics_path", None),
-        getattr(stats, "config_path", None),
-    )
-    if session_name:
-        return session_name
-
-    if getattr(state, "video_path", None):
-        try:
-            stem = Path(state.video_path).stem
-        except Exception:
-            stem = ""
-        if stem:
-            return stem
-
-    if stats and getattr(stats, "config_sha1", None):
-        frames_val = getattr(stats, "frames", None)
-        if frames_val is not None:
-            return f"{stats.config_sha1}-{frames_val}"
-        return stats.config_sha1
-
-    return "run"
-
-
 def _preferred_video_base_name(
     video_original_name: str | None,
     video_path: str | Path | None,
@@ -236,13 +200,6 @@ def _report_bundle_file_name(
     ts_str = ts.strftime("%Y_%m_%d-%H_%M")
     base = base_name or "analysis_report"
     return f"{base}-{ts_str}.zip"
-
-
-def _metrics_chart_key(run_token: str) -> str:
-    """Build the Streamlit chart key for the metrics widget."""
-
-    return f"results_video_metrics_sync_{run_token}"
-
 
 def _build_debug_report_bundle(
     *,
@@ -1349,6 +1306,18 @@ def _results_panel() -> Dict[str, bool]:
             debug_video_path = (
                 overlay_stream_path or overlay_raw_path or report.debug_video_path
             )
+            run_token = _metrics_run_token(state, stats)
+            sync_channel = sync_channel_for_run(run_token)
+
+            primary_video_path = overlay_stream_path or overlay_raw_path or state.video_path
+            if primary_video_path:
+                render_uniform_video(
+                    primary_video_path,
+                    key=f"results_primary_video_{run_token}",
+                    fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
+                    bottom_margin=0.0,
+                    sync_channel=sync_channel,
+                )
 
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
@@ -1421,8 +1390,6 @@ def _results_panel() -> Dict[str, bool]:
                             if not math.isfinite(value):
                                 continue
                             thresholds.append(value)
-                        run_token = _metrics_run_token(state, stats)
-                        sync_channel = f"vmx-sync-{run_token}"
 
                         render_video_with_metrics_sync(
                             video_path=None,
