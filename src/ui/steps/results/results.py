@@ -35,7 +35,6 @@ from src.ui.metrics_sync.run_tokens import (
     sync_channel_for_run,
 )
 from src.ui.state import AppState, get_state
-from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 from ..utils import step_container
 
 
@@ -1309,16 +1308,6 @@ def _results_panel() -> Dict[str, bool]:
             run_token = _metrics_run_token(state, stats)
             sync_channel = sync_channel_for_run(run_token)
 
-            primary_video_path = overlay_stream_path or overlay_raw_path or state.video_path
-            if primary_video_path:
-                render_uniform_video(
-                    primary_video_path,
-                    key=f"results_primary_video_{run_token}",
-                    fixed_height_px=VIDEO_VIEWPORT_HEIGHT_PX,
-                    bottom_margin=0.0,
-                    sync_channel=sync_channel,
-                )
-
             if metrics_df is not None:
                 st.markdown('<div class="results-metrics-block">', unsafe_allow_html=True)
                 (
@@ -1583,15 +1572,10 @@ def _results_panel() -> Dict[str, bool]:
             except Exception as exc:
                 st.error(f"Could not assemble debug report: {exc}")
             else:
-                fallback_token = _session_name_from_paths(
-                    state.metrics_path,
-                    getattr(report.stats, "config_path", None),
-                    getattr(report, "metrics_path", None),
-                )
                 base_name = _preferred_video_base_name(
                     video_original_name,
                     state.video_path,
-                    fallback_token=fallback_token,
+                    fallback_token=run_token,
                 )
                 report_name = _report_bundle_file_name(base_name)
                 st.download_button(
