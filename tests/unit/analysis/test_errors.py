@@ -187,7 +187,7 @@ def test_run_pipeline_raises_no_frames_extracted(monkeypatch, tmp_path: Path) ->
         lambda _cap, _video_path: (fake_info, 30.0, None, False),
     )
     monkeypatch.setattr(
-        "src.C_analysis.pipeline.extract_processed_frames_stream",
+        "src.C_analysis.pipeline.extract_frames_stream",
         lambda **_: [],
     )
     monkeypatch.setattr(
