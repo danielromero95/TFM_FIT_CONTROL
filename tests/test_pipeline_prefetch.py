@@ -60,7 +60,7 @@ def test_run_pipeline_uses_prefetched_detection(monkeypatch, tmp_path) -> None:
     )
 
     monkeypatch.setattr(
-        "src.C_analysis.pipeline.extract_processed_frames_stream",
+        "src.C_analysis.pipeline.extract_frames_stream",
         lambda **_: frames,
     )
 
