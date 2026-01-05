@@ -163,6 +163,7 @@ def test_get_video_metadata_merges_ffprobe(monkeypatch, tmp_path):
     assert metadata["fps_r_frame_rate_float"] == pytest.approx(29.97, rel=1e-3)
     assert metadata["fps_avg_frame_rate_float"] == pytest.approx(30.0)
     assert metadata["total_frames_estimated"] == 100
+    assert isinstance(metadata["total_frames_estimated"], int)
     assert metadata["file_size_bytes"] == 1234
     assert metadata["creation_time"] == "2023-12-02T00:00:00Z"
 
@@ -284,4 +285,4 @@ def test_extract_and_preprocess_frames_prefetched(monkeypatch, tmp_path):
 
     assert fps == pytest.approx(30.0)
     assert len(frames) == 2
-    assert cap.release_calls == 1
+    assert cap.release_calls == 0

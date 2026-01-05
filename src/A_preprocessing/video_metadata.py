@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import cv2
 
@@ -99,6 +99,20 @@ def _safe_fraction_to_float(value: str | None) -> float | None:
         return float(value)
     except Exception:  # pragma: no cover - defensive
         return None
+
+
+def _safe_to_int(value: Any) -> int | None:
+    """Best-effort conversion to ``int``; returns ``None`` if not parseable."""
+
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except Exception:  # pragma: no cover - defensivo
+        try:
+            return int(float(value))
+        except Exception:  # pragma: no cover - defensivo
+            return None
 
 
 def _frame_rate_to_str(value: Any) -> str | None:
@@ -418,6 +432,11 @@ def get_video_metadata(path: Path, original_name: str | None = None) -> dict[str
                 )
             except Exception:
                 pass
+
+    # For consistency, normalize the type of ``total_frames_estimated``
+    metadata["total_frames_estimated"] = _safe_to_int(
+        metadata.get("total_frames_estimated")
+    )
 
     if audio_stream:
         metadata["audio_present"] = True
