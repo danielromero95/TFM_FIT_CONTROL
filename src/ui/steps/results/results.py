@@ -563,7 +563,7 @@ def _emit_metric_help_script(widget_key: str, metric_help: Dict[str, Dict[str, s
 
     function normaliseOptionText(text) {{
         if (!text) return "";
-        return text.replace(/\s+/g, " ").trim();
+        return text.replace(/\\s+/g, " ").trim();
     }}
 
     function ensureInit() {{
