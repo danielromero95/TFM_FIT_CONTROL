@@ -13,3 +13,4 @@ cachetools==5.3.3
 pytest
 pytest-cov
 ruff
+pyarrow
