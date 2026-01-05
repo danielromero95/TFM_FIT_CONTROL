@@ -1,0 +1,6 @@
+[run]
+omit =
+    src/ui/*
+    src/app.py
+    src/ui/assets/*
+    src/ui/controllers/*
