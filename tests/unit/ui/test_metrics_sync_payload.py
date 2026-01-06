@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.ui.metrics_sync.component import _build_payload
+from src.ui.metrics_sync.component import _build_payload, _map_rep_intervals_to_axis
 
 
 def test_build_payload_stride_and_nan_mapping():
@@ -77,3 +77,36 @@ def test_time_offset_applied_when_requested():
     assert payload["axis_times"][0] == pytest.approx(0.0)
     assert payload["times"][0] == pytest.approx(0.0)
     assert payload["axis_times"][-1] == pytest.approx(time_values[-1] - 1.5)
+
+
+def test_source_time_offset_preserved_and_rebased():
+    source_time = [1.2, 1.25, 1.30]
+    df = pd.DataFrame(
+        {
+            "source_time_s": source_time,
+            "source_frame_idx": [10, 11, 12],
+            "analysis_frame_idx": [0, 1, 2],
+            "metric": [0.1, 0.2, 0.3],
+        }
+    )
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10, time_offset_s=source_time[0])
+
+    assert payload["axis_ref"] == "source"
+    assert payload["time_offset_s"] == pytest.approx(source_time[0])
+    assert payload["axis_times"][0] == pytest.approx(0.0)
+    assert payload["axis_times"][-1] == pytest.approx(source_time[-1] - source_time[0])
+
+
+def test_rep_intervals_are_mapped_to_source_domain():
+    df = pd.DataFrame(
+        {
+            "analysis_frame_idx": [0, 1, 2, 3],
+            "source_frame_idx": [10, 12, 14, 16],
+            "metric": [0.0, 0.5, 1.0, 1.5],
+        }
+    )
+
+    mapped = _map_rep_intervals_to_axis([(0, 2), (2, 3)], df, axis_ref="source")
+
+    assert mapped == [(10, 14), (14, 16)]
