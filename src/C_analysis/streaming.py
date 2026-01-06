@@ -257,6 +257,7 @@ def stream_pose_and_detection(
                     "frame_idx": int(analysis_idx),
                     "source_frame_idx": int(source_frame_idx),
                     "time_s": float(ts_sec),
+                    "source_time_s": float(ts_sec),
                 }
                 overlay_points: dict[int, tuple[int, int]] = {}
 
