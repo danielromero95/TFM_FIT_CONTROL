@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from src.ui.metrics_sync.component import _build_payload
 
@@ -47,3 +48,32 @@ def test_build_payload_stride_and_nan_mapping():
     L = len(payload["times"])
     assert len(payload["series"]["metric_a"]) == L
     assert len(payload["series"]["metric_b"]) == L
+
+
+def test_axis_times_use_source_time_when_present():
+    source_time = [0.05, 0.12, 0.18, 0.27]
+    df = pd.DataFrame(
+        {
+            "source_time_s": source_time,
+            "source_frame_idx": [1, 2, 3, 4],
+            "metric": [0.0, 0.5, 1.0, 1.5],
+        }
+    )
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
+
+    assert payload["axis_times"] == source_time
+    assert payload["time_offset_s"] == 0.0
+    assert payload["axis_ref"] == "source"
+
+
+def test_time_offset_applied_when_requested():
+    time_values = [1.5, 1.54, 1.6]
+    df = pd.DataFrame({"time_s": time_values, "metric": [1, 2, 3]})
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10, time_offset_s=1.5)
+
+    assert payload["time_offset_s"] == pytest.approx(1.5)
+    assert payload["axis_times"][0] == pytest.approx(0.0)
+    assert payload["times"][0] == pytest.approx(0.0)
+    assert payload["axis_times"][-1] == pytest.approx(time_values[-1] - 1.5)

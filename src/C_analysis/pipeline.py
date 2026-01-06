@@ -82,6 +82,8 @@ def _attach_temporal_columns(
     if "source_frame_idx" not in base_meta.columns:
         base_meta["source_frame_idx"] = base_meta["analysis_frame_idx"]
     meta_cols = ["analysis_frame_idx", "source_frame_idx"]
+    if "source_time_s" in base_meta.columns:
+        meta_cols.append("source_time_s")
     if "time_s" in base_meta.columns:
         meta_cols.append("time_s")
     base_meta = base_meta[meta_cols]

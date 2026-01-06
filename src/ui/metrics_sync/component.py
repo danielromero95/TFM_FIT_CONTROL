@@ -50,6 +50,7 @@ def _build_payload(
     fps: float | int,
     *,
     max_points: int = 3000,
+    time_offset_s: float | None = None,
 ) -> dict:
     """Normaliza los datos seleccionados para enviarlos al frontend Plotly."""
 
@@ -57,7 +58,16 @@ def _build_payload(
 
     n = int(len(df))
     if n <= 0:
-        return {"times": [], "series": {}, "fps": fps_video, "x_mode": "frame"}
+        return {
+            "times": [],
+            "series": {},
+            "fps": fps_video,
+            "x_mode": "frame",
+            "axis_times": [],
+            "axis_frames": [],
+            "time_offset_s": float(time_offset_s or 0.0),
+            "axis_ref": "frame",
+        }
 
     stride = 1
     if max_points and n > int(max_points):
@@ -77,12 +87,13 @@ def _build_payload(
     frame_idx = _safe_numeric(df.get("frame_idx", df.index), np.arange(n, dtype="float64"))
     source_frames = _safe_numeric(df.get("source_frame_idx", df.index), np.arange(n, dtype="float64"))
 
+    axis_ref = "source" if "source_frame_idx" in df.columns else "frame"
+
     times_base = None
-    x_mode = "time"
-    if "time_s" in df.columns:
-        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps_video)
-    elif "source_time_s" in df.columns:
+    if "source_time_s" in df.columns:
         times_base = _safe_numeric(df["source_time_s"], np.arange(n, dtype="float64") / fps_video)
+    elif "time_s" in df.columns:
+        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps_video)
     elif "source_frame_idx" in df.columns:
         times_base = source_frames / fps_video
     elif "frame_idx" in df.columns:
@@ -90,14 +101,14 @@ def _build_payload(
     else:
         times_base = np.arange(n, dtype="float64") / fps_video
 
-    finite_mask = np.isfinite(times_base)
-    if finite_mask.any():
-        t0 = float(times_base[finite_mask][0])
-    else:
-        t0 = float(times_base[0]) if times_base.size else 0.0
-    times_base = times_base - t0
+    try:
+        offset_value = float(time_offset_s) if time_offset_s is not None else 0.0
+    except Exception:
+        offset_value = 0.0
 
-    times_arr = times_base[idx]
+    times_axis = times_base - offset_value
+
+    times_arr = times_axis[idx]
     times = times_arr.tolist()
     frames_for_plot = frame_idx[idx].tolist()
     analysis_for_plot = analysis_frames[idx].tolist()
@@ -120,11 +131,13 @@ def _build_payload(
         "times": times,
         "series": series,
         "fps": fps_video,
-        "x_mode": x_mode,
+        "x_mode": "time",
         "frames": analysis_for_plot,
         "source_frames": source_for_plot,
-        "axis_times": times_base.tolist(),
+        "axis_times": times_axis.tolist(),
         "axis_frames": axis_frames,
+        "time_offset_s": offset_value,
+        "axis_ref": axis_ref,
     }
     return payload
 

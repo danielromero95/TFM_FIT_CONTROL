@@ -14,6 +14,10 @@
   const bc = (SYNC_CHANNEL && typeof BroadcastChannel !== "undefined")
     ? new BroadcastChannel(SYNC_CHANNEL) : null;
 
+  const timeOffset = Number.isFinite(DATA.time_offset_s)
+    ? Number(DATA.time_offset_s)
+    : 0;
+
   const x = DATA.times.slice();
   const frames = Array.isArray(DATA.frames) ? DATA.frames.slice() : x.map((_, idx) => idx);
   const axisTimes = Array.isArray(DATA.axis_times) && DATA.axis_times.length ? DATA.axis_times.slice() : x;
@@ -135,16 +139,17 @@
     const axisLookup = hasTimeAxis ? axisTimes : x;
     const plotLookup = x;
     if (!axisLookup.length && !plotLookup.length) {
-      return { frame: 0, time: 0, x: axisValue, axisIdx: 0, plotIdx: 0 };
+      return { frame: 0, time: 0, axisTime: 0, x: axisValue, axisIdx: 0, plotIdx: 0, idx: 0 };
     }
     const axisIdx = nearestIndex(axisValue, axisLookup.length ? axisLookup : plotLookup);
     const plotIdx = nearestIndex(axisValue, plotLookup.length ? plotLookup : axisLookup);
     const frameVal = Number.isFinite(axisFrames[axisIdx]) ? axisFrames[axisIdx] : axisIdx;
-    const timeVal = hasTimeAxis
+    const axisTime = hasTimeAxis
       ? axisLookup[axisIdx]
       : (Number.isFinite(frameVal) && fps > 0 ? frameVal / fps : 0);
+    const timeVal = axisTime + timeOffset;
     const xVal = plotLookup.length ? plotLookup[plotIdx] : axisValue;
-    return { frame: frameVal, time: timeVal, x: xVal, axisIdx, plotIdx };
+    return { frame: frameVal, time: timeVal, axisTime, x: xVal, axisIdx, plotIdx, idx: plotIdx };
   }
 
   function timeForFrame(frameVal) {
@@ -204,7 +209,7 @@
   function updateCursorFromVideo() {
     if (!video) return;
     const rawT = video.currentTime || 0;
-    const axisValue = hasTimeAxis ? rawT : rawT * fps;
+    const axisValue = (hasTimeAxis ? rawT : rawT * fps) - timeOffset;
     const state = setCursorForAxis(axisValue);
     if (bc) bc.postMessage({ type: "time", t: state.time });
   }
@@ -302,14 +307,14 @@
       const msg = ev && ev.data ? ev.data : null;
       if (!msg || typeof msg !== "object") return;
       if (msg.type === "time" && Number.isFinite(msg.t)) {
-        const axisValue = hasTimeAxis ? msg.t : msg.t * fps;
+        const axisValue = (hasTimeAxis ? msg.t : msg.t * fps) - timeOffset;
         setCursorForAxis(axisValue);
       } else if (msg.type === "seek" && Number.isFinite(msg.t)) {
         const target = Math.max(0, msg.t);
         if (video) {
           try { if (!video.paused) video.pause(); video.currentTime = target; } catch (e) {}
         } else {
-          const axisValue = hasTimeAxis ? target : target * fps;
+          const axisValue = (hasTimeAxis ? target : target * fps) - timeOffset;
           setCursorForAxis(axisValue);
         }
       }
