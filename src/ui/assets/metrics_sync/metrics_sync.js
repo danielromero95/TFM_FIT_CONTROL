@@ -18,6 +18,8 @@
     ? Number(DATA.time_offset_s)
     : 0;
 
+  const axisRef = typeof DATA.axis_ref === "string" ? DATA.axis_ref : "analysis";
+
   const x = DATA.times.slice();
   const frames = Array.isArray(DATA.frames) ? DATA.frames.slice() : x.map((_, idx) => idx);
   const axisTimes = Array.isArray(DATA.axis_times) && DATA.axis_times.length ? DATA.axis_times.slice() : x;
@@ -206,16 +208,23 @@
     if (bc) bc.postMessage({ type: "seek", t: state.time, origin: "metrics" });
   }
 
-  function updateCursorFromVideo() {
+  function axisValueFromSeconds(seconds) {
+    const t = Number.isFinite(seconds) ? seconds : 0;
+    return (hasTimeAxis ? t : t * fps) - timeOffset;
+  }
+
+  function updateCursorFromVideo(seconds) {
     if (!video) return;
-    const rawT = video.currentTime || 0;
-    const axisValue = (hasTimeAxis ? rawT : rawT * fps) - timeOffset;
+    const rawT = Number.isFinite(seconds) ? seconds : video.currentTime || 0;
+    const axisValue = axisValueFromSeconds(rawT);
     const state = setCursorForAxis(axisValue);
     if (bc) bc.postMessage({ type: "time", t: state.time });
   }
 
+  const supportsVFC = video && typeof video.requestVideoFrameCallback === "function";
+
   if (video) {
-    ["timeupdate","seeked"].forEach((ev) => video.addEventListener(ev, updateCursorFromVideo));
+    ["timeupdate","seeked"].forEach((ev) => video.addEventListener(ev, () => updateCursorFromVideo()));
     video.addEventListener("loadedmetadata", () => {
       if (Number.isFinite(DATA.startAt)) {
         try { video.currentTime = Math.max(0, DATA.startAt); } catch (e) {}
@@ -230,15 +239,43 @@
   }
 
   let rafId = null;
+  let vfcHandle = null;
+
+  function cancelVideoFrameCallback() {
+    if (video && typeof video.cancelVideoFrameCallback === "function" && vfcHandle !== null) {
+      try { video.cancelVideoFrameCallback(vfcHandle); } catch (e) {}
+    }
+    vfcHandle = null;
+  }
+
+  function tickVFC() {
+    if (!video || !supportsVFC) return;
+    const cb = (_now, metadata) => {
+      const mediaTime = Number.isFinite(metadata?.mediaTime) ? metadata.mediaTime : video.currentTime || 0;
+      updateCursorFromVideo(mediaTime);
+      if (!video.paused && !video.ended) {
+        vfcHandle = video.requestVideoFrameCallback(cb);
+      }
+    };
+    vfcHandle = video.requestVideoFrameCallback(cb);
+  }
+
   function tick() {
     if (!video) return;
     updateCursorFromVideo();
     if (!video.paused && !video.ended) { rafId = requestAnimationFrame(tick); }
   }
   if (video) {
-    video.addEventListener("play",  () => { cancelAnimationFrame(rafId); tick(); });
-    video.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
-    video.addEventListener("ended", () => { cancelAnimationFrame(rafId); });
+    if (supportsVFC) {
+      video.addEventListener("play", () => { cancelAnimationFrame(rafId); cancelVideoFrameCallback(); tickVFC(); });
+      video.addEventListener("pause", () => { cancelVideoFrameCallback(); });
+      video.addEventListener("ended", () => { cancelVideoFrameCallback(); });
+      tickVFC();
+    } else {
+      video.addEventListener("play",  () => { cancelAnimationFrame(rafId); tick(); });
+      video.addEventListener("pause", () => { cancelAnimationFrame(rafId); });
+      video.addEventListener("ended", () => { cancelAnimationFrame(rafId); });
+    }
   }
 
   let scrubbing = false;

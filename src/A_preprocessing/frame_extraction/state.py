@@ -98,13 +98,21 @@ class _IteratorContext:
     progress: _ProgressHandler
     read_idx: int
     produced: int = 0
+    last_ts_ms: float = float("nan")
 
     def effective_timestamp(self, ts_ms: float, idx: int) -> float:
         if ts_ms > 0:
-            return ts_ms / 1000.0
-        if self.fps_base > 0:
-            return idx / self.fps_base
-        return 0.0
+            ts_used = ts_ms
+        elif self.fps_base > 0:
+            ts_used = (idx / self.fps_base) * 1000.0
+        else:
+            ts_used = 0.0
+
+        if np.isfinite(self.last_ts_ms):
+            ts_used = max(ts_used, self.last_ts_ms)
+
+        self.last_ts_ms = ts_used
+        return ts_used / 1000.0
 
     def limit_reached(self) -> bool:
         return bool(self.max_frames and self.produced >= self.max_frames)

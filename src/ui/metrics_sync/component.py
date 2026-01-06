@@ -44,6 +44,49 @@ def nearest_time_index(times: Sequence[float], target: float) -> int:
     return pos if curr_diff <= prev_diff else prev_idx
 
 
+def _map_rep_intervals_to_axis(
+    rep_intervals: Sequence[tuple[int, int]] | None,
+    df: pd.DataFrame,
+    axis_ref: str,
+) -> list[tuple[int, int]]:
+    """Convert repetition intervals to the axis frame domain when needed."""
+
+    intervals = [(int(a), int(b)) for a, b in rep_intervals or [] if a is not None and b is not None]
+
+    if axis_ref != "source" or not intervals:
+        return intervals
+
+    try:
+        meta = df[["analysis_frame_idx", "source_frame_idx"]]
+    except Exception:
+        return intervals
+
+    meta = meta.dropna(subset=["analysis_frame_idx", "source_frame_idx"])
+    if meta.empty:
+        return intervals
+
+    mapping = (
+        meta.drop_duplicates(subset=["analysis_frame_idx"], keep="first")
+        .set_index("analysis_frame_idx")["source_frame_idx"]
+    )
+
+    def _map_frame(value: int) -> int:
+        try:
+            key = int(value)
+        except Exception:
+            return value
+        try:
+            mapped = mapping.get(key, key)
+        except Exception:
+            mapped = key
+        try:
+            return int(mapped)
+        except Exception:
+            return key
+
+    return [(_map_frame(a), _map_frame(b)) for a, b in intervals]
+
+
 def _build_payload(
     df: pd.DataFrame,
     selected: Sequence[str],
@@ -66,7 +109,7 @@ def _build_payload(
             "axis_times": [],
             "axis_frames": [],
             "time_offset_s": float(time_offset_s or 0.0),
-            "axis_ref": "frame",
+            "axis_ref": "analysis",
         }
 
     stride = 1
@@ -87,7 +130,7 @@ def _build_payload(
     frame_idx = _safe_numeric(df.get("frame_idx", df.index), np.arange(n, dtype="float64"))
     source_frames = _safe_numeric(df.get("source_frame_idx", df.index), np.arange(n, dtype="float64"))
 
-    axis_ref = "source" if "source_frame_idx" in df.columns else "frame"
+    axis_ref = "source" if "source_frame_idx" in df.columns else "analysis"
 
     times_base = None
     if "source_time_s" in df.columns:
@@ -113,7 +156,7 @@ def _build_payload(
     frames_for_plot = frame_idx[idx].tolist()
     analysis_for_plot = analysis_frames[idx].tolist()
     source_for_plot = source_frames[idx].tolist()
-    axis_frames_source = source_frames if "source_frame_idx" in df.columns else frame_idx
+    axis_frames_source = source_frames if axis_ref == "source" else analysis_frames
     axis_frames = axis_frames_source.tolist() if axis_frames_source.size else []
 
     present = [c for c in selected if c in df.columns]
@@ -175,7 +218,7 @@ def render_video_with_metrics_sync(
         return
 
     payload = _build_payload(metrics_df, selected_metrics, fps=fps)
-    payload["rep"] = rep_intervals or []
+    payload["rep"] = _map_rep_intervals_to_axis(rep_intervals or [], metrics_df, payload["axis_ref"])
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []
     if thresholds is not None:
