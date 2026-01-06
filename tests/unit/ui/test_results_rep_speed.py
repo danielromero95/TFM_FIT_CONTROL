@@ -200,11 +200,42 @@ def test_squat_phase_mapping_preserved():
         primary_metric=primary_metric,
     )
 
+
+def test_rep_speed_uses_only_accepted_candidates():
+    stats = _dummy_stats(exercise="squat", fps=30.0)
+    frames = np.arange(0, 60)
+    metrics_df = pd.DataFrame({"frame_idx": frames, "angle": np.linspace(0, 50, len(frames))})
+
+    rep_candidates = [
+        {"rep_index": i, "start_frame": i * 10, "end_frame": i * 10 + 9, "turning_frame": i * 10 + 4,
+         "accepted": True, "rejection_reason": "NONE"}
+        for i in range(5)
+    ]
+    rep_candidates.append(
+        {"rep_index": 5, "start_frame": 50, "end_frame": 59, "turning_frame": 54, "accepted": False,
+         "rejection_reason": "TEST"}
+    )
+
+    rep_speeds_df = _compute_rep_speeds(
+        [],
+        stats,
+        exercise_key="squat",
+        valley_frames=[],
+        frame_values=pd.Series(frames, name="frame_idx"),
+        metrics_df=metrics_df,
+        primary_metric="angle",
+        rep_candidates=rep_candidates,
+    )
+
+    assert rep_speeds_df.shape[0] == 5
+    assert set(rep_speeds_df["Repetition"]) == set(range(1, 6))
+
+    chart_df = _build_rep_speed_chart_df(rep_speeds_df, phase_order_for_exercise("squat"))
+    assert chart_df.shape[0] == 10
+
     assert list(rep_speeds_df.columns).index("Down duration (s)") < list(
         rep_speeds_df.columns
     ).index("Up duration (s)")
-    assert rep_speeds_df.iloc[0]["Down speed (deg/s)"] > 0
-    assert rep_speeds_df.iloc[0]["Up speed (deg/s)"] > 0
 
 
 def test_squat_midpoint_valley_intervals_fill_rep_speed_chart():

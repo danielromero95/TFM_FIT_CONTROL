@@ -53,11 +53,11 @@ def _build_payload(
 ) -> dict:
     """Normaliza los datos seleccionados para enviarlos al frontend Plotly."""
 
-    fps = float(fps) if float(fps) > 0 else 1.0
+    fps_video = float(fps) if float(fps) > 0 else 1.0
 
     n = int(len(df))
     if n <= 0:
-        return {"times": [], "series": {}, "fps": fps, "x_mode": "frame"}
+        return {"times": [], "series": {}, "fps": fps_video, "x_mode": "frame"}
 
     stride = 1
     if max_points and n > int(max_points):
@@ -77,23 +77,33 @@ def _build_payload(
     frame_idx = _safe_numeric(df.get("frame_idx", df.index), np.arange(n, dtype="float64"))
     source_frames = _safe_numeric(df.get("source_frame_idx", df.index), np.arange(n, dtype="float64"))
 
+    times_base = None
+    x_mode = "time"
     if "time_s" in df.columns:
-        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps)
-        times_arr = times_base[idx]
-        x_mode = "time"
+        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps_video)
+    elif "source_time_s" in df.columns:
+        times_base = _safe_numeric(df["source_time_s"], np.arange(n, dtype="float64") / fps_video)
+    elif "source_frame_idx" in df.columns:
+        times_base = source_frames / fps_video
     elif "frame_idx" in df.columns:
-        times_base = frame_idx / fps
-        times_arr = times_base[idx]
-        x_mode = "time"
+        times_base = frame_idx / fps_video
     else:
-        times_base = idx.astype("float64", copy=False)
-        times_arr = idx.astype("float64", copy=False)
-        x_mode = "frame"
+        times_base = np.arange(n, dtype="float64") / fps_video
 
+    finite_mask = np.isfinite(times_base)
+    if finite_mask.any():
+        t0 = float(times_base[finite_mask][0])
+    else:
+        t0 = float(times_base[0]) if times_base.size else 0.0
+    times_base = times_base - t0
+
+    times_arr = times_base[idx]
     times = times_arr.tolist()
     frames_for_plot = frame_idx[idx].tolist()
     analysis_for_plot = analysis_frames[idx].tolist()
     source_for_plot = source_frames[idx].tolist()
+    axis_frames_source = source_frames if "source_frame_idx" in df.columns else frame_idx
+    axis_frames = axis_frames_source.tolist() if axis_frames_source.size else []
 
     present = [c for c in selected if c in df.columns]
     series: dict[str, list[float | None]] = {}
@@ -109,12 +119,12 @@ def _build_payload(
     payload = {
         "times": times,
         "series": series,
-        "fps": fps,
+        "fps": fps_video,
         "x_mode": x_mode,
         "frames": analysis_for_plot,
         "source_frames": source_for_plot,
         "axis_times": times_base.tolist(),
-        "axis_frames": analysis_frames.tolist(),
+        "axis_frames": axis_frames,
     }
     return payload
 

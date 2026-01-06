@@ -820,16 +820,33 @@ def _compute_rep_intervals(
     valley_frames = [_to_frame(idx) for idx in valley_indices]
     valley_frames = sorted(dict.fromkeys(valley_frames))
 
-    expected_reps = getattr(report, "repetitions", None)
+    accepted_candidates = [
+        c
+        for c in rep_candidates_data
+        if c.get("accepted") is True and c.get("end_frame") is not None
+    ]
+    accepted_candidates = sorted(
+        accepted_candidates, key=lambda c: c.get("start_frame") if c.get("start_frame") is not None else 0
+    )
+
+    expected_reps_raw = getattr(report, "repetitions", None)
+    expected_reps = (
+        int(expected_reps_raw)
+        if isinstance(expected_reps_raw, (int, float)) and expected_reps_raw > 0
+        else None
+    )
     raw_expected = getattr(stats, "reps_detected_raw", None)
-    target_reps = None
-    if rep_candidates_data:
-        target_reps = len(rep_candidates_data)
-    elif raw_expected:
-        target_reps = raw_expected
-    elif expected_reps is not None:
-        target_reps = expected_reps
-    expected_reps = int(expected_reps) if isinstance(expected_reps, (int, float)) and expected_reps > 0 else None
+    target_reps = expected_reps if expected_reps is not None else None
+    if target_reps is None:
+        if accepted_candidates:
+            target_reps = len(accepted_candidates)
+        elif rep_candidates_data:
+            target_reps = len(rep_candidates_data)
+        elif raw_expected:
+            target_reps = raw_expected
+
+    if target_reps is not None and accepted_candidates and len(accepted_candidates) > target_reps:
+        accepted_candidates = accepted_candidates[:target_reps]
 
     intervals: List[Tuple[int, int]] = []
     interval_strategy: str | None = None
@@ -1006,7 +1023,7 @@ def _compute_rep_intervals(
         candidate,
         interval_strategy,
         thresholds_used,
-        rep_candidates_data,
+        accepted_candidates,
     )
 
 
@@ -1142,9 +1159,23 @@ def _compute_rep_speeds(
 
     rows: List[Dict[str, float]] = []
 
-    candidates_source = rep_candidates or []
+    candidates_source: list[dict] = []
+    if rep_candidates:
+        candidates_source = [
+            c
+            for c in rep_candidates
+            if c.get("accepted") is True and c.get("end_frame") is not None
+        ]
+
     if candidates_source:
-        iterable = sorted(candidates_source, key=lambda c: c.get("rep_index", 0))
+        iterable = sorted(
+            candidates_source,
+            key=lambda c: (
+                c.get("start_frame")
+                if c.get("start_frame") is not None
+                else c.get("rep_index", 0)
+            ),
+        )
     else:
         iterable = [
             {
@@ -1169,7 +1200,7 @@ def _compute_rep_speeds(
 
         accepted = bool(entry.get("accepted", True))
         rejection_reason = str(entry.get("rejection_reason", "NONE"))
-        rep_number = int(entry.get("rep_index", i - 1)) + 1
+        rep_number = i
 
         if start_frame is None or end_frame is None or end_frame <= start_frame:
             duration_s = math.nan
@@ -1482,11 +1513,14 @@ def _results_panel() -> Dict[str, bool]:
                                 continue
                             thresholds.append(value)
 
+                        fps_for_sync = getattr(stats, "fps_original", None) or getattr(
+                            stats, "fps_effective", 0.0
+                        )
                         render_video_with_metrics_sync(
                             video_path=None,
                             metrics_df=metrics_df,
                             selected_metrics=selected_metrics,
-                            fps=stats.fps_effective,
+                            fps=fps_for_sync,
                             rep_intervals=rep_intervals,
                             thresholds=thresholds,
                             start_at_s=None,
