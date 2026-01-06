@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 import numpy as np
@@ -11,6 +11,7 @@ import pandas as pd
 
 from src import config
 from src.B_pose_estimation.signal import derivative, interpolate_small_gaps, smooth_series
+from src.C_analysis.rep_candidates import RejectionReason, detect_rep_candidates
 from src.config.constants import (
     ANALYSIS_MAX_GAP_FRAMES,
     ANALYSIS_SAVGOL_POLYORDER,
@@ -30,6 +31,8 @@ class CountingDebugInfo:
     raw_count: int = 0
     reps_rejected_threshold: int = 0
     rejection_reasons: List[str] | None = None
+    rep_candidates: list[dict] = field(default_factory=list)
+    rep_intervals: list[tuple[int, int]] = field(default_factory=list)
 
 
 def _quality_mask_from_df(df_metrics: pd.DataFrame, column: str) -> np.ndarray:
@@ -273,44 +276,44 @@ def count_repetitions_with_config(
     if np.isfinite(angles).sum() < 3:
         return 0, CountingDebugInfo([], [])
 
-    rep_indices, prominences, long_gap_seen = _state_machine_reps(
-        angles,
-        velocities,
-        refractory_frames=refractory_frames,
-        min_excursion=min_excursion,
-        min_prominence=min_prominence,
-        min_distance_frames=min_distance_frames,
-        reference=reference,
-    )
-
-    raw_count = len(rep_indices)
     low_thresh = _as_optional_float(getattr(faults_cfg, "low_thresh", None) if faults_cfg else None)
     high_thresh = _as_optional_float(getattr(faults_cfg, "high_thresh", None) if faults_cfg else None)
-    enforce_low = bool(getattr(counting_cfg, "enforce_low_thresh", False))
-    enforce_high = bool(getattr(counting_cfg, "enforce_high_thresh", False))
+    if low_thresh is None:
+        finite_angles = angles[np.isfinite(angles)]
+        low_thresh = float(np.nanpercentile(finite_angles, 20))
+    if high_thresh is None:
+        finite_angles = angles[np.isfinite(angles)]
+        high_thresh = float(np.nanpercentile(finite_angles, 80))
 
-    filtered_indices, filtered_proms, rejected, reasons = _filter_reps_by_thresholds(
+    rep_candidates = detect_rep_candidates(
         reference if reference is not None else angles,
-        rep_indices,
-        prominences,
         low_thresh=low_thresh,
         high_thresh=high_thresh,
-        enforce_low=enforce_low,
-        enforce_high=enforce_high,
+        exercise_key=getattr(counting_cfg, "exercise", "squat"),
+    )
+
+    raw_count = len(rep_candidates)
+    reps = sum(1 for r in rep_candidates if r.accepted)
+    threshold_rejected = sum(
+        1
+        for r in rep_candidates
+        if r.rejection_reason
+        in (RejectionReason.LOW_THRESH, RejectionReason.HIGH_THRESH)
     )
 
     debug = CountingDebugInfo(
-        valley_indices=filtered_indices,
-        prominences=filtered_proms,
+        valley_indices=[c.turning_frame or c.start_frame for c in rep_candidates],
+        prominences=[0.0 for _ in rep_candidates],
         raw_count=raw_count,
-        reps_rejected_threshold=rejected,
-        rejection_reasons=reasons,
+        reps_rejected_threshold=threshold_rejected,
+        rejection_reasons=[r.rejection_reason.value for r in rep_candidates],
+        rep_candidates=[r.as_dict() for r in rep_candidates],
+        rep_intervals=[
+            (c.start_frame, c.end_frame)
+            for c in rep_candidates
+            if c.end_frame is not None and c.start_frame is not None
+        ],
     )
-
-    if long_gap_seen:
-        return 0, debug
-
-    reps = len(filtered_indices)
 
     logger.debug(
         "Repetition count=%d (raw=%d, refractory=%d frames ≈ %.2fs, min_excursion=%.1f). Valid frames=%d/%d",
