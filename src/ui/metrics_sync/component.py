@@ -18,6 +18,32 @@ from streamlit.components.v1 import html
 from src.ui.video import get_video_source
 
 
+
+def nearest_time_index(times: Sequence[float], target: float) -> int:
+    """Return the index of the closest timestamp to ``target`` using binary search."""
+
+    try:
+        arr = pd.to_numeric(pd.Series(times), errors="coerce").to_numpy(
+            dtype="float64", copy=False
+        )
+    except Exception:
+        arr = np.asarray(list(times), dtype="float64") if times is not None else np.asarray([], dtype="float64")
+
+    if arr.size == 0:
+        return 0
+
+    pos = int(np.searchsorted(arr, target, side="left"))
+    if pos <= 0:
+        return 0
+    if pos >= arr.size:
+        return int(arr.size - 1)
+
+    prev_idx = pos - 1
+    prev_diff = abs(arr[prev_idx] - target)
+    curr_diff = abs(arr[pos] - target)
+    return pos if curr_diff <= prev_diff else prev_idx
+
+
 def _build_payload(
     df: pd.DataFrame,
     selected: Sequence[str],
@@ -56,9 +82,11 @@ def _build_payload(
         times_arr = times_base[idx]
         x_mode = "time"
     elif "frame_idx" in df.columns:
-        times_arr = frame_idx[idx] / fps
+        times_base = frame_idx / fps
+        times_arr = times_base[idx]
         x_mode = "time"
     else:
+        times_base = idx.astype("float64", copy=False)
         times_arr = idx.astype("float64", copy=False)
         x_mode = "frame"
 
@@ -85,6 +113,8 @@ def _build_payload(
         "x_mode": x_mode,
         "frames": analysis_for_plot,
         "source_frames": source_for_plot,
+        "axis_times": times_base.tolist(),
+        "axis_frames": analysis_frames.tolist(),
     }
     return payload
 

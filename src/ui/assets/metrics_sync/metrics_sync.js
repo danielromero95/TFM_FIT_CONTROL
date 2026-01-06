@@ -16,6 +16,8 @@
 
   const x = DATA.times.slice();
   const frames = Array.isArray(DATA.frames) ? DATA.frames.slice() : x.map((_, idx) => idx);
+  const axisTimes = Array.isArray(DATA.axis_times) && DATA.axis_times.length ? DATA.axis_times.slice() : x;
+  const axisFrames = Array.isArray(DATA.axis_frames) && DATA.axis_frames.length ? DATA.axis_frames.slice() : frames;
   const names = Object.keys(DATA.series || {});
   const thr = Array.isArray(DATA.thr)
     ? DATA.thr.filter((v) => Number.isFinite(v))
@@ -104,8 +106,9 @@
   Plotly.newPlot(plot, traces, layout, CFG);
 
   const hasTimeAxis = DATA.x_mode === "time";
-  const xMin = x.length ? x[0] : 0;
-  const xMax = x.length ? x[x.length - 1] : xMin;
+  const xBounds = hasTimeAxis && axisTimes.length ? axisTimes : x;
+  const xMin = xBounds.length ? xBounds[0] : 0;
+  const xMax = xBounds.length ? xBounds[xBounds.length - 1] : xMin;
   const EPS = (xMax - xMin) * 1e-3 || 1e-6;
 
   let lastT = -1;
@@ -129,19 +132,20 @@
   }
 
   function stateFromAxis(axisValue) {
-    if (!x.length) return { frame: 0, time: 0, x: 0, idx: 0 };
-    const idx = nearestIndex(axisValue, x);
-    const frameVal = Number.isFinite(frames[idx]) ? frames[idx] : idx;
+    const lookup = hasTimeAxis ? axisTimes : x;
+    if (!lookup.length) return { frame: 0, time: 0, x: axisValue, idx: 0 };
+    const idx = nearestIndex(axisValue, lookup);
+    const frameVal = Number.isFinite(axisFrames[idx]) ? axisFrames[idx] : idx;
     const timeVal = hasTimeAxis
-      ? x[idx]
+      ? lookup[idx]
       : (Number.isFinite(frameVal) && fps > 0 ? frameVal / fps : 0);
-    return { frame: frameVal, time: timeVal, x: x[idx], idx };
+    return { frame: frameVal, time: timeVal, x: axisValue, idx };
   }
 
   function timeForFrame(frameVal) {
-    if (!hasTimeAxis || !x.length || !frames.length) return null;
-    const idx = nearestIndex(frameVal, frames);
-    const t = x[idx];
+    if (!hasTimeAxis || !axisTimes.length || !axisFrames.length) return null;
+    const idx = nearestIndex(frameVal, axisFrames);
+    const t = axisTimes[idx];
     return Number.isFinite(t) ? t : null;
   }
 

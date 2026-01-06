@@ -144,7 +144,7 @@ def test_deadlift_rep_intervals_and_speeds_cover_all_phases():
     stats = _dummy_stats(exercise="deadlift")
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -182,7 +182,7 @@ def test_squat_phase_mapping_preserved():
     stats = _dummy_stats(exercise="squat")
     report = _dummy_report(stats, "squat", repetitions=1, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -217,7 +217,7 @@ def test_squat_midpoint_valley_intervals_fill_rep_speed_chart():
     stats = _dummy_stats(exercise="squat")
     report = _dummy_report(stats, "squat", repetitions=5, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -274,7 +274,7 @@ def test_squat_midpoint_fallback_when_debug_intervals_undercount(monkeypatch):
     stats = _dummy_stats(exercise="squat")
     report = _dummy_report(stats, "squat", repetitions=5, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -320,7 +320,7 @@ def test_deadlift_with_boundary_nans_keeps_all_phases():
     stats = _dummy_stats(exercise="deadlift")
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -363,7 +363,7 @@ def test_nonconsecutive_index_samples_nearest_frames():
     stats = _dummy_stats(exercise="squat")
     report = _dummy_report(stats, "squat", repetitions=2, metrics=metrics_df)
 
-    rep_intervals, valley_frames, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, valley_frames, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -428,7 +428,7 @@ def test_deadlift_infers_start_bottom_and_keeps_phases_non_nan():
     stats = _dummy_stats(exercise="deadlift")
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
 
-    rep_intervals, _, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, _, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -474,7 +474,7 @@ def test_deadlift_boundary_pose_gaps_still_produce_phases():
     stats = _dummy_stats(exercise="deadlift")
     report = _dummy_report(stats, "deadlift", repetitions=2, metrics=metrics_df)
 
-    rep_intervals, _, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, _, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -505,7 +505,7 @@ def test_fewer_bottoms_emit_warning_and_limit_intervals():
     stats = _dummy_stats(exercise="deadlift")
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
 
-    rep_intervals, _, _, _, _, _ = _compute_rep_intervals(
+    rep_intervals, _, _, _, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -535,7 +535,7 @@ def test_deadlift_threshold_intervals_match_reported_reps(monkeypatch):
     stats.upper_threshold = 8.0
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
 
-    rep_intervals, _, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, _, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
@@ -581,7 +581,7 @@ def test_deadlift_threshold_intervals_use_faults_config(monkeypatch):
     report = _dummy_report(stats, "deadlift", repetitions=3, metrics=metrics_df)
     report.config_used.faults = SimpleNamespace(low_thresh=2.0, high_thresh=8.0)
 
-    rep_intervals, _, frame_values, primary_metric, _, _ = _compute_rep_intervals(
+    rep_intervals, _, frame_values, primary_metric, _, _, _ = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,
         stats=stats,
