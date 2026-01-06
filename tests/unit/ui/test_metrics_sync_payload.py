@@ -50,7 +50,7 @@ def test_build_payload_stride_and_nan_mapping():
     assert len(payload["series"]["metric_b"]) == L
 
 
-def test_axis_times_use_source_time_when_present():
+def test_axis_times_use_source_time_with_auto_offset():
     source_time = [0.05, 0.12, 0.18, 0.27]
     df = pd.DataFrame(
         {
@@ -62,8 +62,10 @@ def test_axis_times_use_source_time_when_present():
 
     payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
 
-    assert payload["axis_times"] == source_time
-    assert payload["time_offset_s"] == 0.0
+    expected_axis = [v - source_time[0] for v in source_time]
+
+    assert payload["axis_times"] == pytest.approx(expected_axis)
+    assert payload["time_offset_s"] == pytest.approx(source_time[0])
     assert payload["axis_ref"] == "source"
 
 
@@ -96,6 +98,30 @@ def test_source_time_offset_preserved_and_rebased():
     assert payload["time_offset_s"] == pytest.approx(source_time[0])
     assert payload["axis_times"][0] == pytest.approx(0.0)
     assert payload["axis_times"][-1] == pytest.approx(source_time[-1] - source_time[0])
+
+
+def test_auto_offset_from_time_s_when_source_missing():
+    time_values = [2.0, 2.05, 2.10]
+    df = pd.DataFrame({"time_s": time_values, "metric": [1, 2, 3]})
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
+
+    assert payload["time_offset_s"] == pytest.approx(time_values[0])
+    assert payload["axis_times"][0] == pytest.approx(0.0)
+    assert payload["axis_times"][-1] == pytest.approx(time_values[-1] - time_values[0])
+
+
+def test_axis_times_are_not_downsampled():
+    n = 5
+    times = [0.0, 0.02, 0.04, 0.06, 0.08]
+    df = pd.DataFrame({"source_time_s": times, "metric": range(n)})
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=2)
+
+    assert len(payload["axis_times"]) == n
+    assert len(payload["times"]) < n
+    assert payload["times"][0] == pytest.approx(payload["axis_times"][0])
+    assert payload["times"][1] == pytest.approx(payload["axis_times"][3])
 
 
 def test_rep_intervals_are_mapped_to_source_domain():

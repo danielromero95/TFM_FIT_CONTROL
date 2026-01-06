@@ -16,3 +16,14 @@ def test_axis_times_rebased_from_frame_idx_start():
     assert payload["axis_times"][0] == pytest.approx(expected_start)
     assert payload["axis_times"][-1] == pytest.approx(expected_start + expected_span)
     assert payload["time_offset_s"] == pytest.approx(0.0)
+
+
+def test_axis_times_are_strictly_increasing_with_duplicates():
+    times = [1.0, 1.0, 1.002, 1.004]
+    df = pd.DataFrame({"source_time_s": times, "source_frame_idx": [0, 1, 2, 3], "metric": [0.0, 0.1, 0.2, 0.3]})
+
+    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
+
+    axis_times = payload["axis_times"]
+    assert axis_times[0] == pytest.approx(0.0)
+    assert all(b > a for a, b in zip(axis_times, axis_times[1:]))
