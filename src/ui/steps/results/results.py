@@ -1003,6 +1003,15 @@ def _metric_extreme(metric_name: str | None) -> str:
     return "min"
 
 
+def normalize_exercise_key(exercise_key: str | None) -> str:
+    """Return a lowercase exercise key, tolerating missing or non-string inputs."""
+
+    try:
+        return str(exercise_key or "").lower()
+    except Exception:
+        return ""
+
+
 def _compute_rep_speeds(
     rep_intervals: List[Tuple[int, int]],
     stats: RunStats,
@@ -1014,6 +1023,8 @@ def _compute_rep_speeds(
     primary_metric: str | None,
     ) -> pd.DataFrame:
     """Estimate per-rep cadence, duration, and phase speeds from frame intervals."""
+
+    exercise_normalized = normalize_exercise_key(exercise_key)
 
     if not rep_intervals:
         return pd.DataFrame()
@@ -1092,9 +1103,8 @@ def _compute_rep_speeds(
         except Exception:
             return frame
 
-    exercise = (exercise_key or "").lower()
     first_phase_label, second_phase_label = (
-        ("Up", "Down") if exercise == "deadlift" else ("Down", "Up")
+        ("Up", "Down") if exercise_normalized == "deadlift" else ("Down", "Up")
     )
     bottom_extreme = _metric_extreme(primary_metric)
 
@@ -1128,7 +1138,11 @@ def _compute_rep_speeds(
             frame_at_turn = min(max(frame_at_turn, start), end)
             return frame_at_turn, float(masked.loc[idx])
 
-        use_max_turning = bottom_extreme == "min" if exercise == "deadlift" else bottom_extreme == "max"
+        use_max_turning = (
+            bottom_extreme == "min"
+            if exercise_normalized == "deadlift"
+            else bottom_extreme == "max"
+        )
         turning_frame, turning_val = _turning_point(start_frame, end_frame, use_max=use_max_turning)
 
         start_sample_frame = _nearest_valid_frame(start_frame, start_frame, turning_frame)

@@ -95,6 +95,42 @@ def test_rep_speed_chart_default_phase_mapping():
     assert chart_df.iloc[1]["Phase duration (s)"] == 0.4
 
 
+def test_rep_speeds_define_normalized_exercise_even_when_missing():
+    stats_deadlift = _dummy_stats(exercise="deadlift")
+    frame_values = pd.Series([0, 1], name="frame_idx")
+
+    rep_speeds_df = _compute_rep_speeds(
+        [(0, 1)],
+        stats_deadlift,
+        exercise_key="deadlift",
+        valley_frames=[],
+        frame_values=frame_values,
+        metrics_df=None,
+        primary_metric=None,
+    )
+
+    assert not rep_speeds_df.empty
+    assert {"Down duration (s)", "Up duration (s)"}.issubset(
+        set(rep_speeds_df.columns)
+    )
+
+    stats_missing = _dummy_stats(exercise=None)
+    rep_speeds_missing_df = _compute_rep_speeds(
+        [(0, 0)],
+        stats_missing,
+        exercise_key=None,
+        valley_frames=[],
+        frame_values=pd.Series([0], name="frame_idx"),
+        metrics_df=None,
+        primary_metric=None,
+    )
+
+    assert not rep_speeds_missing_df.empty
+    assert {"Down duration (s)", "Up duration (s)"}.issubset(
+        set(rep_speeds_missing_df.columns)
+    )
+
+
 def test_deadlift_rep_intervals_and_speeds_cover_all_phases():
     angles = []
     for _ in range(3):
