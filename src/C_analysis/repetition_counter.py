@@ -11,7 +11,7 @@ import pandas as pd
 
 from src import config
 from src.B_pose_estimation.signal import derivative, interpolate_small_gaps, smooth_series
-from src.C_analysis.rep_candidates import RejectionReason, detect_rep_candidates
+from src.C_analysis.rep_candidates import RepCandidate, RejectionReason, detect_rep_candidates
 from src.config.constants import (
     ANALYSIS_MAX_GAP_FRAMES,
     ANALYSIS_SAVGOL_POLYORDER,
@@ -61,6 +61,94 @@ def _prepare_primary_series(
     smoothed = np.where(quality_mask, smoothed, np.nan)
     velocity = derivative(smoothed, fps)
     return smoothed, velocity, quality_mask, reference
+
+
+def _frame_index_bounds(length: int, start: int | None, end: int | None) -> tuple[int, int]:
+    start_idx = 0 if start is None else max(0, min(int(start), length - 1))
+    end_idx = length - 1 if end is None else max(start_idx, min(int(end), length - 1))
+    return start_idx, end_idx
+
+
+def _close_deadlift_candidates_with_fallback(
+    rep_candidates: list,
+    df_metrics: pd.DataFrame,
+    fps: float,
+    *,
+    fallback_metric: str = "trunk_inclination_deg",
+) -> None:
+    """Try to close incomplete deadlift reps using a fallback metric."""
+
+    if df_metrics is None or df_metrics.empty or fallback_metric not in df_metrics.columns:
+        return
+
+    try:
+        fallback_smoothed, _, fallback_quality, _ = _prepare_primary_series(
+            df_metrics, fallback_metric, fps
+        )
+    except Exception:
+        return
+
+    if fallback_smoothed.size == 0:
+        return
+
+    bottom_is_max = True
+    metric_name = fallback_metric.lower()
+    if "trunk_inclination" not in metric_name and not metric_name.startswith("trunk_"):
+        bottom_is_max = False
+
+    length = len(fallback_smoothed)
+
+    for cand in rep_candidates:
+        if getattr(cand, "end_frame", None) is not None:
+            continue
+        start_frame = getattr(cand, "start_frame", None)
+        if start_frame is None:
+            continue
+
+        start_idx, _ = _frame_index_bounds(length, start_frame, None)
+        segment = fallback_smoothed[start_idx:]
+        quality = fallback_quality[start_idx:]
+        if segment.size == 0:
+            continue
+
+        finite_mask = np.isfinite(segment) & quality
+        if not finite_mask.any():
+            continue
+
+        try:
+            turning_rel = int(np.nanargmin(segment[finite_mask])) if bottom_is_max else int(np.nanargmax(segment[finite_mask]))
+        except Exception:
+            turning_rel = None
+
+        if turning_rel is not None:
+            finite_indices = np.nonzero(finite_mask)[0]
+            turning_idx = start_idx + finite_indices[min(max(turning_rel, 0), finite_indices.size - 1)]
+        else:
+            turning_idx = getattr(cand, "turning_frame", start_idx)
+
+        tail_start = max(turning_idx, start_idx)
+        tail_segment = fallback_smoothed[tail_start:]
+        tail_quality = fallback_quality[tail_start:]
+        if tail_segment.size == 0:
+            continue
+
+        tail_mask = np.isfinite(tail_segment) & tail_quality
+        if not tail_mask.any():
+            continue
+
+        try:
+            end_rel = int(np.nanargmax(tail_segment[tail_mask])) if bottom_is_max else int(np.nanargmin(tail_segment[tail_mask]))
+        except Exception:
+            continue
+
+        tail_indices = np.nonzero(tail_mask)[0]
+        end_idx = tail_start + tail_indices[min(max(end_rel, 0), tail_indices.size - 1)]
+
+        if end_idx <= turning_idx:
+            continue
+
+        cand.turning_frame = cand.turning_frame or turning_idx
+        cand.end_frame = end_idx
 
 
 def _state_machine_reps(
@@ -276,21 +364,90 @@ def count_repetitions_with_config(
     if np.isfinite(angles).sum() < 3:
         return 0, CountingDebugInfo([], [])
 
-    low_thresh = _as_optional_float(getattr(faults_cfg, "low_thresh", None) if faults_cfg else None)
-    high_thresh = _as_optional_float(getattr(faults_cfg, "high_thresh", None) if faults_cfg else None)
-    if low_thresh is None:
-        finite_angles = angles[np.isfinite(angles)]
-        low_thresh = float(np.nanpercentile(finite_angles, 20))
-    if high_thresh is None:
-        finite_angles = angles[np.isfinite(angles)]
-        high_thresh = float(np.nanpercentile(finite_angles, 80))
+    state_valleys, state_proms, long_gap = _state_machine_reps(
+        angles,
+        velocities,
+        refractory_frames=refractory_frames,
+        min_excursion=min_excursion,
+        min_prominence=min_prominence,
+        min_distance_frames=min_distance_frames,
+        reference=reference,
+    )
+
+    finite_angles = angles[np.isfinite(angles)]
+    auto_low = float(np.nanpercentile(finite_angles, 20)) if finite_angles.size else 0.0
+    auto_high = float(np.nanpercentile(finite_angles, 80)) if finite_angles.size else 0.0
+    low_thresh_cfg = _as_optional_float(getattr(faults_cfg, "low_thresh", None) if faults_cfg else None)
+    high_thresh_cfg = _as_optional_float(getattr(faults_cfg, "high_thresh", None) if faults_cfg else None)
+
+    pass_low = low_thresh_cfg if low_thresh_cfg is not None else auto_low
+    pass_high = high_thresh_cfg if high_thresh_cfg is not None else auto_high
+
+    detect_low = auto_low
+    detect_high = auto_high
+
+    enforce_low_flag = bool(getattr(counting_cfg, "enforce_low_thresh", True))
+    enforce_high_flag = bool(getattr(counting_cfg, "enforce_high_thresh", True))
 
     rep_candidates = detect_rep_candidates(
         reference if reference is not None else angles,
-        low_thresh=low_thresh,
-        high_thresh=high_thresh,
+        low_thresh=detect_low,
+        high_thresh=detect_high,
         exercise_key=getattr(counting_cfg, "exercise", "squat"),
+        enforce_low=False,
+        enforce_high=False,
     )
+
+    if long_gap:
+        rep_candidates = []
+
+    exercise_key = getattr(counting_cfg, "exercise", "").lower()
+
+    if not rep_candidates and state_valleys:
+        for i, valley in enumerate(state_valleys):
+            end_frame = min(len(angles) - 1, valley + 1)
+            cand = RepCandidate(
+                rep_index=i,
+                start_frame=valley,
+                turning_frame=valley,
+                end_frame=end_frame,
+                min_angle=float(reference[valley]) if reference is not None and np.isfinite(reference[valley]) else float(auto_low),
+                max_angle=float(reference[valley]) if reference is not None and np.isfinite(reference[valley]) else float(auto_high),
+            )
+            rep_candidates.append(cand)
+
+    for cand in rep_candidates:
+        cand.passed_low = bool(cand.min_angle is not None and cand.min_angle <= pass_low)
+        cand.passed_high = bool(cand.max_angle is not None and cand.max_angle >= pass_high)
+        if exercise_key == "deadlift" and not enforce_low_flag:
+            cand.passed_low = True
+
+    if exercise_key == "deadlift":
+        _close_deadlift_candidates_with_fallback(rep_candidates, df_metrics, fps_safe)
+
+    for cand in rep_candidates:
+        if cand.rejection_reason == RejectionReason.INCOMPLETE:
+            continue
+        cand.accepted = True
+        cand.rejection_reason = RejectionReason.NONE
+        if enforce_low_flag and not cand.passed_low:
+            cand.accepted = False
+            cand.rejection_reason = RejectionReason.LOW_THRESH
+        if enforce_high_flag and not cand.passed_high:
+            cand.accepted = False
+            if cand.rejection_reason == RejectionReason.NONE:
+                cand.rejection_reason = RejectionReason.HIGH_THRESH
+
+    for cand in rep_candidates:
+        if cand.rejection_reason == RejectionReason.INCOMPLETE and (
+            not enforce_low_flag or cand.passed_low
+        ):
+            if enforce_high_flag and not cand.passed_high:
+                continue
+            cand.accepted = True
+            cand.rejection_reason = RejectionReason.NONE
+            if cand.end_frame is None:
+                cand.end_frame = len(angles) - 1
 
     raw_count = len(rep_candidates)
     reps = sum(1 for r in rep_candidates if r.accepted)
@@ -301,9 +458,10 @@ def count_repetitions_with_config(
         in (RejectionReason.LOW_THRESH, RejectionReason.HIGH_THRESH)
     )
 
+    valley_for_debug = state_valleys if state_valleys else [c.turning_frame or c.start_frame for c in rep_candidates]
     debug = CountingDebugInfo(
-        valley_indices=[c.turning_frame or c.start_frame for c in rep_candidates],
-        prominences=[0.0 for _ in rep_candidates],
+        valley_indices=valley_for_debug,
+        prominences=state_proms if state_proms else [0.0 for _ in rep_candidates],
         raw_count=raw_count,
         reps_rejected_threshold=threshold_rejected,
         rejection_reasons=[r.rejection_reason.value for r in rep_candidates],

@@ -65,3 +65,11 @@ def test_incomplete_rep_is_flagged():
     incomplete = [r for r in reps if r.rejection_reason == RejectionReason.INCOMPLETE]
     assert len(incomplete) == 1
     assert incomplete[0].end_frame is None
+
+
+def test_squat_mid_segments_keep_phase_order():
+    angles = np.asarray([30, 25, 20, 15, 10, 15, 20, 25, 30] * 2, dtype=float)
+    reps = detect_rep_candidates(angles, low_thresh=8.0, high_thresh=28.0, exercise_key="squat")
+    assert len(reps) == 2
+    assert all(rep.down_start is not None and rep.up_start is not None for rep in reps)
+    assert all(rep.down_start < rep.up_start for rep in reps)

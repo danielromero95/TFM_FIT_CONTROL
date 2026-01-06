@@ -137,6 +137,8 @@ def detect_rep_candidates(
     high_thresh: float,
     exercise_key: str,
     frame_offset: int = 0,
+    enforce_low: bool = True,
+    enforce_high: bool = True,
 ) -> List[RepCandidate]:
     """Detect repetitions using hysteresis zones and an exercise-aware FSM."""
 
@@ -183,6 +185,9 @@ def detect_rep_candidates(
         min_angle = np.inf
         max_angle = -np.inf
 
+    apply_low = spec.require_low and enforce_low
+    apply_high = spec.require_high and enforce_high
+
     for idx, (angle, zone) in enumerate(zip(angles, zones)):
         if np.isfinite(angle):
             min_angle = min(min_angle, angle)
@@ -224,6 +229,13 @@ def detect_rep_candidates(
 
                 candidate.accepted = True
                 candidate.rejection_reason = RejectionReason.NONE
+                if apply_low and not candidate.passed_low:
+                    candidate.accepted = False
+                    candidate.rejection_reason = RejectionReason.LOW_THRESH
+                if apply_high and not candidate.passed_high:
+                    candidate.accepted = False
+                    if candidate.rejection_reason == RejectionReason.NONE:
+                        candidate.rejection_reason = RejectionReason.HIGH_THRESH
                 candidates.append(candidate)
                 rep_index += 1
                 rep_start_idx = None
@@ -234,17 +246,6 @@ def detect_rep_candidates(
         last_zone = zone
 
     _flush_incomplete()
-
-    for cand in candidates:
-        if cand.rejection_reason == RejectionReason.INCOMPLETE:
-            continue
-        if spec.require_low and not cand.passed_low:
-            cand.accepted = False
-            cand.rejection_reason = RejectionReason.LOW_THRESH
-        if spec.require_high and not cand.passed_high:
-            cand.accepted = False
-            if cand.rejection_reason == RejectionReason.NONE:
-                cand.rejection_reason = RejectionReason.HIGH_THRESH
 
     return candidates
 

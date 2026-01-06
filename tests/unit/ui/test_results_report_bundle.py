@@ -75,6 +75,7 @@ def test_debug_bundle_contains_rep_speed_artifacts():
         primary_metric,
         interval_strategy,
         thresholds_used,
+        _,
     ) = _compute_rep_intervals(
         metrics_df=metrics_df,
         report=report,

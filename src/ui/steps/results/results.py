@@ -701,9 +701,10 @@ def _compute_rep_intervals(
     str | None,
     str | None,
     Tuple[float, float] | None,
+    list[dict],
 ]:
     if metrics_df.empty:
-        return [], [], pd.Series(dtype=float), None, None, None
+        return [], [], pd.Series(dtype=float), None, None, None, []
 
     # Preserve frame_idx for time mapping but operate on a stable positional index
     try:
@@ -721,7 +722,7 @@ def _compute_rep_intervals(
     frame_values = frame_values.where(~frame_values.isna(), pd.Series(range(len(metrics_df)), index=metrics_df.index))
 
     if frame_values.empty:
-        return [], [], frame_values, None, None, None
+        return [], [], frame_values, None, None, None, []
 
     first_frame = int(frame_values.iloc[0])
     last_frame = int(frame_values.iloc[-1]) if len(frame_values) > 1 else first_frame + 1
@@ -735,10 +736,11 @@ def _compute_rep_intervals(
     if not candidate or candidate not in metrics_df.columns:
         candidate = numeric_columns[0] if numeric_columns else None
     if not candidate or candidate not in metrics_df.columns:
-        return [], [], frame_values, None, None, None
+        return [], [], frame_values, None, None, None, []
 
     valley_indices: List[int] = []
     rep_intervals_by_index: List[Tuple[int, int]] = []
+    rep_candidates_data: list[dict] = []
     config_used = getattr(report, "config_used", None)
     counting_cfg = getattr(config_used, "counting", None)
     faults_cfg = getattr(config_used, "faults", None)
@@ -749,6 +751,7 @@ def _compute_rep_intervals(
             )
             valley_indices = list(getattr(debug, "valley_indices", []))
             rep_intervals_by_index = list(getattr(debug, "rep_intervals", []) or [])
+            rep_candidates_data = list(getattr(debug, "rep_candidates", []) or [])
             if not rep_intervals_by_index:
                 rep_starts = getattr(debug, "rep_start_frames", None)
                 rep_ends = getattr(debug, "rep_end_frames", None)
@@ -797,7 +800,7 @@ def _compute_rep_intervals(
     exercise = (exercise_key or "").lower()
 
     if not valley_indices and not rep_intervals_by_index and exercise != "deadlift":
-        return [], [], frame_values, candidate, None, None
+        return [], [], frame_values, candidate, None, None, []
 
     def _frame_at_index(pos: int) -> int:
         pos = min(max(pos, 0), frame_count - 1)
@@ -818,6 +821,14 @@ def _compute_rep_intervals(
     valley_frames = sorted(dict.fromkeys(valley_frames))
 
     expected_reps = getattr(report, "repetitions", None)
+    raw_expected = getattr(stats, "reps_detected_raw", None)
+    target_reps = None
+    if rep_candidates_data:
+        target_reps = len(rep_candidates_data)
+    elif raw_expected:
+        target_reps = raw_expected
+    elif expected_reps is not None:
+        target_reps = expected_reps
     expected_reps = int(expected_reps) if isinstance(expected_reps, (int, float)) and expected_reps > 0 else None
 
     intervals: List[Tuple[int, int]] = []
@@ -974,10 +985,10 @@ def _compute_rep_intervals(
             intervals = midpoint_intervals
             interval_strategy = "midpoint_valleys"
 
-    if expected_reps is not None:
-        if len(intervals) > expected_reps:
-            intervals = intervals[:expected_reps]
-        elif len(intervals) < expected_reps:
+    if target_reps is not None:
+        if len(intervals) > target_reps:
+            intervals = intervals[:target_reps]
+        elif len(intervals) < target_reps:
             warning_msg = (
                 f"Repetition speed uses {len(intervals)} intervals because only {len(valley_indices)} bottoms were detected; "
                 "some reps may be missing."
@@ -988,7 +999,15 @@ def _compute_rep_intervals(
             except Exception:
                 pass
 
-    return intervals, valley_frames, frame_values, candidate, interval_strategy, thresholds_used
+    return (
+        intervals,
+        valley_frames,
+        frame_values,
+        candidate,
+        interval_strategy,
+        thresholds_used,
+        rep_candidates_data,
+    )
 
 
 def _metric_extreme(metric_name: str | None) -> str:
@@ -1021,12 +1040,13 @@ def _compute_rep_speeds(
     frame_values: pd.Series,
     metrics_df: pd.DataFrame | None,
     primary_metric: str | None,
-    ) -> pd.DataFrame:
+    rep_candidates: list[dict] | None = None,
+) -> pd.DataFrame:
     """Estimate per-rep cadence, duration, and phase speeds from frame intervals."""
 
     exercise_normalized = normalize_exercise_key(exercise_key)
 
-    if not rep_intervals:
+    if not rep_intervals and not rep_candidates:
         return pd.DataFrame()
 
     try:
@@ -1055,6 +1075,18 @@ def _compute_rep_speeds(
 
     frame_arr = frame_values.to_numpy(copy=False)
     raw_values = metrics_series.to_numpy(copy=False) if metrics_series is not None else None
+
+    def _frame_from_index(idx: int | None) -> int | None:
+        if idx is None:
+            return None
+        try:
+            return int(frame_values.iloc[int(idx)])
+        except Exception:
+            try:
+                pos = min(max(int(idx), 0), len(frame_values) - 1)
+                return int(frame_values.to_numpy()[pos])
+            except Exception:
+                return int(idx)
 
     def _metric_at_frame(frame: int) -> float:
         if frame_values.empty:
@@ -1109,69 +1141,110 @@ def _compute_rep_speeds(
     bottom_extreme = _metric_extreme(primary_metric)
 
     rows: List[Dict[str, float]] = []
-    for i, (start_frame, end_frame) in enumerate(rep_intervals, start=1):
-        span_frames = max(1, end_frame - start_frame)
-        duration_s = span_frames / fps
-        cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
 
-        def _turning_point(
-            start: int, end: int, *, use_max: bool
-        ) -> Tuple[int, float]:
-            if metrics_interp is None or frame_values.empty:
-                return start, math.nan
-            mask = (frame_values >= start) & (frame_values <= end)
-            try:
-                masked = metrics_interp[mask]
-            except Exception:
-                masked = metrics_interp.iloc[0:0]
-            if masked.empty or masked.isna().all():
-                return start, math.nan
-            idx = masked.idxmax() if use_max else masked.idxmin()
-            try:
-                frame_at_turn = int(frame_values.loc[idx])
-            except Exception:
+    candidates_source = rep_candidates or []
+    if candidates_source:
+        iterable = sorted(candidates_source, key=lambda c: c.get("rep_index", 0))
+    else:
+        iterable = [
+            {
+                "rep_index": i - 1,
+                "start_frame": start,
+                "end_frame": end,
+                "turning_frame": None,
+                "accepted": True,
+                "rejection_reason": "NONE",
+            }
+            for i, (start, end) in enumerate(rep_intervals, start=1)
+        ]
+
+    for i, entry in enumerate(iterable, start=1):
+        start_frame_idx = entry.get("start_frame")
+        end_frame_idx = entry.get("end_frame")
+        turning_frame_idx = entry.get("turning_frame")
+
+        start_frame = _frame_from_index(start_frame_idx)
+        end_frame = _frame_from_index(end_frame_idx)
+        turning_frame = _frame_from_index(turning_frame_idx)
+
+        accepted = bool(entry.get("accepted", True))
+        rejection_reason = str(entry.get("rejection_reason", "NONE"))
+        rep_number = int(entry.get("rep_index", i - 1)) + 1
+
+        if start_frame is None or end_frame is None or end_frame <= start_frame:
+            duration_s = math.nan
+            cadence_rps = 0.0
+            start_frame = start_frame if start_frame is not None else 0
+            end_frame = end_frame if end_frame is not None else start_frame
+            missing_data = True
+            first_duration = second_duration = math.nan
+            turning_frame = turning_frame if turning_frame is not None else start_frame
+            first_speed = second_speed = math.nan
+        else:
+            span_frames = max(1, end_frame - start_frame)
+            duration_s = span_frames / fps
+            cadence_rps = (1.0 / duration_s) if duration_s > 0 else 0.0
+
+            def _turning_point(
+                start: int, end: int, *, use_max: bool
+            ) -> Tuple[int, float]:
+                if metrics_interp is None or frame_values.empty:
+                    return start, math.nan
+                mask = (frame_values >= start) & (frame_values <= end)
                 try:
-                    pos = metrics_interp.index.get_loc(idx)
-                    frame_at_turn = int(frame_values.iloc[pos])
+                    masked = metrics_interp[mask]
                 except Exception:
-                    frame_at_turn = start
-            frame_at_turn = min(max(frame_at_turn, start), end)
-            return frame_at_turn, float(masked.loc[idx])
+                    masked = metrics_interp.iloc[0:0]
+                if masked.empty or masked.isna().all():
+                    return start, math.nan
+                idx = masked.idxmax() if use_max else masked.idxmin()
+                try:
+                    frame_at_turn = int(frame_values.loc[idx])
+                except Exception:
+                    try:
+                        pos = metrics_interp.index.get_loc(idx)
+                        frame_at_turn = int(frame_values.iloc[pos])
+                    except Exception:
+                        frame_at_turn = start
+                frame_at_turn = min(max(frame_at_turn, start), end)
+                return frame_at_turn, float(masked.loc[idx])
 
-        use_max_turning = (
-            bottom_extreme == "min"
-            if exercise_normalized == "deadlift"
-            else bottom_extreme == "max"
-        )
-        turning_frame, turning_val = _turning_point(start_frame, end_frame, use_max=use_max_turning)
-
-        start_sample_frame = _nearest_valid_frame(start_frame, start_frame, turning_frame)
-        end_sample_frame = _nearest_valid_frame(end_frame, turning_frame, end_frame)
-
-        start_val = _metric_at_frame(start_sample_frame)
-        end_val = _metric_at_frame(end_sample_frame)
-
-        first_phase_frames = max(1, turning_frame - start_frame)
-        second_phase_frames = max(1, end_frame - turning_frame)
-
-        first_duration = first_phase_frames / fps
-        second_duration = second_phase_frames / fps
-
-        if any(math.isnan(v) for v in (start_val, turning_val)):
-            first_speed = math.nan
-        else:
-            first_speed = (
-                abs(start_val - turning_val) / first_duration if first_duration > 0 else math.nan
+            use_max_turning = (
+                bottom_extreme == "min"
+                if exercise_normalized == "deadlift"
+                else bottom_extreme == "max"
+            )
+            turning_frame, turning_val = _turning_point(
+                start_frame, end_frame, use_max=use_max_turning
             )
 
-        if any(math.isnan(v) for v in (end_val, turning_val)):
-            second_speed = math.nan
-        else:
-            second_speed = (
-                abs(end_val - turning_val) / second_duration if second_duration > 0 else math.nan
-            )
+            start_sample_frame = _nearest_valid_frame(start_frame, start_frame, turning_frame)
+            end_sample_frame = _nearest_valid_frame(end_frame, turning_frame, end_frame)
 
-        missing_data = math.isnan(first_speed) or math.isnan(second_speed)
+            start_val = _metric_at_frame(start_sample_frame)
+            end_val = _metric_at_frame(end_sample_frame)
+
+            first_phase_frames = max(1, turning_frame - start_frame)
+            second_phase_frames = max(1, end_frame - turning_frame)
+
+            first_duration = first_phase_frames / fps
+            second_duration = second_phase_frames / fps
+
+            if any(math.isnan(v) for v in (start_val, turning_val)):
+                first_speed = math.nan
+            else:
+                first_speed = (
+                    abs(start_val - turning_val) / first_duration if first_duration > 0 else math.nan
+                )
+
+            if any(math.isnan(v) for v in (end_val, turning_val)):
+                second_speed = math.nan
+            else:
+                second_speed = (
+                    abs(end_val - turning_val) / second_duration if second_duration > 0 else math.nan
+                )
+
+            missing_data = math.isnan(first_speed) or math.isnan(second_speed)
 
         if first_phase_label == "Up":
             up_duration = first_duration
@@ -1184,9 +1257,16 @@ def _compute_rep_speeds(
             up_duration = second_duration
             up_speed = second_speed
 
+        missing_data = missing_data or not math.isfinite(duration_s)
+        if missing_data:
+            down_speed = 0.0 if not math.isfinite(down_speed) else down_speed
+            up_speed = 0.0 if not math.isfinite(up_speed) else up_speed
+            down_duration = 0.0 if not math.isfinite(down_duration) else down_duration
+            up_duration = 0.0 if not math.isfinite(up_duration) else up_duration
+
         rows.append(
             {
-                "Repetition": i,
+                "Repetition": rep_number,
                 "Start frame": float(start_frame),
                 "End frame": float(end_frame),
                 "Duration (s)": duration_s,
@@ -1197,6 +1277,8 @@ def _compute_rep_speeds(
                 "Down speed (deg/s)": down_speed,
                 "Up speed (deg/s)": up_speed,
                 "Missing data": missing_data,
+                "Accepted": accepted,
+                "Rejection reason": rejection_reason,
             }
         )
 
@@ -1248,6 +1330,10 @@ def _build_rep_speed_chart_df(
 
     phase_frames = []
     base_cols = ["Repetition", "Cadence (reps/min)"]
+    if "Accepted" in rep_speeds_df.columns:
+        base_cols.append("Accepted")
+    if "Rejection reason" in rep_speeds_df.columns:
+        base_cols.append("Rejection reason")
     if "Missing data" in rep_speeds_df.columns:
         base_cols.append("Missing data")
 
@@ -1302,6 +1388,7 @@ def _results_panel() -> Dict[str, bool]:
             primary_metric: str | None = None
             interval_strategy: str | None = None
             thresholds_used: Tuple[float, float] | None = None
+            rep_candidates_data: list[dict] = []
             phase_order = phase_order_for_exercise(exercise_key)
             rep_chart_df = pd.DataFrame()
 
@@ -1331,6 +1418,7 @@ def _results_panel() -> Dict[str, bool]:
                     primary_metric,
                     interval_strategy,
                     thresholds_used,
+                    rep_candidates_data,
                 ) = _compute_rep_intervals(
                     metrics_df=metrics_df,
                     report=report,
@@ -1424,6 +1512,7 @@ def _results_panel() -> Dict[str, bool]:
                 frame_values=frame_values,
                 metrics_df=metrics_df,
                 primary_metric=primary_metric,
+                rep_candidates=rep_candidates_data,
             )
             rep_chart_df = _build_rep_speed_chart_df(rep_speeds_df, phase_order)
 
@@ -1469,6 +1558,8 @@ def _results_panel() -> Dict[str, bool]:
                                 "Phase duration (s):Q", title="Phase duration (s)", format=".2f"
                             ),
                             alt.Tooltip("Cadence (reps/min):Q", title="Cadence", format=".1f"),
+                            alt.Tooltip("Accepted:N", title="Accepted"),
+                            alt.Tooltip("Rejection reason:N", title="Rejection"),
                         ],
                     )
                     .properties(height=280)
