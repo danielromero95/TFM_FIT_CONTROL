@@ -224,6 +224,8 @@ def stream_pose_and_detection(
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:
+            prev_source_ts: float | None = None
+
             for analysis_idx, frame_info in enumerate(frames):
                 frames_processed += 1
                 if isinstance(frame_info, FrameInfo):
@@ -245,6 +247,13 @@ def stream_pose_and_detection(
                         ts_sec = source_frame_idx / float(detection_ts_fps)
                     else:
                         ts_sec = analysis_idx / float(max(detection_ts_fps, 1.0))
+
+                if prev_source_ts is not None and np.isfinite(prev_source_ts):
+                    if not np.isfinite(ts_sec) or ts_sec <= prev_source_ts:
+                        ts_sec = prev_source_ts + 0.001
+
+                prev_source_ts = ts_sec if np.isfinite(ts_sec) else prev_source_ts
+
                 ts_ms = float(ts_sec * 1000.0)
                 emit_preview = preview_active and (analysis_idx % stride_preview == 0)
                 overlay_points_needed = emit_preview or debug_video_path is not None

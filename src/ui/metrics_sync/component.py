@@ -132,10 +132,41 @@ def _build_payload(
 
     axis_ref = "source" if "source_frame_idx" in df.columns else "analysis"
 
+    def _first_finite(series_like: object) -> float | None:
+        try:
+            values = pd.to_numeric(pd.Series(series_like), errors="coerce").to_numpy(
+                dtype="float64", copy=False
+            )
+        except Exception:
+            return None
+        mask = np.isfinite(values)
+        if not mask.any():
+            return None
+        return float(values[mask][0])
+
+    def _enforce_strictly_increasing(arr: np.ndarray, eps: float = 1e-3) -> np.ndarray:
+        if arr.size <= 1:
+            return arr
+        out = arr.copy()
+        if not np.isfinite(out[0]):
+            finite_mask = np.isfinite(out)
+            baseline = float(out[finite_mask][0]) if finite_mask.any() else 0.0
+            out[0] = baseline
+        last = out[0]
+        for i in range(1, out.size):
+            val = out[i]
+            if not np.isfinite(val) or val <= last:
+                out[i] = last + eps
+            last = out[i]
+        return out
+
     times_base = None
+    offset_auto: float | None = None
     if "source_time_s" in df.columns:
+        offset_auto = _first_finite(df["source_time_s"])
         times_base = _safe_numeric(df["source_time_s"], np.arange(n, dtype="float64") / fps_video)
     elif "time_s" in df.columns:
+        offset_auto = _first_finite(df["time_s"])
         times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps_video)
     elif "source_frame_idx" in df.columns:
         times_base = source_frames / fps_video
@@ -145,11 +176,11 @@ def _build_payload(
         times_base = np.arange(n, dtype="float64") / fps_video
 
     try:
-        offset_value = float(time_offset_s) if time_offset_s is not None else 0.0
+        offset_value = float(time_offset_s) if time_offset_s is not None else float(offset_auto or 0.0)
     except Exception:
         offset_value = 0.0
 
-    times_axis = times_base - offset_value
+    times_axis = _enforce_strictly_increasing(times_base - offset_value)
 
     times_arr = times_axis[idx]
     times = times_arr.tolist()
