@@ -132,14 +132,19 @@
   }
 
   function stateFromAxis(axisValue) {
-    const lookup = hasTimeAxis ? axisTimes : x;
-    if (!lookup.length) return { frame: 0, time: 0, x: axisValue, idx: 0 };
-    const idx = nearestIndex(axisValue, lookup);
-    const frameVal = Number.isFinite(axisFrames[idx]) ? axisFrames[idx] : idx;
+    const axisLookup = hasTimeAxis ? axisTimes : x;
+    const plotLookup = x;
+    if (!axisLookup.length && !plotLookup.length) {
+      return { frame: 0, time: 0, x: axisValue, axisIdx: 0, plotIdx: 0 };
+    }
+    const axisIdx = nearestIndex(axisValue, axisLookup.length ? axisLookup : plotLookup);
+    const plotIdx = nearestIndex(axisValue, plotLookup.length ? plotLookup : axisLookup);
+    const frameVal = Number.isFinite(axisFrames[axisIdx]) ? axisFrames[axisIdx] : axisIdx;
     const timeVal = hasTimeAxis
-      ? lookup[idx]
+      ? axisLookup[axisIdx]
       : (Number.isFinite(frameVal) && fps > 0 ? frameVal / fps : 0);
-    return { frame: frameVal, time: timeVal, x: axisValue, idx };
+    const xVal = plotLookup.length ? plotLookup[plotIdx] : axisValue;
+    return { frame: frameVal, time: timeVal, x: xVal, axisIdx, plotIdx };
   }
 
   function timeForFrame(frameVal) {
