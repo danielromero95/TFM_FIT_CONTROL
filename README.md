@@ -258,3 +258,7 @@ Protegen frente a entradas llenas de NaN para evitar `RuntimeWarning` de NumPy
 mientras se preserva el comportamiento actual.
 
 ---
+
+## NOTA:
+En entornos Windows, si el vídeo con landmarks no se genera, reinstalar opencv-python puede resolver conflictos de codecs (OpenH264/FFmpeg).
+uv pip uninstall opencv-python opencv-contrib-python opencv-python-headless uv pip install opencv-python 
