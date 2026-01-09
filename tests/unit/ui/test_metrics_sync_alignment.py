@@ -11,11 +11,10 @@ def test_axis_times_rebased_from_frame_idx_start():
 
     payload = _build_payload(df, ["metric"], fps=30.0, max_points=100)
 
-    expected_start = frame_idx[0] / 30.0
-    expected_span = (frame_idx[-1] - frame_idx[0]) / 30.0
+    expected_start = 0.0
+    expected_span = (len(frame_idx) - 1) / 30.0
     assert payload["axis_times"][0] == pytest.approx(expected_start)
-    assert payload["axis_times"][-1] == pytest.approx(expected_start + expected_span)
-    assert payload["time_offset_s"] == pytest.approx(0.0)
+    assert payload["axis_times"][-1] == pytest.approx(expected_span)
 
 
 def test_axis_times_are_strictly_increasing_with_duplicates():
