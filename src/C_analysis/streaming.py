@@ -291,7 +291,7 @@ def stream_pose_and_detection(
 
                 if prev_source_ts is not None and np.isfinite(prev_source_ts):
                     if not np.isfinite(ts_sec) or ts_sec <= prev_source_ts:
-                        ts_sec = prev_source_ts + 0.001
+                        ts_sec = prev_source_ts + max(1.0 / debug_fps, 0.001)
 
                 prev_source_ts = ts_sec if np.isfinite(ts_sec) else prev_source_ts
 
