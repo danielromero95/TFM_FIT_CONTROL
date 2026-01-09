@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
@@ -40,6 +41,17 @@ from .streaming import (
     infer_upright_quadrant_from_sequence,
     stream_pose_and_detection,
 )
+
+
+def _deep_copy_config(cfg: config.Config) -> config.Config:
+    if hasattr(cfg, "model_copy"):
+        return cfg.model_copy(deep=True)
+    if hasattr(cfg, "copy"):
+        try:
+            return cfg.copy(deep=True)
+        except TypeError:
+            return cfg.copy()
+    return copy.deepcopy(cfg)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +139,7 @@ def run_pipeline(
     preview_fps: Optional[float] = None,
 ) -> Report:
     """Ejecutar la pipeline completa utilizando `cfg` como fuente de verdad."""
+    cfg = _deep_copy_config(cfg)
 
     def notify(progress: int, message: str) -> None:
         logger.info(message)
