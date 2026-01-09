@@ -266,9 +266,6 @@ def stream_pose_and_detection(
             prev_overlay: Optional[np.ndarray] = None
             prev_overlay_ts: float = float("nan")
             prev_overlay_idx: int = 0
-            debug_frames_written = 0
-            debug_base_ts: float | None = None
-            debug_repeat_cap = int(math.ceil(debug_fps * 2.0))
 
             for analysis_idx, frame_info in enumerate(frames):
                 frames_processed += 1
@@ -429,24 +426,11 @@ def stream_pose_and_detection(
                                 int(source_frame_idx),
                                 debug_fps,
                             )
-                            if (
-                                debug_base_ts is not None
-                                and np.isfinite(prev_overlay_ts)
-                                and np.isfinite(ts_sec)
-                            ):
-                                desired_total = int(
-                                    round((float(ts_sec) - debug_base_ts) * debug_fps)
-                                )
-                                repeat = max(1, desired_total - debug_frames_written)
-                                repeat = min(repeat, debug_repeat_cap)
                             for _ in range(repeat):
                                 debug_writer.write(prev_overlay)
-                            debug_frames_written += repeat
                         prev_overlay = overlay_to_write
                         prev_overlay_ts = float(ts_sec)
                         prev_overlay_idx = int(source_frame_idx)
-                        if debug_base_ts is None and np.isfinite(ts_sec):
-                            debug_base_ts = float(ts_sec)
 
                 if emit_preview and preview_active and preview_callback is not None:
                     try:
