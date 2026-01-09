@@ -106,6 +106,32 @@ def test_writer_fps_fallback_and_counts(tmp_path, monkeypatch):
     assert factory.created[0].frames and len(factory.created[0].frames) == 3
 
 
+def test_writer_retime_uses_timestamps(tmp_path, monkeypatch):
+    output = tmp_path / "retimed.mp4"
+    frames = list(_make_test_frames(3))
+    factory = _WriterFactory()
+    monkeypatch.setattr(
+        "src.D_visualization.landmark_renderers._open_writer",
+        lambda path, fps, size, prefs: factory.open(path, fps, size, prefs),
+    )
+
+    timestamps = [0.0, 0.10, 0.20]
+    stats = render_landmarks_video(
+        frames,
+        [None, None, None],
+        None,
+        str(output),
+        fps=30.0,
+        processed_size=(256, 256),
+        timestamps=timestamps,
+    )
+
+    assert stats.frames_in == 3
+    assert stats.frames_written == 7
+    assert output.exists()
+    assert factory.created[0].frames and len(factory.created[0].frames) == 7
+
+
 def test_writer_codec_fallback(tmp_path, monkeypatch):
     output = tmp_path / "fallback.mp4"
     frames = list(_make_test_frames(2))

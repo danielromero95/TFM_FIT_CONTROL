@@ -16,6 +16,7 @@ from .landmark_geometry import _estimate_subject_bbox, _normalize_points_for_fra
 from .landmark_overlay_styles import OverlayStyle, RenderStats
 from .landmark_transforms import _normalize_rotation_deg, _rotate_frame
 from .landmark_video_io import DEFAULT_CODEC_PREFERENCE, _open_writer
+from src.core.video_timing import RetimeWriter
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,8 @@ def render_landmarks_video(
     fps: float,
     *,
     processed_size: tuple[int, int],
+    timestamps: Sequence[float] | None = None,
+    source_indices: Sequence[int] | None = None,
     style: OverlayStyle | None = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
@@ -293,8 +296,19 @@ def render_landmarks_video(
             writer_size,
             codec_preference,
         )
-        writer.write(frame_to_write)
-        frames_written += 1
+        retimer = RetimeWriter(fps) if timestamps is not None else None
+
+        if retimer is not None:
+            ts0 = _safe_get(timestamps, 0)
+            idx0 = _safe_get(source_indices, 0) if source_indices is not None else 0
+            fallback_ts = float(idx0) / float(retimer.fps_out) if retimer.fps_out > 0 else float("nan")
+            retimer.prime(float(ts0) if ts0 is not None else float("nan"), fallback_ts)
+            prev_frame = frame_to_write
+        else:
+            writer.write(frame_to_write)
+            frames_written += 1
+            prev_frame = None
+
         frames_in += 1
         if progress_cb:
             try:
@@ -309,13 +323,36 @@ def render_landmarks_video(
             frame_to_write = _process_frame(idx, fr)
             if writer_size and (frame_to_write.shape[1], frame_to_write.shape[0]) != writer_size:
                 frame_to_write = cv2.resize(frame_to_write, writer_size)
-            writer.write(frame_to_write)
-            frames_written += 1
+
+            if retimer is not None and prev_frame is not None:
+                ts_raw = _safe_get(timestamps, idx)
+                fallback_idx = _safe_get(source_indices, idx) if source_indices is not None else idx
+                fallback_ts = (
+                    float(fallback_idx) / float(retimer.fps_out)
+                    if retimer.fps_out > 0
+                    else float("nan")
+                )
+                repeat = retimer.repeats_for_next(
+                    float(ts_raw) if ts_raw is not None else float("nan"),
+                    fallback_ts,
+                )
+                for _ in range(repeat):
+                    writer.write(prev_frame)
+                    frames_written += 1
+                prev_frame = frame_to_write
+            else:
+                writer.write(frame_to_write)
+                frames_written += 1
+
             if progress_cb and (idx % 10 == 0):
                 try:
                     progress_cb(frames_written, frames_in)
                 except Exception:
                     pass
+
+        if retimer is not None and prev_frame is not None:
+            writer.write(prev_frame)
+            frames_written += 1
     finally:
         if writer:
             writer.release()

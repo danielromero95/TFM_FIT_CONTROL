@@ -12,7 +12,6 @@ pruebas.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Optional
@@ -39,39 +38,12 @@ from src.exercise_detection.exercise_detector import (
     IncrementalExerciseFeatureExtractor,
 )
 from src.core.types import ExerciseType, ViewType
+from src.core.video_timing import RetimeWriter
 
 logger = logging.getLogger(__name__)
 
 # Prioriza mp4v para evitar dependencias de libopenh264 en Windows.
 _DEBUG_VIDEO_CODECS = ("mp4v", "avc1", "XVID", "H264")
-
-
-def compute_repeat(
-    prev_ts: float,
-    curr_ts: float,
-    prev_source_idx: int,
-    curr_source_idx: int,
-    debug_fps: float,
-) -> int:
-    """Calcular cuántas veces repetir un *frame* para preservar el tiempo real.
-
-    Se basa en los *timestamps* si son válidos; de lo contrario, usa el salto de
-    índices de cuadros de origen como aproximación.
-    """
-
-    fps = float(debug_fps) if debug_fps and debug_fps > 0 else 30.0
-    max_repeat = int(math.ceil(fps * 2.0))
-
-    if np.isfinite(prev_ts) and np.isfinite(curr_ts):
-        dt = float(curr_ts) - float(prev_ts)
-        if dt <= 0:
-            dt = max(1.0 / fps, 0.001)
-        repeat = max(1, int(round(dt * fps)))
-    else:
-        gap = max(1, int(curr_source_idx) - int(prev_source_idx))
-        repeat = int(gap)
-
-    return int(min(max_repeat, repeat))
 
 
 @dataclass
@@ -264,8 +236,7 @@ def stream_pose_and_detection(
         ) as estimator:
             prev_source_ts: float | None = None
             prev_overlay: Optional[np.ndarray] = None
-            prev_overlay_ts: float = float("nan")
-            prev_overlay_idx: int = 0
+            retimer = RetimeWriter(debug_fps)
 
             for analysis_idx, frame_info in enumerate(frames):
                 frames_processed += 1
@@ -418,19 +389,18 @@ def stream_pose_and_detection(
                             debug_path = debug_video_path
                     if debug_writer is not None:
                         overlay_to_write = ensure_overlay_frame()
+                        fallback_ts = (
+                            float(source_frame_idx) / float(debug_fps)
+                            if debug_fps > 0
+                            else float("nan")
+                        )
                         if prev_overlay is not None:
-                            repeat = compute_repeat(
-                                prev_overlay_ts,
-                                float(ts_sec),
-                                prev_overlay_idx,
-                                int(source_frame_idx),
-                                debug_fps,
-                            )
+                            repeat = retimer.repeats_for_next(float(ts_sec), fallback_ts)
                             for _ in range(repeat):
                                 debug_writer.write(prev_overlay)
+                        else:
+                            retimer.prime(float(ts_sec), fallback_ts)
                         prev_overlay = overlay_to_write
-                        prev_overlay_ts = float(ts_sec)
-                        prev_overlay_idx = int(source_frame_idx)
 
                 if emit_preview and preview_active and preview_callback is not None:
                     try:

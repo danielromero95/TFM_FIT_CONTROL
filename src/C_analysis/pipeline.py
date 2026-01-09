@@ -407,7 +407,9 @@ def run_pipeline(
                         pct = base
                     notify(pct, f"EXTRA STAGE: Rendering debug video... ({written}/{total})")
 
-                base_overlay_fps = fps_effective if fps_effective > 0 else fps_original
+                base_overlay_fps = fps_original if fps_original > 0 else fps_from_reader
+                if base_overlay_fps <= 0:
+                    base_overlay_fps = fps_effective
                 overlay_cap_raw = getattr(cfg.debug, "overlay_fps_cap", 0.0)
                 try:
                     overlay_cap_value = float(overlay_cap_raw)
@@ -426,6 +428,24 @@ def run_pipeline(
                     frame_sequence=filtered_sequence,
                     crop_boxes=crop_boxes,
                     processed_size=processed_frame_size or target_size,
+                    timestamps=(
+                        df_raw_landmarks["source_time_s"].to_list()
+                        if "source_time_s" in df_raw_landmarks.columns
+                        else (
+                            df_raw_landmarks["time_s"].to_list()
+                            if "time_s" in df_raw_landmarks.columns
+                            else None
+                        )
+                    ),
+                    source_indices=(
+                        df_raw_landmarks["source_frame_idx"].to_list()
+                        if "source_frame_idx" in df_raw_landmarks.columns
+                        else (
+                            df_raw_landmarks["analysis_frame_idx"].to_list()
+                            if "analysis_frame_idx" in df_raw_landmarks.columns
+                            else None
+                        )
+                    ),
                     rotate=processing_rotate,
                     sample_rate=sample_rate,
                     target_fps=target_fps_for_sampling,

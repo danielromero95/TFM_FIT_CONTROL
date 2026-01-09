@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -85,6 +85,8 @@ def generate_overlay_video(
     frame_sequence: np.ndarray,
     crop_boxes: Optional[np.ndarray],
     processed_size: Optional[tuple[int, int]],
+    timestamps: Sequence[float] | None = None,
+    source_indices: Sequence[int] | None = None,
     rotate: int,
     sample_rate: int,
     target_fps: Optional[float],
@@ -129,6 +131,16 @@ def generate_overlay_video(
                 y_val = float(row.get(f"y{i}", float("nan")))
                 frame_landmarks.append({"x": x_val, "y": y_val})
             normalized_sequence.append(frame_landmarks)
+        if timestamps is None:
+            if "source_time_s" in frame_sequence.columns:
+                timestamps = frame_sequence["source_time_s"].to_list()
+            elif "time_s" in frame_sequence.columns:
+                timestamps = frame_sequence["time_s"].to_list()
+        if source_indices is None:
+            if "source_frame_idx" in frame_sequence.columns:
+                source_indices = frame_sequence["source_frame_idx"].to_list()
+            elif "analysis_frame_idx" in frame_sequence.columns:
+                source_indices = frame_sequence["analysis_frame_idx"].to_list()
         frame_sequence = normalized_sequence  # type: ignore[assignment]
 
     processed_w = int(processed_size[0])
@@ -157,6 +169,8 @@ def generate_overlay_video(
         str(overlay_path),
         fps=float(fps_value),
         processed_size=(processed_w, processed_h),
+        timestamps=timestamps,
+        source_indices=source_indices,
         output_rotate=output_rotate,
         tighten_to_subject=False,
         subject_margin=0.15,
