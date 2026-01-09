@@ -46,6 +46,34 @@ logger = logging.getLogger(__name__)
 _DEBUG_VIDEO_CODECS = ("mp4v", "avc1", "XVID", "H264")
 
 
+def compute_repeat(
+    prev_ts: float,
+    curr_ts: float,
+    prev_source_idx: int,
+    curr_source_idx: int,
+    debug_fps: float,
+) -> int:
+    """Calcular cuántas veces repetir un *frame* para preservar el tiempo real.
+
+    Se basa en los *timestamps* si son válidos; de lo contrario, usa el salto de
+    índices de cuadros de origen como aproximación.
+    """
+
+    fps = float(debug_fps) if debug_fps and debug_fps > 0 else 30.0
+    max_repeat = int(math.ceil(fps * 2.0))
+
+    if np.isfinite(prev_ts) and np.isfinite(curr_ts):
+        dt = float(curr_ts) - float(prev_ts)
+        if dt <= 0:
+            dt = max(1.0 / fps, 0.001)
+        repeat = max(1, int(round(dt * fps)))
+    else:
+        gap = max(1, int(curr_source_idx) - int(prev_source_idx))
+        repeat = int(gap)
+
+    return int(min(max_repeat, repeat))
+
+
 @dataclass
 class StreamingPoseResult:
     """Objeto con los resultados del *streaming* de pose y detección."""
@@ -206,9 +234,19 @@ def stream_pose_and_detection(
     debug_writer: Optional[cv2.VideoWriter] = None
     debug_style = OverlayStyle()
     debug_path: Optional[Path] = None
-    debug_fps = float(debug_video_fps or detection_target_fps)
-    if debug_fps <= 0:
-        debug_fps = float(detection_target_fps)
+    debug_fps = next(
+        (
+            fps_value
+            for fps_value in (
+                float(debug_video_fps or 0.0),
+                float(detection_source_fps or 0.0),
+                float(detection_ts_fps or 0.0),
+                30.0,
+            )
+            if fps_value > 0
+        ),
+        30.0,
+    )
 
     estimator_cls = (
         RoiPoseEstimator
@@ -225,6 +263,12 @@ def stream_pose_and_detection(
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:
             prev_source_ts: float | None = None
+            prev_overlay: Optional[np.ndarray] = None
+            prev_overlay_ts: float = float("nan")
+            prev_overlay_idx: int = 0
+            debug_frames_written = 0
+            debug_base_ts: float | None = None
+            debug_repeat_cap = int(math.ceil(debug_fps * 2.0))
 
             for analysis_idx, frame_info in enumerate(frames):
                 frames_processed += 1
@@ -250,7 +294,7 @@ def stream_pose_and_detection(
 
                 if prev_source_ts is not None and np.isfinite(prev_source_ts):
                     if not np.isfinite(ts_sec) or ts_sec <= prev_source_ts:
-                        ts_sec = prev_source_ts + 0.001
+                        ts_sec = prev_source_ts + max(1.0 / debug_fps, 0.001)
 
                 prev_source_ts = ts_sec if np.isfinite(ts_sec) else prev_source_ts
 
@@ -376,7 +420,33 @@ def stream_pose_and_detection(
                         else:
                             debug_path = debug_video_path
                     if debug_writer is not None:
-                        debug_writer.write(ensure_overlay_frame())
+                        overlay_to_write = ensure_overlay_frame()
+                        if prev_overlay is not None:
+                            repeat = compute_repeat(
+                                prev_overlay_ts,
+                                float(ts_sec),
+                                prev_overlay_idx,
+                                int(source_frame_idx),
+                                debug_fps,
+                            )
+                            if (
+                                debug_base_ts is not None
+                                and np.isfinite(prev_overlay_ts)
+                                and np.isfinite(ts_sec)
+                            ):
+                                desired_total = int(
+                                    round((float(ts_sec) - debug_base_ts) * debug_fps)
+                                )
+                                repeat = max(1, desired_total - debug_frames_written)
+                                repeat = min(repeat, debug_repeat_cap)
+                            for _ in range(repeat):
+                                debug_writer.write(prev_overlay)
+                            debug_frames_written += repeat
+                        prev_overlay = overlay_to_write
+                        prev_overlay_ts = float(ts_sec)
+                        prev_overlay_idx = int(source_frame_idx)
+                        if debug_base_ts is None and np.isfinite(ts_sec):
+                            debug_base_ts = float(ts_sec)
 
                 if emit_preview and preview_active and preview_callback is not None:
                     try:
@@ -385,6 +455,8 @@ def stream_pose_and_detection(
                     except Exception:  # pragma: no cover - mejor esfuerzo desde la UI
                         preview_active = False
                         logger.exception("Preview callback failed; disabling previews for this run")
+            if debug_writer is not None and prev_overlay is not None:
+                debug_writer.write(prev_overlay)
     finally:
         if debug_writer is not None:
             debug_writer.release()

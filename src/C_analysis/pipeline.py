@@ -304,7 +304,7 @@ def run_pipeline(
             detection_enabled=prefetched_detection is None,
             detection_source_fps=detection_source,
             debug_video_path=None,
-            debug_video_fps=fps_effective if fps_effective > 0 else detection_source,
+            debug_video_fps=(fps_original if fps_original > 0 else fps_from_reader),
             preview_callback=preview_cb_to_use,
             preview_fps=(
                 preview_fps_to_use
