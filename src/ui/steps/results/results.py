@@ -27,7 +27,11 @@ except Exception:
 from src.A_preprocessing.video_metadata import get_video_metadata
 from src.C_analysis.repetition_counter import count_repetitions_with_config
 from src.pipeline_data import Report, RunStats
-from src.ui.metrics_catalog import human_metric_name, metric_base_description
+from src.ui.metrics_catalog import (
+    human_metric_name,
+    is_user_facing_metric,
+    metric_base_description,
+)
 from src.ui.metrics_sync import render_video_with_metrics_sync
 from src.ui.metrics_sync.run_tokens import (
     metrics_chart_key as _metrics_chart_key,
@@ -685,6 +689,26 @@ def _emit_metric_help_script(widget_key: str, metric_help: Dict[str, Dict[str, s
         """,
         unsafe_allow_html=True,
     )
+
+
+def _prepare_metrics_df_for_display(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    if metrics_df is None:
+        return metrics_df
+    display_df = metrics_df.copy()
+    if "trunk_inclination_deg" not in display_df.columns:
+        return display_df
+    trunk_series = pd.to_numeric(display_df["trunk_inclination_deg"], errors="coerce")
+    values = trunk_series.to_numpy()
+    if not np.isfinite(values).any():
+        return display_df
+    try:
+        p95 = float(np.nanpercentile(values, 95))
+    except (TypeError, ValueError):
+        p95 = np.nan
+    max_val = float(np.nanmax(values))
+    if (not np.isnan(p95) and p95 < 30.0) or (not np.isnan(max_val) and max_val < 45.0):
+        display_df["trunk_inclination_deg"] = 90.0 - trunk_series
+    return display_df
 
 
 def _compute_rep_intervals(
@@ -1494,7 +1518,9 @@ def _results_panel() -> Dict[str, bool]:
                     if metrics_df[c].dtype.kind in "fi" and c != "frame_idx"
                 ]
                 numeric_columns = numeric_candidates
-            metric_options = numeric_columns
+            metric_options = [
+                c for c in numeric_columns if is_user_facing_metric(c)
+            ]
             rep_intervals: List[Tuple[int, int]] = []
             valley_frames: List[int] = []
             frame_values = pd.Series(dtype=float)
@@ -1603,9 +1629,10 @@ def _results_panel() -> Dict[str, bool]:
                             exercise_key=exercise_key,
                             fps_effective=fps_for_sync,
                         )
+                        display_metrics_df = _prepare_metrics_df_for_display(metrics_df)
                         render_video_with_metrics_sync(
                             video_path=None,
-                            metrics_df=metrics_df,
+                            metrics_df=display_metrics_df,
                             selected_metrics=selected_metrics,
                             fps=fps_for_sync,
                             rep_intervals=rep_intervals,

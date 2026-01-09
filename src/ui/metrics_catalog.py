@@ -109,3 +109,25 @@ def metric_base_description(metric: str, exercise: str) -> str | None:
     if exercise in base:
         return base[exercise]
     return base.get("default", None)
+
+
+def is_user_facing_metric(name: str) -> bool:
+    """Return True when a metric should be shown in the UI selector."""
+
+    if not name:
+        return False
+    excluded = {
+        "analysis_frame_idx",
+        "frame_idx",
+        "source_frame_idx",
+        "time_s",
+        "source_time_s",
+        "pose_ok",
+    }
+    if name in excluded:
+        return False
+    if name.endswith("_idx"):
+        return False
+    if "time" in name and name.endswith("_s"):
+        return False
+    return True
