@@ -255,6 +255,7 @@ def _process_with_recovery(
     pose_graph: object,
     rgb_image: np.ndarray,
     *,
+    run_id: str,
     static_image_mode: bool,
     model_complexity: int,
     min_detection_confidence: float,
@@ -283,6 +284,7 @@ def _process_with_recovery(
         return results
 
     fallback_pose, key = PoseGraphPool.acquire(
+        run_id=run_id,
         static_image_mode=True,
         model_complexity=max(model_complexity, 2),
         min_detection_confidence=min_detection_confidence,
@@ -299,6 +301,7 @@ def _process_with_recovery(
 class PoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
+        run_id: str = "default",
         static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
@@ -318,6 +321,7 @@ class PoseEstimator(PoseEstimatorBase):
         self.smooth_landmarks = smooth_landmarks
         self.enable_segmentation = enable_segmentation
         self.enable_recovery_pass = enable_recovery_pass
+        self.run_id = str(run_id)
         self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
         self.reliability_min_visibility = reliability_min_visibility
         self._smoother = (
@@ -334,7 +338,7 @@ class PoseEstimator(PoseEstimatorBase):
         else:
             self.landmark_pb2 = None
         self.pose = None
-        self._key: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._key: Optional[Tuple[str, bool, int, float, float, bool, bool]] = None
         self._misses = 0
         self._debug_recorder = debug_recorder
         PoseGraphPool._ensure_imports()
@@ -344,6 +348,7 @@ class PoseEstimator(PoseEstimatorBase):
     def _ensure_pose(self) -> None:
         if self.pose is None:
             self.pose, self._key = PoseGraphPool.acquire(
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -358,6 +363,7 @@ class PoseEstimator(PoseEstimatorBase):
         results = _process_with_recovery(
             self.pose,
             rgb_image,
+            run_id=self.run_id,
             static_image_mode=self.static_image_mode,
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
@@ -405,6 +411,7 @@ class PoseEstimator(PoseEstimatorBase):
 class CroppedPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
+        run_id: str = "default",
         static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
@@ -428,6 +435,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         self.smooth_landmarks = smooth_landmarks
         self.enable_segmentation = enable_segmentation
         self.enable_recovery_pass = enable_recovery_pass
+        self.run_id = str(run_id)
         self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
         self.reliability_min_visibility = reliability_min_visibility
         self._smoother = (
@@ -437,8 +445,8 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         )
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float, float, bool, bool]] = None
-        self._key_crop: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._key_full: Optional[Tuple[str, bool, int, float, float, bool, bool]] = None
+        self._key_crop: Optional[Tuple[str, bool, int, float, float, bool, bool]] = None
         self.smooth_factor = 0.65
         self._smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
         self._misses_full = 0
@@ -458,6 +466,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
             self.pose_full, self._key_full = PoseGraphPool.acquire(
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -467,6 +476,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -501,6 +511,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         results_full = _process_with_recovery(
             self.pose_full,
             rgb_image,
+            run_id=self.run_id,
             static_image_mode=self.static_image_mode,
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
@@ -563,6 +574,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
         results_crop = _process_with_recovery(
             self.pose_crop,
             crop_rgb,
+            run_id=self.run_id,
             static_image_mode=self.static_image_mode,
             model_complexity=self.model_complexity,
             min_detection_confidence=self.min_detection_confidence,
@@ -632,6 +644,7 @@ class CroppedPoseEstimator(PoseEstimatorBase):
 class RoiPoseEstimator(PoseEstimatorBase):
     def __init__(
         self,
+        run_id: str = "default",
         static_image_mode: bool = False,
         model_complexity: int = MODEL_COMPLEXITY,
         min_detection_confidence: float = MIN_DETECTION_CONFIDENCE,
@@ -670,6 +683,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.smooth_landmarks = smooth_landmarks
         self.enable_segmentation = enable_segmentation
         self.enable_recovery_pass = enable_recovery_pass
+        self.run_id = str(run_id)
         self.recovery_miss_threshold = max(1, int(recovery_miss_threshold))
         self.reliability_min_visibility = reliability_min_visibility
         self._smoother = (
@@ -692,14 +706,15 @@ class RoiPoseEstimator(PoseEstimatorBase):
         self.landmark_pb2 = landmark_pb2
         self.pose_full = None
         self.pose_crop = None
-        self._key_full: Optional[Tuple[bool, int, float, float, bool, bool]] = None
-        self._key_crop: Optional[Tuple[bool, int, float, float, bool, bool]] = None
+        self._key_full: Optional[Tuple[str, bool, int, float, float, bool, bool]] = None
+        self._key_crop: Optional[Tuple[str, bool, int, float, float, bool, bool]] = None
         self._recovery_misses_full = 0
         self._recovery_misses_crop = 0
 
     def _ensure_graphs(self) -> None:
         if self.pose_full is None:
             self.pose_full, self._key_full = PoseGraphPool.acquire(
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -709,6 +724,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
             )
         if self.pose_crop is None:
             self.pose_crop, self._key_crop = PoseGraphPool.acquire(
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -735,6 +751,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
             results_full = _process_with_recovery(
                 self.pose_full,
                 rgb_image,
+                run_id=self.run_id,
                 static_image_mode=self.static_image_mode,
                 model_complexity=self.model_complexity,
                 min_detection_confidence=self.min_detection_confidence,
@@ -800,6 +817,7 @@ class RoiPoseEstimator(PoseEstimatorBase):
                 results_crop = _process_with_recovery(
                     self.pose_crop,
                     crop_rgb,
+                    run_id=self.run_id,
                     static_image_mode=self.static_image_mode,
                     model_complexity=self.model_complexity,
                     min_detection_confidence=self.min_detection_confidence,

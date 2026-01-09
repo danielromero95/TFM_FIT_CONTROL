@@ -180,6 +180,7 @@ def stream_pose_and_detection(
     debug_video_fps: float,
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
+    run_id: str = "default",
 ) -> StreamingPoseResult:
     """Recorrer los cuadros ejecutando pose, detección y vistas previas según la configuración."""
 
@@ -258,6 +259,7 @@ def stream_pose_and_detection(
 
     try:
         with estimator_cls(
+            run_id=run_id,
             static_image_mode=False,
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,

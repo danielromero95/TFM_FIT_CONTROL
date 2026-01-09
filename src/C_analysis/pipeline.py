@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
+import random
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -16,7 +19,9 @@ import pandas as pd
 
 from src import config
 from src.A_preprocessing.frame_extraction import extract_frames_stream
+from src.A_preprocessing.frame_extraction.state import FrameInfo
 from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
+from src.B_pose_estimation.estimators.mediapipe_pool import PoseGraphPool
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
 from .errors import NoFramesExtracted
@@ -53,6 +58,28 @@ def _deep_copy_config(cfg: config.Config) -> config.Config:
             return cfg.copy()
     return copy.deepcopy(cfg)
 
+
+class _FrameChecksumTracker:
+    """Acumular un checksum estable de los primeros frames preprocesados."""
+
+    def __init__(self, max_frames: int = 5) -> None:
+        self.max_frames = max(1, int(max_frames))
+        self._hasher = hashlib.sha1()
+        self.frames_hashed = 0
+
+    def update(self, frame: np.ndarray) -> None:
+        if self.frames_hashed >= self.max_frames:
+            return
+        self._hasher.update(str(frame.shape).encode("utf-8"))
+        self._hasher.update(str(frame.dtype).encode("utf-8"))
+        self._hasher.update(frame.tobytes())
+        self.frames_hashed += 1
+
+    def digest(self) -> Optional[str]:
+        if self.frames_hashed <= 0:
+            return None
+        return self._hasher.hexdigest()
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,6 +92,19 @@ def _notify(cb: Optional[Callable[..., None]], progress: int, message: str) -> N
         cb(progress, message)
     except TypeError:
         cb(progress)
+
+
+def _reset_run_state() -> None:
+    """Restablecer fuentes de estado global para un run determinista."""
+
+    # Semillas de RNG solo para eliminar variación entre runs.
+    random.seed(0)
+    np.random.seed(0)
+    try:
+        cv2.setNumThreads(1)
+        cv2.ocl.setUseOpenCL(False)
+    except Exception:
+        logger.debug("Ajustes deterministas de OpenCV no disponibles", exc_info=True)
 
 
 def _attach_temporal_columns(
@@ -140,6 +180,8 @@ def run_pipeline(
 ) -> Report:
     """Ejecutar la pipeline completa utilizando `cfg` como fuente de verdad."""
     cfg = _deep_copy_config(cfg)
+    _reset_run_state()
+    run_id = uuid.uuid4().hex
 
     def notify(progress: int, message: str) -> None:
         logger.info(message)
@@ -170,6 +212,7 @@ def run_pipeline(
     df_raw_landmarks: Optional[pd.DataFrame] = None
     fps_original = 0.0
     t1 = t0
+    checksum_tracker = _FrameChecksumTracker(max_frames=5)
 
     detected_label = ExerciseType.UNKNOWN
     detected_view = ViewType.UNKNOWN
@@ -281,6 +324,15 @@ def run_pipeline(
                 progress_callback=None,
             )
 
+        def _iter_with_checksum(frames):
+            for frame_info in frames:
+                frame = frame_info.array if isinstance(frame_info, FrameInfo) else frame_info
+                if isinstance(frame, np.ndarray):
+                    checksum_tracker.update(frame)
+                yield frame_info
+
+        raw_iter = _iter_with_checksum(raw_iter)
+
         t1 = time.perf_counter()
         notify(25, "STAGE 2: Estimating pose on frames...")
         detection_source = fps_effective if fps_effective > 0 else fps_original
@@ -324,6 +376,7 @@ def run_pipeline(
                 if preview_fps_to_use is not None
                 else getattr(getattr(cfg, "debug", object()), "preview_fps", None)
             ),
+            run_id=run_id,
         )
         df_raw_landmarks = streaming_result.df_landmarks
         frames_processed = streaming_result.frames_processed
@@ -347,6 +400,16 @@ def run_pipeline(
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
         cap.release()
+        PoseGraphPool.close_run(run_id)
+
+        checksum_digest = checksum_tracker.digest()
+        if checksum_digest:
+            message = (
+                "Frame checksum (first "
+                f"{checksum_tracker.frames_hashed} after preprocess) = {checksum_digest}"
+            )
+            debug_notes.append(message)
+            logger.info(message)
 
     if df_raw_landmarks is None:
         raise NoFramesExtracted("No frames could be extracted from the video.")
