@@ -12,7 +12,7 @@ import zipfile
 from dataclasses import fields
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Literal, Tuple
 
 import altair as alt
 import numpy as np
@@ -1048,6 +1048,88 @@ def normalize_exercise_key(exercise_key: str | None) -> str:
         return ""
 
 
+def turning_extreme(
+    exercise_key: str | None, primary_metric: str | None
+) -> Literal["min", "max"]:
+    """Return the turning extreme for the exercise based on the primary metric."""
+
+    bottom_extreme = _metric_extreme(primary_metric)
+    top_extreme = "max" if bottom_extreme == "min" else "min"
+    exercise = normalize_exercise_key(exercise_key)
+    if exercise == "deadlift":
+        return top_extreme
+    return bottom_extreme
+
+
+def _compute_rep_splits(
+    metrics_df: pd.DataFrame | None,
+    rep_intervals: List[Tuple[int, int]],
+    *,
+    primary_metric: str | None,
+    exercise_key: str | None,
+    fps_effective: float | int,
+) -> List[Tuple[float, float, float]]:
+    """Compute per-rep split seconds based on the turning point of the primary metric."""
+
+    if not rep_intervals:
+        return []
+
+    fps = float(fps_effective) if float(fps_effective) > 0 else 1.0
+    use_max = turning_extreme(exercise_key, primary_metric) == "max"
+
+    values: np.ndarray | None = None
+    if metrics_df is not None and primary_metric and primary_metric in metrics_df.columns:
+        try:
+            values = pd.to_numeric(metrics_df[primary_metric], errors="coerce").to_numpy(
+                dtype="float64", copy=False
+            )
+        except Exception:
+            values = None
+
+    rep_splits: List[Tuple[float, float, float]] = []
+    max_index = len(values) - 1 if values is not None else -1
+
+    for start_frame, end_frame in rep_intervals:
+        try:
+            start_idx = int(start_frame)
+            end_idx = int(end_frame)
+        except Exception:
+            continue
+
+        if end_idx < start_idx:
+            start_idx, end_idx = end_idx, start_idx
+
+        if max_index >= 0:
+            start_idx = max(0, min(start_idx, max_index))
+            end_idx = max(0, min(end_idx, max_index))
+
+        start_s = start_idx / fps
+        end_s = end_idx / fps
+        split_s = (start_s + end_s) / 2.0
+
+        if values is not None and max_index >= 0:
+            window = values[start_idx : end_idx + 1]
+            finite_mask = np.isfinite(window)
+            if finite_mask.any():
+                window_valid = window.copy()
+                window_valid[~finite_mask] = np.nan
+                try:
+                    pos = int(np.nanargmax(window_valid) if use_max else np.nanargmin(window_valid))
+                    split_frame = start_idx + pos
+                    split_s = split_frame / fps
+                except ValueError:
+                    split_s = (start_s + end_s) / 2.0
+
+        if split_s < start_s:
+            split_s = start_s
+        elif split_s > end_s:
+            split_s = end_s
+
+        rep_splits.append((start_s, split_s, end_s))
+
+    return rep_splits
+
+
 def _compute_rep_speeds(
     rep_intervals: List[Tuple[int, int]],
     stats: RunStats,
@@ -1514,12 +1596,20 @@ def _results_panel() -> Dict[str, bool]:
                             thresholds.append(value)
 
                         fps_for_sync = getattr(stats, "fps_effective", 0.0)
+                        rep_splits = _compute_rep_splits(
+                            metrics_df,
+                            rep_intervals,
+                            primary_metric=primary_metric,
+                            exercise_key=exercise_key,
+                            fps_effective=fps_for_sync,
+                        )
                         render_video_with_metrics_sync(
                             video_path=None,
                             metrics_df=metrics_df,
                             selected_metrics=selected_metrics,
                             fps=fps_for_sync,
                             rep_intervals=rep_intervals,
+                            rep_splits=rep_splits,
                             thresholds=thresholds,
                             start_at_s=None,
                             scroll_zoom=True,

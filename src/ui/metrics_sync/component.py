@@ -155,6 +155,7 @@ def render_video_with_metrics_sync(
     selected_metrics: Sequence[str],
     fps: float | int,
     rep_intervals: list[tuple[int, int]] | None = None,
+    rep_splits: list[tuple[float, float, float]] | None = None,
     thresholds: Sequence[float] | float | None = None,
     start_at_s: float | None = None,
     scroll_zoom: bool = True,
@@ -174,6 +175,7 @@ def render_video_with_metrics_sync(
 
     payload = _build_payload(metrics_df, selected_metrics, fps=fps)
     payload["rep"] = _rep_intervals_to_seconds(rep_intervals or [], float(payload["fps"]))
+    payload["rep_splits"] = rep_splits or []
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []
     if thresholds is not None:
