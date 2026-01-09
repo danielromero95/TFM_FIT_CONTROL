@@ -147,7 +147,29 @@
     return { frame: frameVal, time: timeVal, axisTime, x: xVal, axisIdx, plotIdx, idx: plotIdx };
   }
 
-  if (Array.isArray(DATA.rep)) {
+  const repSplits = Array.isArray(DATA.rep_splits) ? DATA.rep_splits : [];
+  if (repSplits.length) {
+    repSplits.forEach(([startS, splitS, endS]) => {
+      if (![startS, splitS, endS].every(Number.isFinite)) return;
+      let start = hasTimeAxis ? startS : startS * fps;
+      let split = hasTimeAxis ? splitS : splitS * fps;
+      let end = hasTimeAxis ? endS : endS * fps;
+      if (!Number.isFinite(start) || !Number.isFinite(split) || !Number.isFinite(end)) return;
+      if (end < start) [start, end] = [end, start];
+      if (split < start) split = start;
+      if (split > end) split = end;
+      bands.push({
+        type: "rect", xref: "x", yref: "paper",
+        x0: start, x1: split,
+        y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.06)", line: { width: 0 }
+      });
+      bands.push({
+        type: "rect", xref: "x", yref: "paper",
+        x0: split, x1: end,
+        y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.11)", line: { width: 0 }
+      });
+    });
+  } else if (Array.isArray(DATA.rep)) {
     DATA.rep.forEach(([f0, f1]) => {
       const start = hasTimeAxis ? f0 : f0 * fps;
       const end = hasTimeAxis ? f1 : f1 * fps;
@@ -157,10 +179,10 @@
         y0: 0, y1: 1, fillcolor: "rgba(160,160,160,0.15)", line: { width: 0 }
       });
     });
-    if (bands.length) {
-      const shapes = [cursor, ...thrShapes, ...bands];
-      Plotly.relayout(plot, { shapes });
-    }
+  }
+  if (bands.length) {
+    const shapes = [cursor, ...thrShapes, ...bands];
+    Plotly.relayout(plot, { shapes });
   }
 
   function setCursorForAxis(axisValue) {
