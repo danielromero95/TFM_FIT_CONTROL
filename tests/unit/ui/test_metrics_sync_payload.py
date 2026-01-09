@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.ui.metrics_sync.component import _build_payload, _map_rep_intervals_to_axis
+from src.ui.metrics_sync.component import _build_payload, _rep_intervals_to_seconds
 
 
 def test_build_payload_stride_and_nan_mapping():
@@ -50,7 +50,7 @@ def test_build_payload_stride_and_nan_mapping():
     assert len(payload["series"]["metric_b"]) == L
 
 
-def test_axis_times_use_source_time_with_auto_offset():
+def test_axis_times_use_cfr_timebase_even_with_source_time():
     source_time = [0.05, 0.12, 0.18, 0.27]
     df = pd.DataFrame(
         {
@@ -60,55 +60,23 @@ def test_axis_times_use_source_time_with_auto_offset():
         }
     )
 
-    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
+    fps = 30.0
+    payload = _build_payload(df, ["metric"], fps=fps, max_points=10)
 
-    expected_axis = [v - source_time[0] for v in source_time]
+    expected_axis = [i / fps for i in range(len(source_time))]
 
     assert payload["axis_times"] == pytest.approx(expected_axis)
-    assert payload["time_offset_s"] == pytest.approx(source_time[0])
-    assert payload["axis_ref"] == "source"
+    assert payload["axis_times"][-1] == pytest.approx((len(source_time) - 1) / fps)
 
 
-def test_time_offset_applied_when_requested():
+def test_axis_times_ignore_time_offset_input():
     time_values = [1.5, 1.54, 1.6]
     df = pd.DataFrame({"time_s": time_values, "metric": [1, 2, 3]})
 
     payload = _build_payload(df, ["metric"], fps=30.0, max_points=10, time_offset_s=1.5)
 
-    assert payload["time_offset_s"] == pytest.approx(1.5)
     assert payload["axis_times"][0] == pytest.approx(0.0)
-    assert payload["times"][0] == pytest.approx(0.0)
-    assert payload["axis_times"][-1] == pytest.approx(time_values[-1] - 1.5)
-
-
-def test_source_time_offset_preserved_and_rebased():
-    source_time = [1.2, 1.25, 1.30]
-    df = pd.DataFrame(
-        {
-            "source_time_s": source_time,
-            "source_frame_idx": [10, 11, 12],
-            "analysis_frame_idx": [0, 1, 2],
-            "metric": [0.1, 0.2, 0.3],
-        }
-    )
-
-    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10, time_offset_s=source_time[0])
-
-    assert payload["axis_ref"] == "source"
-    assert payload["time_offset_s"] == pytest.approx(source_time[0])
-    assert payload["axis_times"][0] == pytest.approx(0.0)
-    assert payload["axis_times"][-1] == pytest.approx(source_time[-1] - source_time[0])
-
-
-def test_auto_offset_from_time_s_when_source_missing():
-    time_values = [2.0, 2.05, 2.10]
-    df = pd.DataFrame({"time_s": time_values, "metric": [1, 2, 3]})
-
-    payload = _build_payload(df, ["metric"], fps=30.0, max_points=10)
-
-    assert payload["time_offset_s"] == pytest.approx(time_values[0])
-    assert payload["axis_times"][0] == pytest.approx(0.0)
-    assert payload["axis_times"][-1] == pytest.approx(time_values[-1] - time_values[0])
+    assert payload["axis_times"][-1] == pytest.approx((len(time_values) - 1) / 30.0)
 
 
 def test_axis_times_are_not_downsampled():
@@ -124,15 +92,18 @@ def test_axis_times_are_not_downsampled():
     assert payload["times"][1] == pytest.approx(payload["axis_times"][3])
 
 
-def test_rep_intervals_are_mapped_to_source_domain():
-    df = pd.DataFrame(
-        {
-            "analysis_frame_idx": [0, 1, 2, 3],
-            "source_frame_idx": [10, 12, 14, 16],
-            "metric": [0.0, 0.5, 1.0, 1.5],
-        }
-    )
+def test_rep_intervals_converted_to_seconds():
+    mapped = _rep_intervals_to_seconds([(0, 2), (2, 3)], fps_video=10.0)
 
-    mapped = _map_rep_intervals_to_axis([(0, 2), (2, 3)], df, axis_ref="source")
+    assert mapped == [(0.0, 0.2), (0.2, 0.3)]
 
-    assert mapped == [(10, 14), (14, 16)]
+
+def test_axis_times_match_cfr_duration():
+    n = 12
+    fps = 6.0
+    df = pd.DataFrame({"metric": range(n)})
+
+    payload = _build_payload(df, ["metric"], fps=fps, max_points=10)
+
+    expected_duration = (n - 1) / fps
+    assert payload["axis_times"][-1] == pytest.approx(expected_duration)

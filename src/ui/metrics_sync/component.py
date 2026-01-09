@@ -44,47 +44,27 @@ def nearest_time_index(times: Sequence[float], target: float) -> int:
     return pos if curr_diff <= prev_diff else prev_idx
 
 
-def _map_rep_intervals_to_axis(
+def _rep_intervals_to_seconds(
     rep_intervals: Sequence[tuple[int, int]] | None,
-    df: pd.DataFrame,
-    axis_ref: str,
-) -> list[tuple[int, int]]:
-    """Convert repetition intervals to the axis frame domain when needed."""
+    fps_video: float,
+) -> list[tuple[float, float]]:
+    """Convert repetition intervals from frame indices to CFR seconds."""
 
-    intervals = [(int(a), int(b)) for a, b in rep_intervals or [] if a is not None and b is not None]
+    if not rep_intervals:
+        return []
 
-    if axis_ref != "source" or not intervals:
-        return intervals
-
-    try:
-        meta = df[["analysis_frame_idx", "source_frame_idx"]]
-    except Exception:
-        return intervals
-
-    meta = meta.dropna(subset=["analysis_frame_idx", "source_frame_idx"])
-    if meta.empty:
-        return intervals
-
-    mapping = (
-        meta.drop_duplicates(subset=["analysis_frame_idx"], keep="first")
-        .set_index("analysis_frame_idx")["source_frame_idx"]
-    )
-
-    def _map_frame(value: int) -> int:
+    fps_value = fps_video if fps_video > 0 else 1.0
+    converted: list[tuple[float, float]] = []
+    for start_frame, end_frame in rep_intervals:
+        if start_frame is None or end_frame is None:
+            continue
         try:
-            key = int(value)
+            start_s = float(start_frame) / fps_value
+            end_s = float(end_frame) / fps_value
         except Exception:
-            return value
-        try:
-            mapped = mapping.get(key, key)
-        except Exception:
-            mapped = key
-        try:
-            return int(mapped)
-        except Exception:
-            return key
-
-    return [(_map_frame(a), _map_frame(b)) for a, b in intervals]
+            continue
+        converted.append((start_s, end_s))
+    return converted
 
 
 def _build_payload(
@@ -108,8 +88,6 @@ def _build_payload(
             "x_mode": "frame",
             "axis_times": [],
             "axis_frames": [],
-            "time_offset_s": float(time_offset_s or 0.0),
-            "axis_ref": "analysis",
         }
 
     stride = 1
@@ -130,65 +108,13 @@ def _build_payload(
     frame_idx = _safe_numeric(df.get("frame_idx", df.index), np.arange(n, dtype="float64"))
     source_frames = _safe_numeric(df.get("source_frame_idx", df.index), np.arange(n, dtype="float64"))
 
-    axis_ref = "source" if "source_frame_idx" in df.columns else "analysis"
-
-    def _first_finite(series_like: object) -> float | None:
-        try:
-            values = pd.to_numeric(pd.Series(series_like), errors="coerce").to_numpy(
-                dtype="float64", copy=False
-            )
-        except Exception:
-            return None
-        mask = np.isfinite(values)
-        if not mask.any():
-            return None
-        return float(values[mask][0])
-
-    def _enforce_strictly_increasing(arr: np.ndarray, eps: float = 1e-3) -> np.ndarray:
-        if arr.size <= 1:
-            return arr
-        out = arr.copy()
-        if not np.isfinite(out[0]):
-            finite_mask = np.isfinite(out)
-            baseline = float(out[finite_mask][0]) if finite_mask.any() else 0.0
-            out[0] = baseline
-        last = out[0]
-        for i in range(1, out.size):
-            val = out[i]
-            if not np.isfinite(val) or val <= last:
-                out[i] = last + eps
-            last = out[i]
-        return out
-
-    times_base = None
-    offset_auto: float | None = None
-    if "source_time_s" in df.columns:
-        offset_auto = _first_finite(df["source_time_s"])
-        times_base = _safe_numeric(df["source_time_s"], np.arange(n, dtype="float64") / fps_video)
-    elif "time_s" in df.columns:
-        offset_auto = _first_finite(df["time_s"])
-        times_base = _safe_numeric(df["time_s"], np.arange(n, dtype="float64") / fps_video)
-    elif "source_frame_idx" in df.columns:
-        times_base = source_frames / fps_video
-    elif "frame_idx" in df.columns:
-        times_base = frame_idx / fps_video
-    else:
-        times_base = np.arange(n, dtype="float64") / fps_video
-
-    try:
-        offset_value = float(time_offset_s) if time_offset_s is not None else float(offset_auto or 0.0)
-    except Exception:
-        offset_value = 0.0
-
-    times_axis = _enforce_strictly_increasing(times_base - offset_value)
-
+    times_axis = np.arange(n, dtype="float64") / fps_video
     times_arr = times_axis[idx]
     times = times_arr.tolist()
     frames_for_plot = frame_idx[idx].tolist()
     analysis_for_plot = analysis_frames[idx].tolist()
     source_for_plot = source_frames[idx].tolist()
-    axis_frames_source = source_frames if axis_ref == "source" else analysis_frames
-    axis_frames = axis_frames_source.tolist() if axis_frames_source.size else []
+    axis_frames = analysis_frames.tolist() if analysis_frames.size else []
 
     present = [c for c in selected if c in df.columns]
     series: dict[str, list[float | None]] = {}
@@ -210,8 +136,6 @@ def _build_payload(
         "source_frames": source_for_plot,
         "axis_times": times_axis.tolist(),
         "axis_frames": axis_frames,
-        "time_offset_s": offset_value,
-        "axis_ref": axis_ref,
     }
     return payload
 
@@ -249,7 +173,7 @@ def render_video_with_metrics_sync(
         return
 
     payload = _build_payload(metrics_df, selected_metrics, fps=fps)
-    payload["rep"] = _map_rep_intervals_to_axis(rep_intervals or [], metrics_df, payload["axis_ref"])
+    payload["rep"] = _rep_intervals_to_seconds(rep_intervals or [], float(payload["fps"]))
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []
     if thresholds is not None:

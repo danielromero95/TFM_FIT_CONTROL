@@ -1513,9 +1513,7 @@ def _results_panel() -> Dict[str, bool]:
                                 continue
                             thresholds.append(value)
 
-                        fps_for_sync = getattr(stats, "fps_original", None) or getattr(
-                            stats, "fps_effective", 0.0
-                        )
+                        fps_for_sync = getattr(stats, "fps_effective", 0.0)
                         render_video_with_metrics_sync(
                             video_path=None,
                             metrics_df=metrics_df,
