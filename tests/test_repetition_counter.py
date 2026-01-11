@@ -9,6 +9,7 @@ from src import config
 from src.C_analysis.rep_candidates import RepCandidate
 from src.C_analysis.repetition_counter import (
     _filter_reps_by_thresholds,
+    _threshold_zone_reps,
     count_repetitions_with_config,
 )
 
@@ -532,3 +533,154 @@ def test_threshold_reconciliation_noop_when_candidates_match(monkeypatch) -> Non
     assert reps == 5
     assert [c["start_frame"] for c in debug.rep_candidates] == [i * 6 for i in range(5)]
     assert [c["end_frame"] for c in debug.rep_candidates] == [i * 6 + 4 for i in range(5)]
+
+
+def test_threshold_reconciliation_removes_wobble_and_repairs_last(monkeypatch) -> None:
+    angles = []
+    for cycle in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+        if cycle == 0:
+            angles.extend([150.0, 152.0, 149.0])
+    values = np.array(angles)
+    df = pd.DataFrame({"left_knee": values, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+    threshold_reps = _threshold_zone_reps(
+        values,
+        low_thresh=100.0,
+        high_thresh=140.0,
+        min_distance_frames=1,
+    )
+
+    def _wobble_candidates(*_args, **_kwargs):
+        candidates = []
+        rep_index = 0
+        for cycle, (start, low, end) in enumerate(threshold_reps):
+            if cycle == 0:
+                candidates.append(
+                    RepCandidate(
+                        rep_index=rep_index,
+                        start_frame=start,
+                        turning_frame=low,
+                        end_frame=end,
+                        min_angle=90.0,
+                        max_angle=150.0,
+                    )
+                )
+                rep_index += 1
+                candidates.append(
+                    RepCandidate(
+                        rep_index=rep_index,
+                        start_frame=end + 1,
+                        turning_frame=None,
+                        end_frame=end + 2,
+                        min_angle=148.0,
+                        max_angle=152.0,
+                    )
+                )
+                rep_index += 1
+                continue
+            if cycle == len(threshold_reps) - 1:
+                truncated_end = max(low + 1, end - 2)
+                candidates.append(
+                    RepCandidate(
+                        rep_index=rep_index,
+                        start_frame=start,
+                        turning_frame=low,
+                        end_frame=truncated_end,
+                        min_angle=90.0,
+                        max_angle=150.0,
+                    )
+                )
+                rep_index += 1
+                continue
+            candidates.append(
+                RepCandidate(
+                    rep_index=rep_index,
+                    start_frame=start,
+                    turning_frame=low,
+                    end_frame=end,
+                    min_angle=90.0,
+                    max_angle=150.0,
+                )
+            )
+            rep_index += 1
+        return candidates
+
+    monkeypatch.setattr(
+        "src.C_analysis.repetition_counter.detect_rep_candidates", _wobble_candidates
+    )
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+    assert len(debug.rep_candidates) == 5
+    for rep, (start, low, end) in zip(debug.rep_candidates, threshold_reps):
+        assert rep["turning_frame"] is not None
+        assert abs(rep["turning_frame"] - low) <= 3
+        assert abs(rep["start_frame"] - start) <= 3
+        assert abs(rep["end_frame"] - end) <= 3
+
+
+def test_threshold_reconciliation_skipped_when_thresholds_not_enforced(monkeypatch) -> None:
+    angles = []
+    for _ in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+    values = np.array(angles)
+    df = pd.DataFrame({"left_knee": values, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=False,
+        enforce_high_thresh=False,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    def _misaligned_candidates(*_args, **_kwargs):
+        candidates = []
+        rep_index = 0
+        for cycle in range(5):
+            start = cycle * 6
+            low = start + 2
+            end = start + 4
+            if cycle == 4:
+                end = start + 1
+            candidates.append(
+                RepCandidate(
+                    rep_index=rep_index,
+                    start_frame=start,
+                    turning_frame=low,
+                    end_frame=end,
+                    min_angle=90.0,
+                    max_angle=150.0,
+                )
+            )
+            rep_index += 1
+        candidates.append(
+            RepCandidate(
+                rep_index=rep_index,
+                start_frame=2,
+                turning_frame=None,
+                end_frame=3,
+                min_angle=148.0,
+                max_angle=152.0,
+            )
+        )
+        return candidates
+
+    monkeypatch.setattr(
+        "src.C_analysis.repetition_counter.detect_rep_candidates", _misaligned_candidates
+    )
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 6
+    assert len(debug.rep_candidates) == 6
+    assert debug.rep_candidates[-1]["turning_frame"] is None

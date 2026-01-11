@@ -61,6 +61,21 @@
   }));
   const bands = [];
 
+  const hasTimeAxis = DATA.x_mode === "time";
+  const repBands = Array.isArray(DATA.rep_bands) ? DATA.rep_bands : [];
+  const repSplits = Array.isArray(DATA.rep_splits) ? DATA.rep_splits : [];
+  const minPhaseS = Math.max(1 / fps, 0.08);
+  const minPhaseAxis = hasTimeAxis ? minPhaseS : minPhaseS * fps;
+
+  let repBandMax = Number.isFinite(DATA.rep_band_max) ? DATA.rep_band_max : null;
+  if (!repBandMax && repBands.length) {
+    repBands.forEach((band) => {
+      if (band && Number.isFinite(band.x1)) {
+        repBandMax = repBandMax == null ? band.x1 : Math.max(repBandMax, band.x1);
+      }
+    });
+  }
+
   const layout = {
     margin: { l: 40, r: 10, t: 10, b: 90 },
     paper_bgcolor: "rgba(0,0,0,0)",
@@ -102,13 +117,19 @@
     shapes: [cursor, ...thrShapes, ...bands]
   };
 
-  Plotly.newPlot(plot, traces, layout, CFG);
-
-  const hasTimeAxis = DATA.x_mode === "time";
   const xBounds = hasTimeAxis && axisTimes.length ? axisTimes : x;
   const xMin = xBounds.length ? xBounds[0] : 0;
-  const xMax = xBounds.length ? xBounds[xBounds.length - 1] : xMin;
+  let xMax = xBounds.length ? xBounds[xBounds.length - 1] : xMin;
   const EPS = (xMax - xMin) * 1e-3 || 1e-6;
+  if (repBandMax != null && Number.isFinite(repBandMax)) {
+    const nextMax = Math.max(xMax, repBandMax);
+    if (nextMax > xMax + EPS) {
+      xMax = nextMax;
+      layout.xaxis.range = [xMin, xMax];
+    }
+  }
+
+  Plotly.newPlot(plot, traces, layout, CFG);
 
   let lastT = -1;
 
@@ -147,8 +168,17 @@
     return { frame: frameVal, time: timeVal, axisTime, x: xVal, axisIdx, plotIdx, idx: plotIdx };
   }
 
-  const repSplits = Array.isArray(DATA.rep_splits) ? DATA.rep_splits : [];
-  if (repSplits.length) {
+  if (repBands.length) {
+    repBands.forEach((band) => {
+      if (!band || !Number.isFinite(band.x0) || !Number.isFinite(band.x1)) return;
+      const isUp = band.phase === "up";
+      bands.push({
+        type: "rect", xref: "x", yref: "paper",
+        x0: band.x0, x1: band.x1,
+        y0: 0, y1: 1, fillcolor: isUp ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.06)", line: { width: 0 }
+      });
+    });
+  } else if (repSplits.length) {
     repSplits.forEach(([startS, splitS, endS]) => {
       if (![startS, splitS, endS].every(Number.isFinite)) return;
       let start = hasTimeAxis ? startS : startS * fps;
@@ -158,16 +188,20 @@
       if (end < start) [start, end] = [end, start];
       if (split < start) split = start;
       if (split > end) split = end;
-      bands.push({
-        type: "rect", xref: "x", yref: "paper",
-        x0: start, x1: split,
-        y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.06)", line: { width: 0 }
-      });
-      bands.push({
-        type: "rect", xref: "x", yref: "paper",
-        x0: split, x1: end,
-        y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.11)", line: { width: 0 }
-      });
+      if (split - start >= minPhaseAxis) {
+        bands.push({
+          type: "rect", xref: "x", yref: "paper",
+          x0: start, x1: split,
+          y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.06)", line: { width: 0 }
+        });
+      }
+      if (end - split >= minPhaseAxis) {
+        bands.push({
+          type: "rect", xref: "x", yref: "paper",
+          x0: split, x1: end,
+          y0: 0, y1: 1, fillcolor: "rgba(255,255,255,0.11)", line: { width: 0 }
+        });
+      }
     });
   } else if (Array.isArray(DATA.rep)) {
     DATA.rep.forEach(([f0, f1]) => {
