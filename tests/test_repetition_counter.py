@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 
 from src import config
+from src.C_analysis.rep_candidates import RepCandidate
 from src.C_analysis.repetition_counter import (
     _filter_reps_by_thresholds,
     count_repetitions_with_config,
@@ -295,3 +296,239 @@ def test_threshold_validation_uses_reference_signal() -> None:
     assert debug.raw_count == 2
     assert reps == 2
     assert debug.reps_rejected_threshold == 0
+
+
+def test_threshold_edges_count_boundary_reps() -> None:
+    angles = []
+    for _ in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+
+
+def test_threshold_edges_avoid_flat_signals() -> None:
+    flat_high = pd.DataFrame({"left_knee": [150.0] * 60, "pose_ok": 1.0})
+    flat_mid = pd.DataFrame({"left_knee": [120.0] * 60, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps_high, _ = count_repetitions_with_config(flat_high, cfg, fps=30.0, faults_cfg=faults)
+    reps_mid, _ = count_repetitions_with_config(flat_mid, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps_high == 0
+    assert reps_mid == 0
+
+
+def test_threshold_edges_ignore_high_wobbles_without_low() -> None:
+    angles = [150.0, 160.0, 155.0, 165.0, 150.0, 170.0, 145.0, 150.0]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 0
+
+
+def test_threshold_edges_reconcile_after_high_wobble() -> None:
+    angles = [150.0, 145.0, 150.0]
+    for _ in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+
+
+def test_threshold_edges_do_not_change_internal_reps() -> None:
+    angles = [
+        170.0,
+        150.0,
+        120.0,
+        90.0,
+        120.0,
+        150.0,
+        170.0,
+        150.0,
+        110.0,
+        80.0,
+        110.0,
+        150.0,
+        170.0,
+    ]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 2
+
+
+def test_threshold_edges_do_not_double_count_existing_edges() -> None:
+    angles = [150.0, 90.0, 150.0, 90.0, 150.0, 90.0, 150.0]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 3
+
+
+def test_threshold_edges_noop_when_thresholds_not_enforced() -> None:
+    angles = [
+        170,
+        150,
+        120,
+        90,
+        120,
+        150,
+        170,
+        150,
+        110,
+        80,
+        110,
+        150,
+        170,
+    ]
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=False,
+        enforce_high_thresh=False,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    reps_faults, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+    reps_none, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=FAULTS_DISABLED)
+
+    assert reps_faults == reps_none
+
+
+def test_threshold_reconciliation_repairs_clipped_candidates(monkeypatch) -> None:
+    angles = []
+    for _ in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    def _clipped_candidates(*_args, **_kwargs):
+        candidates = []
+        rep_index = 0
+        for cycle in range(5):
+            start = cycle * 6
+            low = start + 2
+            end = start + 4
+            if cycle >= 3:
+                start = low
+                end = start + 1
+            candidates.append(
+                RepCandidate(
+                    rep_index=rep_index,
+                    start_frame=start,
+                    turning_frame=low,
+                    end_frame=end,
+                    min_angle=90.0,
+                    max_angle=150.0 if cycle < 3 else 90.0,
+                )
+            )
+            rep_index += 1
+        return candidates
+
+    monkeypatch.setattr(
+        "src.C_analysis.repetition_counter.detect_rep_candidates", _clipped_candidates
+    )
+
+    reps, _ = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+
+
+def test_threshold_reconciliation_noop_when_candidates_match(monkeypatch) -> None:
+    angles = []
+    for _ in range(5):
+        angles.extend([150.0, 150.0, 90.0, 90.0, 150.0, 150.0])
+    df = pd.DataFrame({"left_knee": angles, "pose_ok": 1.0})
+    cfg = _make_cfg(
+        primary_angle="left_knee",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = config.FaultConfig(low_thresh=100.0, high_thresh=140.0)
+
+    def _aligned_candidates(*_args, **_kwargs):
+        candidates = []
+        rep_index = 0
+        for cycle in range(5):
+            start = cycle * 6
+            low = start + 2
+            end = start + 4
+            candidates.append(
+                RepCandidate(
+                    rep_index=rep_index,
+                    start_frame=start,
+                    turning_frame=low,
+                    end_frame=end,
+                    min_angle=90.0,
+                    max_angle=150.0,
+                )
+            )
+            rep_index += 1
+        return candidates
+
+    monkeypatch.setattr(
+        "src.C_analysis.repetition_counter.detect_rep_candidates", _aligned_candidates
+    )
+
+    reps, debug = count_repetitions_with_config(df, cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+    assert [c["start_frame"] for c in debug.rep_candidates] == [i * 6 for i in range(5)]
+    assert [c["end_frame"] for c in debug.rep_candidates] == [i * 6 + 4 for i in range(5)]
