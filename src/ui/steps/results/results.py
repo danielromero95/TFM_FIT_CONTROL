@@ -26,6 +26,7 @@ except Exception:
 
 from src.A_preprocessing.video_metadata import get_video_metadata
 from src.C_analysis.repetition_counter import count_repetitions_with_config
+from src.core.types import ViewType, as_view
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_catalog import (
     human_metric_name,
@@ -709,6 +710,63 @@ def _prepare_metrics_df_for_display(metrics_df: pd.DataFrame) -> pd.DataFrame:
     if (not np.isnan(p95) and p95 < 30.0) or (not np.isnan(max_val) and max_val < 45.0):
         display_df["trunk_inclination_deg"] = 90.0 - trunk_series
     return display_df
+
+
+def _metric_side(metric: str | None) -> str | None:
+    if not metric:
+        return None
+    base = metric
+    if base.startswith("ang_vel_"):
+        base = base[len("ang_vel_") :]
+    if base.startswith("left_"):
+        return "left"
+    if base.startswith("right_"):
+        return "right"
+    return None
+
+
+def _visible_side_for_lateral(
+    metrics_df: pd.DataFrame | None,
+    primary_metric: str | None,
+) -> str | None:
+    primary_side = _metric_side(primary_metric)
+    if primary_side:
+        return primary_side
+    if metrics_df is None or metrics_df.empty:
+        return None
+
+    left_cols = [c for c in metrics_df.columns if c.startswith("left_")]
+    right_cols = [c for c in metrics_df.columns if c.startswith("right_")]
+
+    def _finite_ratio(cols: list[str]) -> float:
+        if not cols:
+            return 0.0
+        total = 0
+        finite = 0
+        for col in cols:
+            series = pd.to_numeric(metrics_df[col], errors="coerce")
+            values = series.to_numpy(dtype=float, copy=False)
+            total += len(values)
+            finite += int(np.isfinite(values).sum())
+        return finite / total if total else 0.0
+
+    left_ratio = _finite_ratio(left_cols)
+    right_ratio = _finite_ratio(right_cols)
+
+    if left_ratio == 0.0 and right_ratio == 0.0:
+        return None
+    if right_ratio > left_ratio:
+        return "right"
+    if left_ratio > right_ratio:
+        return "left"
+    return None
+
+
+def _filter_metrics_for_side(metrics: list[str], visible_side: str | None) -> list[str]:
+    if not visible_side:
+        return list(metrics)
+    opposite = "left" if visible_side == "right" else "right"
+    return [metric for metric in metrics if _metric_side(metric) != opposite]
 
 
 def _compute_rep_intervals(
@@ -1596,7 +1654,21 @@ def _results_panel() -> Dict[str, bool]:
                     numeric_columns=(numeric_columns if numeric_columns else metric_options),
                     exercise_key=exercise_key,
                 )
-                if metric_options:
+                view_value = state.view or getattr(stats, "view_detected", None)
+                view = as_view(view_value)
+                visible_side = None
+                metric_options_filtered = metric_options
+                numeric_columns_filtered = numeric_columns
+                if view == ViewType.SIDE:
+                    visible_side = _visible_side_for_lateral(metrics_df, primary_metric)
+                    if visible_side:
+                        metric_options_filtered = _filter_metrics_for_side(
+                            metric_options, visible_side
+                        )
+                        numeric_columns_filtered = _filter_metrics_for_side(
+                            numeric_columns, visible_side
+                        )
+                if metric_options_filtered:
                     # Prefer exercise-specific metrics for defaults
                     ex = getattr(stats, "exercise_detected", "")
                     ex_str = getattr(ex, "value", str(ex))
@@ -1605,17 +1677,23 @@ def _results_panel() -> Dict[str, bool]:
                         "bench_press": ["left_elbow", "right_elbow", "shoulder_width"],
                         "deadlift": ["left_hip", "right_hip", "trunk_inclination_deg"],
                     }
-                    preferred = [m for m in preferred_by_ex.get(ex_str, []) if m in numeric_columns]
+                    preferred = [
+                        m
+                        for m in preferred_by_ex.get(ex_str, [])
+                        if m in numeric_columns_filtered
+                    ]
                     chosen = getattr(stats, "primary_angle", None)
                     metric_help = _build_metric_help(
                         exercise=ex_str,
                         primary_metric=chosen,
-                        metric_options=metric_options,
+                        metric_options=metric_options_filtered,
                     )
-                    if chosen and chosen in numeric_columns and chosen not in preferred:
+                    if chosen and chosen in numeric_columns_filtered and chosen not in preferred:
                         preferred = [chosen] + preferred
                     default_selection = preferred[:3] or (
-                        numeric_columns[:3] if numeric_columns else metric_options[:3]
+                        numeric_columns_filtered[:3]
+                        if numeric_columns_filtered
+                        else metric_options_filtered[:3]
                     )
 
                     run_sig = getattr(stats, "config_sha1", "") or ""
@@ -1624,17 +1702,26 @@ def _results_panel() -> Dict[str, bool]:
                         run_sig = f"{run_sig}-{frames_val}"
                     default_key = f"metrics_default_{run_sig}"
 
-                    if default_key not in st.session_state:
-                        st.session_state[default_key] = default_selection
+                    default_candidate = st.session_state.get(default_key, default_selection)
+                    default_filtered = [
+                        metric for metric in default_candidate if metric in metric_options_filtered
+                    ]
+                    if not default_filtered:
+                        default_filtered = default_selection
+                    st.session_state[default_key] = default_filtered
 
                     widget_key = f"metrics_multiselect_{run_sig}"
 
                     selected_metrics = st.multiselect(
                         "View metrics",
-                        options=metric_options,
+                        options=metric_options_filtered,
                         default=st.session_state[default_key],
                         key=widget_key,
                     )
+                    if visible_side:
+                        selected_metrics = _filter_metrics_for_side(
+                            selected_metrics, visible_side
+                        )
                     if metric_help:
                         _emit_metric_help_assets()
                         _emit_metric_help_script(widget_key, metric_help)

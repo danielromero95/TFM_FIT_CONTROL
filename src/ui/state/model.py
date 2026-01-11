@@ -32,7 +32,7 @@ class Step(str, Enum):
 DEFAULT_EXERCISE_LABEL = "Auto-Detect"
 EXERCISE_THRESHOLDS: Dict[str, Dict[str, float]] = {
     "squat": {"low": float(SQUAT_LOW_THRESH), "high": float(SQUAT_HIGH_THRESH)},
-    "deadlift": {"low": 140.0, "high": 170.0},
+    "deadlift": {"low": 150.0, "high": 170.0},
     "bench_press": {"low": 90.0, "high": 160.0},
 }
 

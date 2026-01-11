@@ -330,46 +330,102 @@ def _threshold_zone_reps(
     *,
     low_thresh: float,
     high_thresh: float,
+    start_zone: Zone,
     min_distance_frames: int,
 ) -> list[tuple[int, int, int]]:
     reps: list[tuple[int, int, int]] = []
     if values.size == 0:
         return reps
 
-    last_high_idx: int | None = None
-    start_high_idx: int | None = None
-    low_idx: int | None = None
-    low_value = np.inf
     last_completed_end = -min_distance_frames
-    state = "WAIT_LOW"
+
+    if start_zone == Zone.HIGH:
+        last_high_idx: int | None = None
+        start_high_idx: int | None = None
+        low_idx: int | None = None
+        low_value = np.inf
+        state = "WAIT_LOW"
+
+        for idx, value in enumerate(values):
+            if not np.isfinite(value):
+                continue
+
+            if value >= high_thresh:
+                last_high_idx = idx
+
+            if state == "WAIT_LOW":
+                if value <= low_thresh and last_high_idx is not None:
+                    start_high_idx = last_high_idx
+                    low_idx = idx
+                    low_value = value
+                    state = "WAIT_HIGH"
+            else:
+                if value <= low_thresh:
+                    if value < low_value:
+                        low_value = value
+                        low_idx = idx
+                    continue
+                if value >= high_thresh and start_high_idx is not None and low_idx is not None:
+                    if idx - last_completed_end >= min_distance_frames:
+                        reps.append((start_high_idx, low_idx, idx))
+                        last_completed_end = idx
+                    start_high_idx = idx
+                    low_idx = None
+                    low_value = np.inf
+                    state = "WAIT_LOW"
+        return reps
+
+    if start_zone != Zone.LOW:
+        return reps
+
+    last_low_idx: int | None = None
+    start_low_idx: int | None = None
+    high_idx: int | None = None
+    high_value = -np.inf
+    state = "WAIT_HIGH"
+    last_finite_idx: int | None = None
+    last_finite_value: float | None = None
 
     for idx, value in enumerate(values):
         if not np.isfinite(value):
             continue
+        last_finite_idx = idx
+        last_finite_value = float(value)
 
-        if value >= high_thresh:
-            last_high_idx = idx
+        if value <= low_thresh:
+            last_low_idx = idx
 
-        if state == "WAIT_LOW":
-            if value <= low_thresh and last_high_idx is not None:
-                start_high_idx = last_high_idx
-                low_idx = idx
-                low_value = value
-                state = "WAIT_HIGH"
-        else:
-            if value <= low_thresh:
-                if value < low_value:
-                    low_value = value
-                    low_idx = idx
-                continue
-            if value >= high_thresh and start_high_idx is not None and low_idx is not None:
-                if idx - last_completed_end >= min_distance_frames:
-                    reps.append((start_high_idx, low_idx, idx))
-                    last_completed_end = idx
-                start_high_idx = idx
-                low_idx = None
-                low_value = np.inf
+        if state == "WAIT_HIGH":
+            if value >= high_thresh and last_low_idx is not None:
+                start_low_idx = last_low_idx
+                high_idx = idx
+                high_value = value
                 state = "WAIT_LOW"
+        else:
+            if value >= high_thresh:
+                if value > high_value:
+                    high_value = value
+                    high_idx = idx
+                continue
+            if value <= low_thresh and start_low_idx is not None and high_idx is not None:
+                if idx - last_completed_end >= min_distance_frames:
+                    reps.append((start_low_idx, high_idx, idx))
+                    last_completed_end = idx
+                start_low_idx = idx
+                high_idx = None
+                high_value = -np.inf
+                state = "WAIT_HIGH"
+
+    if (
+        start_low_idx is not None
+        and high_idx is not None
+        and last_finite_idx is not None
+        and last_finite_value is not None
+        and last_finite_value >= high_thresh
+        and last_finite_idx - last_completed_end >= min_distance_frames
+        and last_finite_idx > high_idx
+    ):
+        reps.append((start_low_idx, high_idx, last_finite_idx))
 
     return reps
 
@@ -553,12 +609,13 @@ def count_repetitions_with_config(
         and high_thresh_cfg is not None
     ):
         spec = EXERCISE_SPECS.get(exercise_key, EXERCISE_SPECS["squat"])
-        if spec.start_zone == Zone.HIGH and spec.completion_zone == Zone.HIGH:
+        if spec.start_zone == spec.completion_zone and spec.start_zone in (Zone.HIGH, Zone.LOW):
             values = reference if reference is not None else angles
             threshold_reps = _threshold_zone_reps(
                 values,
                 low_thresh=low_thresh_cfg,
                 high_thresh=high_thresh_cfg,
+                start_zone=spec.start_zone,
                 min_distance_frames=min_distance_frames,
             )
             if threshold_reps:

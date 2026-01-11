@@ -96,3 +96,48 @@ def test_deadlift_respects_low_threshold_when_enforced():
 
     assert reps_free == 1
     assert debug_free.rep_candidates[0]["rejection_reason"] == "NONE"
+
+
+def _deadlift_clipped_series() -> pd.DataFrame:
+    values: list[float] = []
+    for _ in range(4):
+        values.extend([140.0, 175.0, 140.0])
+    values.extend([140.0, 175.0, 175.0])
+    return pd.DataFrame({"frame_idx": list(range(len(values))), "right_hip": values})
+
+
+def test_deadlift_thresholds_close_final_rep_when_clipped():
+    df = _deadlift_clipped_series()
+    counting_cfg = CountingConfig(
+        exercise="deadlift",
+        primary_angle="right_hip",
+        enforce_low_thresh=True,
+        enforce_high_thresh=True,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = FaultConfig(low_thresh=150.0, high_thresh=170.0)
+
+    reps, debug = count_repetitions_with_config(df, counting_cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 5
+    assert len(debug.rep_candidates) == 5
+    assert debug.rep_candidates[-1]["end_frame"] == len(df) - 1
+
+
+def test_deadlift_clipped_series_unchanged_when_thresholds_not_enforced():
+    df = _deadlift_clipped_series()
+    counting_cfg = CountingConfig(
+        exercise="deadlift",
+        primary_angle="right_hip",
+        enforce_low_thresh=False,
+        enforce_high_thresh=False,
+        min_distance_sec=0.0,
+        refractory_sec=0.0,
+    )
+    faults = FaultConfig(low_thresh=150.0, high_thresh=170.0)
+
+    reps, debug = count_repetitions_with_config(df, counting_cfg, fps=30.0, faults_cfg=faults)
+
+    assert reps == 3
+    assert debug.rep_candidates[-1]["end_frame"] is not None

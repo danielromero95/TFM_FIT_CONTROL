@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 from src import config
-from src.C_analysis.rep_candidates import RepCandidate
+from src.C_analysis.rep_candidates import RepCandidate, Zone
 from src.C_analysis.repetition_counter import (
     _filter_reps_by_thresholds,
     _threshold_zone_reps,
@@ -555,6 +555,7 @@ def test_threshold_reconciliation_removes_wobble_and_repairs_last(monkeypatch) -
         values,
         low_thresh=100.0,
         high_thresh=140.0,
+        start_zone=Zone.HIGH,
         min_distance_frames=1,
     )
 
