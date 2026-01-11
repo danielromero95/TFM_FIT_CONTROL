@@ -40,8 +40,44 @@ def _normalize_rotation(value: int) -> int:
     return min(candidates, key=lambda c: abs(c - value))
 
 
+def _parse_rotation_value(value: Any) -> Optional[int]:
+    """Normaliza valores de rotación a 0/90/180/270; devuelve None si es inválido."""
+
+    if value in (None, ""):
+        return None
+    try:
+        return _normalize_rotation(int(float(value)))
+    except Exception:
+        return None
+
+
+def _parse_ffprobe_rotation(stream: dict[str, Any] | None) -> Optional[int]:
+    """Extrae rotación desde un stream de ffprobe (tags o Display Matrix)."""
+
+    if not isinstance(stream, dict):
+        return None
+
+    side_data_list = stream.get("side_data_list")
+    if isinstance(side_data_list, list):
+        for side_data in side_data_list:
+            if not isinstance(side_data, dict):
+                continue
+            rotation = _parse_rotation_value(side_data.get("rotation"))
+            if rotation is not None:
+                return rotation
+
+    tags = stream.get("tags") or {}
+    if isinstance(tags, dict):
+        rotation_tag = tags.get("rotate")
+        rotation = _parse_rotation_value(rotation_tag)
+        if rotation is not None:
+            return rotation
+
+    return None
+
+
 def _read_rotation_ffprobe(path: Path) -> Optional[int]:
-    """Lee la rotación desde los tags de ffprobe; devuelve None si no existe."""
+    """Lee la rotación desde los tags o Display Matrix de ffprobe."""
     if shutil.which("ffprobe") is None:
         return None
     try:
@@ -49,14 +85,20 @@ def _read_rotation_ffprobe(path: Path) -> Optional[int]:
             "ffprobe",
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream_tags=rotate",
-            "-of", "default=nw=1:nk=1",
+            "-show_entries", "stream_tags=rotate:side_data_list",
+            "-of", "json",
             str(path),
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        output = (res.stdout or "").strip()
-        if output:
-            return _normalize_rotation(int(float(output)))
+        if res.returncode != 0:
+            return None
+        data = json.loads(res.stdout or "{}")
+        streams = data.get("streams", []) if isinstance(data, dict) else []
+        if streams:
+            rotation = _parse_ffprobe_rotation(streams[0])
+            if rotation is not None:
+                logger.info("Detected rotation via ffprobe for %s: %d°", path.name, rotation)
+            return rotation
     except Exception as exc:  # pragma: no cover
         logger.warning("ffprobe rotation check failed: %s", exc)
     return None
@@ -257,7 +299,7 @@ def _run_ffprobe(path: Path) -> dict[str, Any]:
             (
                 "format=format_name,format_long_name,duration,size:format_tags=creation_time:"
                 "stream=codec_name,codec_long_name,profile,pix_fmt,width,height,"
-                "nb_frames,avg_frame_rate,r_frame_rate,tags,codec_type"
+                "nb_frames,avg_frame_rate,r_frame_rate,tags,codec_type,side_data_list"
             ),
             str(path),
         ]
@@ -412,17 +454,14 @@ def get_video_metadata(path: Path, original_name: str | None = None) -> dict[str
             }
         )
 
-        rotation_tag = None
         tags = video_stream.get("tags") or {}
         if isinstance(tags, dict):
-            rotation_tag = tags.get("rotate")
             creation_time = tags.get("creation_time")
             metadata["creation_time"] = creation_time or metadata.get("creation_time")
-        if rotation_tag is not None:
-            try:
-                metadata["rotation"] = _normalize_rotation(int(float(rotation_tag)))
-            except Exception:
-                metadata["rotation"] = metadata.get("rotation")
+
+        rotation_value = _parse_ffprobe_rotation(video_stream)
+        if rotation_value is not None:
+            metadata["rotation"] = rotation_value
 
         fps_avg = _safe_fraction_to_float(metadata.get("fps_avg_frame_rate"))
         if metadata.get("total_frames_estimated") in (None, "") and fps_avg and metadata.get("duration_s"):
