@@ -11,7 +11,14 @@ import pandas as pd
 
 from src import config
 from src.B_pose_estimation.signal import derivative, interpolate_small_gaps, smooth_series
-from src.C_analysis.rep_candidates import RepCandidate, RejectionReason, detect_rep_candidates
+from src.C_analysis.rep_candidates import (
+    EXERCISE_SPECS,
+    ExerciseRepSpec,
+    RepCandidate,
+    RejectionReason,
+    Zone,
+    detect_rep_candidates,
+)
 from src.config.constants import (
     ANALYSIS_MAX_GAP_FRAMES,
     ANALYSIS_SAVGOL_POLYORDER,
@@ -318,6 +325,141 @@ def _filter_reps_by_thresholds(
     return filtered_indices, filtered_proms, rejected, rejection_reasons
 
 
+def _threshold_zone_reps(
+    values: np.ndarray,
+    *,
+    low_thresh: float,
+    high_thresh: float,
+    min_distance_frames: int,
+) -> list[tuple[int, int, int]]:
+    reps: list[tuple[int, int, int]] = []
+    if values.size == 0:
+        return reps
+
+    last_high_idx: int | None = None
+    start_high_idx: int | None = None
+    low_idx: int | None = None
+    low_value = np.inf
+    last_completed_end = -min_distance_frames
+    state = "WAIT_LOW"
+
+    for idx, value in enumerate(values):
+        if not np.isfinite(value):
+            continue
+
+        if value >= high_thresh:
+            last_high_idx = idx
+
+        if state == "WAIT_LOW":
+            if value <= low_thresh and last_high_idx is not None:
+                start_high_idx = last_high_idx
+                low_idx = idx
+                low_value = value
+                state = "WAIT_HIGH"
+        else:
+            if value <= low_thresh:
+                if value < low_value:
+                    low_value = value
+                    low_idx = idx
+                continue
+            if value >= high_thresh and start_high_idx is not None and low_idx is not None:
+                if idx - last_completed_end >= min_distance_frames:
+                    reps.append((start_high_idx, low_idx, idx))
+                    last_completed_end = idx
+                start_high_idx = idx
+                low_idx = None
+                low_value = np.inf
+                state = "WAIT_LOW"
+
+    return reps
+
+
+def _build_edge_candidate(
+    values: np.ndarray,
+    *,
+    start_idx: int,
+    low_idx: int,
+    end_idx: int,
+    exercise_key: str,
+) -> RepCandidate | None:
+    if (
+        start_idx < 0
+        or end_idx <= start_idx
+        or end_idx >= len(values)
+        or low_idx < start_idx
+        or low_idx > end_idx
+    ):
+        return None
+
+    segment = values[start_idx : end_idx + 1]
+    finite_mask = np.isfinite(segment)
+    if not finite_mask.any():
+        return None
+
+    finite_values = segment[finite_mask]
+    min_angle = float(np.nanmin(finite_values))
+    max_angle = float(np.nanmax(finite_values))
+    turning_idx = low_idx
+
+    candidate = RepCandidate(
+        rep_index=0,
+        start_frame=start_idx,
+        turning_frame=turning_idx,
+        end_frame=end_idx,
+        min_angle=min_angle,
+        max_angle=max_angle,
+    )
+
+    spec = EXERCISE_SPECS.get(exercise_key.lower(), EXERCISE_SPECS["squat"])
+    _apply_rep_phases(candidate, spec)
+    return candidate
+
+
+def _apply_rep_phases(candidate: RepCandidate, spec: ExerciseRepSpec) -> None:
+    if spec.phases[0] == "Down":
+        candidate.down_start = candidate.start_frame
+        candidate.down_end = candidate.turning_frame
+        candidate.up_start = candidate.turning_frame
+        candidate.up_end = candidate.end_frame
+    else:
+        candidate.up_start = candidate.start_frame
+        candidate.up_end = candidate.turning_frame
+        candidate.down_start = candidate.turning_frame
+        candidate.down_end = candidate.end_frame
+
+
+def _reindex_candidates(candidates: list[RepCandidate]) -> None:
+    candidates.sort(key=lambda cand: (cand.start_frame, cand.end_frame or -1))
+    for idx, cand in enumerate(candidates):
+        cand.rep_index = idx
+
+
+def _count_passing_threshold_reps(
+    candidates: list[RepCandidate],
+    values: np.ndarray,
+    *,
+    low_thresh: float,
+    high_thresh: float,
+) -> int:
+    count = 0
+    for cand in candidates:
+        if cand.rejection_reason == RejectionReason.INCOMPLETE:
+            continue
+        if cand.start_frame is None or cand.end_frame is None:
+            continue
+        start = max(0, min(int(cand.start_frame), len(values) - 1))
+        end = max(start, min(int(cand.end_frame), len(values) - 1))
+        segment = values[start : end + 1]
+        finite = segment[np.isfinite(segment)]
+        if finite.size == 0:
+            continue
+        min_angle = float(np.nanmin(finite))
+        max_angle = float(np.nanmax(finite))
+        if min_angle <= low_thresh and max_angle >= high_thresh:
+            count += 1
+    return count
+
+
 def count_repetitions_with_config(
     df_metrics: pd.DataFrame,
     counting_cfg: config.CountingConfig,
@@ -389,11 +531,12 @@ def count_repetitions_with_config(
     enforce_low_flag = bool(getattr(counting_cfg, "enforce_low_thresh", True))
     enforce_high_flag = bool(getattr(counting_cfg, "enforce_high_thresh", True))
 
+    exercise_key = getattr(counting_cfg, "exercise", "squat")
     rep_candidates = detect_rep_candidates(
         reference if reference is not None else angles,
         low_thresh=detect_low,
         high_thresh=detect_high,
-        exercise_key=getattr(counting_cfg, "exercise", "squat"),
+        exercise_key=exercise_key,
         enforce_low=False,
         enforce_high=False,
     )
@@ -401,7 +544,83 @@ def count_repetitions_with_config(
     if long_gap:
         rep_candidates = []
 
-    exercise_key = getattr(counting_cfg, "exercise", "").lower()
+    exercise_key = exercise_key.lower()
+
+    if (
+        enforce_low_flag
+        and enforce_high_flag
+        and low_thresh_cfg is not None
+        and high_thresh_cfg is not None
+    ):
+        spec = EXERCISE_SPECS.get(exercise_key, EXERCISE_SPECS["squat"])
+        if spec.start_zone == Zone.HIGH and spec.completion_zone == Zone.HIGH:
+            values = reference if reference is not None else angles
+            threshold_reps = _threshold_zone_reps(
+                values,
+                low_thresh=low_thresh_cfg,
+                high_thresh=high_thresh_cfg,
+                min_distance_frames=min_distance_frames,
+            )
+            if threshold_reps:
+                current_pass_count = _count_passing_threshold_reps(
+                    rep_candidates,
+                    values,
+                    low_thresh=low_thresh_cfg,
+                    high_thresh=high_thresh_cfg,
+                )
+                if current_pass_count < len(threshold_reps):
+                    tolerance = 2
+                    reconciled: list[RepCandidate] = []
+                    used_candidates: set[int] = set()
+
+                    for start_idx, low_idx, end_idx in threshold_reps:
+                        matched_idx = None
+                        for idx, cand in enumerate(rep_candidates):
+                            if idx in used_candidates:
+                                continue
+                            if cand.turning_frame is None:
+                                continue
+                            if abs(cand.turning_frame - low_idx) <= tolerance:
+                                matched_idx = idx
+                                break
+
+                        if matched_idx is not None:
+                            cand = rep_candidates[matched_idx]
+                            used_candidates.add(matched_idx)
+                            cand.start_frame = start_idx
+                            cand.turning_frame = low_idx
+                            cand.end_frame = end_idx
+                            segment = values[start_idx : end_idx + 1]
+                            finite = segment[np.isfinite(segment)]
+                            if finite.size:
+                                cand.min_angle = float(np.nanmin(finite))
+                                cand.max_angle = float(np.nanmax(finite))
+                            else:
+                                cand.min_angle = None
+                                cand.max_angle = None
+                            _apply_rep_phases(cand, spec)
+                            reconciled.append(cand)
+                        else:
+                            new_candidate = _build_edge_candidate(
+                                values,
+                                start_idx=start_idx,
+                                low_idx=low_idx,
+                                end_idx=end_idx,
+                                exercise_key=exercise_key,
+                            )
+                            if new_candidate is not None:
+                                reconciled.append(new_candidate)
+
+                    if reconciled:
+                        reconciled_pass_count = _count_passing_threshold_reps(
+                            reconciled,
+                            values,
+                            low_thresh=low_thresh_cfg,
+                            high_thresh=high_thresh_cfg,
+                        )
+                        if reconciled_pass_count >= current_pass_count:
+                            rep_candidates = reconciled
+                            _reindex_candidates(rep_candidates)
 
     if not rep_candidates and state_valleys:
         for i, valley in enumerate(state_valleys):
