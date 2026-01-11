@@ -2,7 +2,11 @@ import numpy as np
 import pandas as pd
 
 from src.ui.metrics_catalog import is_user_facing_metric
-from src.ui.steps.results.results import _prepare_metrics_df_for_display
+from src.ui.steps.results.results import (
+    _filter_metrics_for_side,
+    _prepare_metrics_df_for_display,
+    _visible_side_for_lateral,
+)
 
 
 def _metric_options_from_df(metrics_df: pd.DataFrame) -> list[str]:
@@ -67,3 +71,32 @@ def test_prepare_metrics_df_for_display_keeps_high_scale_trunk() -> None:
 
     pd.testing.assert_frame_equal(display_df, metrics_df_original)
     pd.testing.assert_frame_equal(metrics_df, metrics_df_original)
+
+
+def test_lateral_view_filters_occluded_side_metrics() -> None:
+    metrics_df = pd.DataFrame(
+        {
+            "left_hip": [np.nan, np.nan, np.nan],
+            "right_hip": [120.0, 130.0, 140.0],
+            "trunk_inclination_deg": [10.0, 12.0, 11.0],
+        }
+    )
+
+    visible_side = _visible_side_for_lateral(metrics_df, "right_hip")
+
+    assert visible_side == "right"
+
+    metric_options = [
+        "left_hip",
+        "right_hip",
+        "trunk_inclination_deg",
+        "ang_vel_left_hip",
+        "ang_vel_right_hip",
+    ]
+    filtered = _filter_metrics_for_side(metric_options, visible_side)
+
+    assert "left_hip" not in filtered
+    assert "ang_vel_left_hip" not in filtered
+    assert "right_hip" in filtered
+    assert "ang_vel_right_hip" in filtered
+    assert "trunk_inclination_deg" in filtered
