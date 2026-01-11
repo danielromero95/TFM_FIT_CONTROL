@@ -71,3 +71,35 @@ def test_rep_splits_fallback_to_midpoint_when_nan():
     assert start == 0.0
     assert end == 1.0
     assert split == 0.5
+
+
+def test_rep_splits_last_rep_includes_final_frame():
+    metrics_df = pd.DataFrame({"primary": [5, 4, 3, 2, 1]})
+    rep_splits = _compute_rep_splits(
+        metrics_df,
+        [(0, 2), (3, 10)],
+        primary_metric="primary",
+        exercise_key="squat",
+        fps_effective=10,
+    )
+
+    assert len(rep_splits) == 2
+    start, split, end = rep_splits[-1]
+    assert math.isfinite(start)
+    assert math.isfinite(split)
+    assert math.isfinite(end)
+    assert end == 0.4
+
+
+def test_rep_splits_filters_micro_phase_from_wobble():
+    metrics_df = pd.DataFrame({"primary": [10, 9.5, 10, 10, 10, 10]})
+    rep_splits = _compute_rep_splits(
+        metrics_df,
+        [(0, 5)],
+        primary_metric="primary",
+        exercise_key="squat",
+        fps_effective=30,
+    )
+
+    start, split, _end = rep_splits[0]
+    assert split == start
