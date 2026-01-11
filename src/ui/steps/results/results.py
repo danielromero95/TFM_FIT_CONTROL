@@ -1111,7 +1111,10 @@ def _compute_rep_splits(
             values = None
 
     rep_splits: List[Tuple[float, float, float]] = []
-    max_index = len(values) - 1 if values is not None else -1
+    frame_count = len(metrics_df) if metrics_df is not None else None
+    max_index = frame_count - 1 if frame_count is not None else -1
+    min_phase_frames = max(2, int(0.15 * fps))
+    min_phase_excursion_deg = 3.0
 
     for start_frame, end_frame in rep_intervals:
         try:
@@ -1125,11 +1128,12 @@ def _compute_rep_splits(
 
         if max_index >= 0:
             start_idx = max(0, min(start_idx, max_index))
-            end_idx = max(0, min(end_idx, max_index))
+            end_idx = max(start_idx, min(end_idx, max_index))
 
         start_s = start_idx / fps
         end_s = end_idx / fps
         split_s = (start_s + end_s) / 2.0
+        split_frame = int(round(split_s * fps))
 
         if values is not None and max_index >= 0:
             window = values[start_idx : end_idx + 1]
@@ -1143,6 +1147,33 @@ def _compute_rep_splits(
                     split_s = split_frame / fps
                 except ValueError:
                     split_s = (start_s + end_s) / 2.0
+                    split_frame = int(round(split_s * fps))
+
+        if values is not None and max_index >= 0:
+            split_frame = max(start_idx, min(split_frame, end_idx))
+            start_val = values[start_idx]
+            split_val = values[split_frame]
+            end_val = values[end_idx]
+            if np.isfinite(start_val) and np.isfinite(split_val) and np.isfinite(end_val):
+                down_frames = split_frame - start_idx
+                up_frames = end_idx - split_frame
+                down_excursion = float(abs(split_val - start_val))
+                up_excursion = float(abs(end_val - split_val))
+                down_bad = (
+                    down_frames < min_phase_frames
+                    or down_excursion < min_phase_excursion_deg
+                )
+                up_bad = (
+                    up_frames < min_phase_frames
+                    or up_excursion < min_phase_excursion_deg
+                )
+                if down_bad and not up_bad:
+                    split_frame = start_idx
+                elif up_bad and not down_bad:
+                    split_frame = end_idx
+                elif down_bad and up_bad:
+                    split_frame = start_idx
+                split_s = split_frame / fps
 
         if split_s < start_s:
             split_s = start_s
