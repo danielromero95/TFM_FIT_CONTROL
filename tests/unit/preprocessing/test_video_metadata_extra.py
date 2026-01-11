@@ -9,6 +9,7 @@ from src.A_preprocessing.frame_extraction.state import FrameInfo
 from src.A_preprocessing.video_metadata import (
     VideoInfo,
     _normalize_rotation,
+    _parse_ffprobe_rotation,
     get_video_metadata,
     read_video_file_info,
 )
@@ -106,6 +107,18 @@ def test_read_video_file_info_reader_fallback(monkeypatch, tmp_path):
     assert info.fps_source == "reader"
     assert info.rotation == 0
     assert cap.released is True
+
+
+@pytest.mark.parametrize(
+    "stream,expected",
+    [
+        ({"tags": {"rotate": "90"}}, 90),
+        ({"side_data_list": [{"rotation": "-90"}]}, 270),
+        ({}, None),
+    ],
+)
+def test_parse_ffprobe_rotation_variants(stream, expected):
+    assert _parse_ffprobe_rotation(stream) == expected
 
 
 def test_get_video_metadata_merges_ffprobe(monkeypatch, tmp_path):

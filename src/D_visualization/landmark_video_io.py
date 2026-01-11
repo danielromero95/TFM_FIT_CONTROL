@@ -42,6 +42,40 @@ __all__ = [
 ]
 
 
+def _build_web_safe_ffmpeg_command(
+    source: Path,
+    destination: Path,
+    *,
+    ffmpeg_bin: str,
+) -> list[str]:
+    """Construye el comando de ffmpeg para generar un MP4 compatible con web."""
+
+    return [
+        ffmpeg_bin,
+        "-y",
+        "-loglevel",
+        "error",
+        "-noautorotate",
+        "-i",
+        str(source),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-metadata:s:v",
+        "rotate=0",
+        "-f",
+        "mp4",
+        str(destination),
+    ]
+
+
 def _open_writer(path: str, fps: float, size: Tuple[int, int], prefs: Sequence[str]) -> tuple[cv2.VideoWriter, str]:
     """Intenta abrir un ``VideoWriter`` probando múltiples preferencias de códec.
     Esta estrategia reduce los fallos en entornos heterogéneos donde los códecs
@@ -163,27 +197,11 @@ def make_web_safe_h264(
     except OSError:
         pass
 
-    command = [
-        ffmpeg_bin,
-        "-y",
-        "-loglevel",
-        "error",
-        "-i",
-        str(source),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-        str(tmp_destination),
-    ]
+    command = _build_web_safe_ffmpeg_command(
+        source,
+        tmp_destination,
+        ffmpeg_bin=ffmpeg_bin,
+    )
 
     try:
         completed = subprocess.run(command, check=True, capture_output=True)
