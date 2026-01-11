@@ -16,6 +16,7 @@ import streamlit as st
 from streamlit.components.v1 import html
 
 from src.ui.video import get_video_source
+from src.ui.metrics_sync.bands import build_phase_bands
 
 
 
@@ -176,6 +177,12 @@ def render_video_with_metrics_sync(
     payload = _build_payload(metrics_df, selected_metrics, fps=fps)
     payload["rep"] = _rep_intervals_to_seconds(rep_intervals or [], float(payload["fps"]))
     payload["rep_splits"] = rep_splits or []
+    rep_bands, rep_band_max = build_phase_bands(
+        rep_splits or [], float(payload["fps"]), x_mode=payload["x_mode"]
+    )
+    payload["rep_bands"] = rep_bands
+    if rep_band_max is not None:
+        payload["rep_band_max"] = rep_band_max
     payload["startAt"] = float(start_at_s) if start_at_s is not None else None
     thr_values: list[float] = []
     if thresholds is not None:

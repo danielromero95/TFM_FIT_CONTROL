@@ -568,10 +568,64 @@ def count_repetitions_with_config(
                     low_thresh=low_thresh_cfg,
                     high_thresh=high_thresh_cfg,
                 )
-                if current_pass_count < len(threshold_reps):
-                    tolerance = 2
+                tolerance = 3
+                short_threshold = max(2, int(round(min_distance_frames / 2)))
+                matched_canonical_count = 0
+                used_candidates: set[int] = set()
+                has_deviation = False
+
+                for start_idx, low_idx, end_idx in threshold_reps:
+                    matched_idx = None
+                    for idx, cand in enumerate(rep_candidates):
+                        if idx in used_candidates:
+                            continue
+                        if cand.turning_frame is None:
+                            continue
+                        if abs(cand.turning_frame - low_idx) <= tolerance:
+                            matched_idx = idx
+                            break
+                    if matched_idx is None:
+                        continue
+                    used_candidates.add(matched_idx)
+                    matched_canonical_count += 1
+                    cand = rep_candidates[matched_idx]
+                    if cand.start_frame is None or cand.end_frame is None:
+                        has_deviation = True
+                    else:
+                        if (
+                            abs(cand.start_frame - start_idx) > tolerance
+                            or abs(cand.end_frame - end_idx) > tolerance
+                        ):
+                            has_deviation = True
+
+                suspicious_candidates = matched_canonical_count != len(rep_candidates)
+                last_canonical_end = threshold_reps[-1][2]
+                last_end_early = True
+                max_end = None
+                for cand in rep_candidates:
+                    if cand.start_frame is None or cand.end_frame is None or cand.turning_frame is None:
+                        suspicious_candidates = True
+                        continue
+                    duration = cand.end_frame - cand.start_frame
+                    if duration < short_threshold:
+                        suspicious_candidates = True
+                    if max_end is None or cand.end_frame > max_end:
+                        max_end = cand.end_frame
+                if max_end is not None:
+                    last_end_early = max_end < last_canonical_end - tolerance
+                if max_end is None:
+                    last_end_early = True
+
+                should_reconcile = (
+                    matched_canonical_count < len(threshold_reps)
+                    or has_deviation
+                    or suspicious_candidates
+                    or last_end_early
+                )
+
+                if should_reconcile:
                     reconciled: list[RepCandidate] = []
-                    used_candidates: set[int] = set()
+                    used_candidates.clear()
 
                     for start_idx, low_idx, end_idx in threshold_reps:
                         matched_idx = None
