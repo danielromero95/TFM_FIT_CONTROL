@@ -54,8 +54,15 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose."""
 
+    label, view, confidence, _ = _classify_features_with_diagnostics(features)
+    return label, view, confidence
+
+
+def _classify_features_with_diagnostics(
+    features: FeatureSeries,
+) -> Tuple[str, str, float, Mapping[str, object] | None]:
     if features.valid_frames < MIN_VALID_FRAMES:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, None
 
     series = _prepare_series(features)
     sampling_rate = float(features.sampling_rate or DEFAULT_SAMPLING_RATE)
@@ -82,7 +89,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         for name in ("shoulder_yaw_deg", "shoulder_z_delta_abs", "shoulder_width_norm", "ankle_width_norm")
     )
     if view_result.label == "unknown" and not view_cues_present:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, None
 
     visibility = _compute_side_visibility(series)
     side = _select_visible_side(series, visibility=visibility)
@@ -94,7 +101,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     torso_tilt = get_series("torso_tilt_deg")
 
     if _is_invalid(knee_angle) or _is_invalid(hip_angle) or _is_invalid(elbow_angle):
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, None
 
     wrist_y_side = get_series(f"wrist_{side}_y")
     wrist_x_side = get_series(f"wrist_{side}_x")
@@ -129,10 +136,11 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     metrics = compute_metrics(rep_slices, metrics_series, torso_scale, sampling_rate)
     if metrics.rep_count == 0:
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, None
 
-    label, confidence, scores, _ = classify_exercise(metrics)
+    label, confidence, scores, probabilities, diagnostics = classify_exercise(metrics)
     view_label = view_result.label
+    confidence_before_view = float(confidence)
 
     if (
         label == "squat"
@@ -145,12 +153,23 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     if label == "unknown":
         view_label = "unknown"
         confidence = 0.0
-
-    if np.isfinite(view_result.confidence):
-        confidence = float(min(confidence, view_result.confidence))
+    else:
+        if np.isfinite(view_result.confidence) and view_label != "unknown":
+            view_factor = 0.6 + 0.4 * float(np.clip(view_result.confidence, 0.0, 1.0))
+            confidence = float(np.clip(confidence * view_factor, 0.0, 1.0))
 
     _log_summary(side, view_label, metrics, scores, view_result)
-    return label, view_label, float(confidence)
+    diagnostics_payload = _build_diagnostics(
+        metrics,
+        scores,
+        probabilities,
+        diagnostics,
+        view_result,
+        view_label,
+        confidence_before_view,
+        confidence,
+    )
+    return label, view_label, float(confidence), diagnostics_payload
 
 
 def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
@@ -307,5 +326,70 @@ def _log_summary(
         )
 
 
-__all__ = ["classify_features"]
+def _build_diagnostics(
+    metrics: AggregateMetrics,
+    scores: ClassificationScores,
+    probabilities: Mapping[str, float],
+    exercise_diagnostics: Mapping[str, object],
+    view_result: ViewResult,
+    view_label: str,
+    confidence_before_view: float,
+    confidence_final: float,
+) -> Dict[str, object]:
+    stats = getattr(view_result, "stats", {}) or {}
+    width_mad = stats.get("width_mad", float("nan"))
+    z_mad = stats.get("z_mad", float("nan"))
+    vis_mad = stats.get("vis_mad", float("nan"))
+    dispersion_values = [value for value in (width_mad, z_mad, vis_mad) if np.isfinite(value)]
+    dispersion = float(np.mean(dispersion_values)) if dispersion_values else float("nan")
 
+    diagnostics: Dict[str, object] = {
+        "raw_scores": {k: float(v) for k, v in scores.raw.items()},
+        "penalties": {k: float(v) for k, v in scores.penalties.items()},
+        "adjusted_scores": {k: float(v) for k, v in scores.adjusted.items()},
+        "probabilities": {k: float(v) for k, v in probabilities.items()},
+        "margin": float(exercise_diagnostics.get("margin", 0.0)),
+        "tiebreak": exercise_diagnostics.get("tiebreak", {}),
+        "deadlift_veto": {
+            "active": bool(scores.deadlift_veto),
+            "cues": exercise_diagnostics.get("deadlift_veto_cues", {}),
+        },
+        "deadlift_gate": {
+            "squat_bar_high_gate": float(exercise_diagnostics.get("squat_bar_high_gate", 0.0)),
+            "deadlift_gate_penalty": float(exercise_diagnostics.get("deadlift_gate_penalty", 0.0)),
+        },
+        "view_result": {
+            "label": view_label,
+            "confidence": float(view_result.confidence),
+            "lateral_score": float(view_result.lateral_score),
+            "reliable_frames": int(stats.get("reliable_frames", 0)),
+            "reliability_ratio": float(stats.get("reliability_ratio", 0.0)),
+            "dispersion": dispersion,
+        },
+        "confidence_blend": {
+            "strategy": "soft_view_blend",
+            "exercise_confidence": float(confidence_before_view),
+            "view_confidence": float(view_result.confidence),
+            "final_confidence": float(confidence_final),
+        },
+        "metrics_snapshot": {
+            "knee_min": float(metrics.knee_min),
+            "hip_min": float(metrics.hip_min),
+            "elbow_bottom": float(metrics.elbow_bottom),
+            "torso_tilt_bottom": float(metrics.torso_tilt_bottom),
+            "wrist_shoulder_diff_norm": float(metrics.wrist_shoulder_diff_norm),
+            "wrist_hip_diff_norm": float(metrics.wrist_hip_diff_norm),
+            "knee_forward_norm": float(metrics.knee_forward_norm),
+            "knee_rom": float(metrics.knee_rom),
+            "hip_rom": float(metrics.hip_rom),
+            "elbow_rom": float(metrics.elbow_rom),
+            "bar_range_norm": float(metrics.bar_range_norm),
+            "bar_ankle_diff_norm": float(metrics.bar_ankle_diff_norm),
+            "bar_horizontal_std_norm": float(metrics.bar_horizontal_std_norm),
+            "rep_count": int(metrics.rep_count),
+        },
+    }
+    return diagnostics
+
+
+__all__ = ["classify_features"]

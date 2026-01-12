@@ -46,6 +46,7 @@ from .constants import (
     DEADLIFT_KNEE_PENALTY_WEIGHT,
     DEADLIFT_LOW_MOVEMENT_CAP,
     DEADLIFT_ROM_WEIGHT,
+    DEADLIFT_SQUAT_GATING_PENALTY_WEIGHT,
     DEADLIFT_SQUAT_PENALTY_WEIGHT,
     DEADLIFT_TORSO_TILT_MIN_DEG,
     DEADLIFT_TORSO_WEIGHT,
@@ -79,7 +80,9 @@ from .types import AggregateMetrics, ClassificationScores
 LABELS = ("squat", "deadlift", "bench_press")
 
 
-def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, ClassificationScores, Mapping[str, float]]:
+def classify_exercise(
+    agg: AggregateMetrics,
+) -> Tuple[str, float, ClassificationScores, Mapping[str, float], Mapping[str, object]]:
     """Calcula la etiqueta, la confianza y las puntuaciones intermedias del ejercicio."""
 
     # Inicializamos contadores para acumular puntuaciones crudas y penalizaciones
@@ -98,21 +101,31 @@ def classify_exercise(agg: AggregateMetrics) -> Tuple[str, float, Classification
     squat_adjusted = max(0.0, squat_raw - squat_penalty)
 
     deadlift_raw, deadlift_penalty = _deadlift_score(agg)
+    squat_bar_high_gate = _squat_bar_high_gate(agg)
+    deadlift_gate_penalty = DEADLIFT_SQUAT_GATING_PENALTY_WEIGHT * squat_bar_high_gate
+    deadlift_penalty += deadlift_gate_penalty
     raw_scores["deadlift"] = deadlift_raw
     penalties["deadlift"] = deadlift_penalty
     deadlift_adjusted = max(0.0, deadlift_raw - deadlift_penalty)
 
-    deadlift_veto = _apply_deadlift_veto(agg, bench_score, deadlift_adjusted)
+    deadlift_veto, deadlift_veto_cues = _apply_deadlift_veto(agg, bench_score, deadlift_adjusted)
     if deadlift_veto:
         squat_adjusted *= DEADLIFT_VETO_SCORE_CLAMP
 
     adjusted["squat"] = squat_adjusted
     adjusted["deadlift"] = deadlift_adjusted
 
-    label, confidence, probabilities = _pick_label(adjusted, agg)
+    label, confidence, probabilities, margin, tiebreak_info = _pick_label(adjusted, agg)
 
     scores = ClassificationScores(raw=raw_scores, adjusted=adjusted, penalties=penalties, deadlift_veto=deadlift_veto)
-    return label, confidence, scores, probabilities
+    diagnostics = {
+        "margin": float(margin),
+        "tiebreak": tiebreak_info,
+        "deadlift_veto_cues": deadlift_veto_cues,
+        "deadlift_gate_penalty": float(deadlift_gate_penalty),
+        "squat_bar_high_gate": float(squat_bar_high_gate),
+    }
+    return label, confidence, scores, probabilities, diagnostics
 
 
 def _bench_score(agg: AggregateMetrics) -> float:
@@ -184,12 +197,13 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
 
     penalty = SQUAT_TIBIA_PENALTY_WEIGHT * max(0.0, tibia_penalty)
 
-    hinge_cues = [
-        _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG),
-        _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM),
-        _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG),
-        _margin_below(np.abs(agg.knee_forward_norm), DEADLIFT_KNEE_FORWARD_MAX_NORM),
-    ]
+    elbow_cue = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
+    wrist_hip_cue = _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
+    knee_forward_cue = _margin_below(np.abs(agg.knee_forward_norm), DEADLIFT_KNEE_FORWARD_MAX_NORM)
+    torso_cue = 0.0
+    if max(elbow_cue, wrist_hip_cue) > 0.0:
+        torso_cue = _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG)
+    hinge_cues = [elbow_cue, wrist_hip_cue, torso_cue, knee_forward_cue]
     penalty += SQUAT_HINGE_PENALTY_WEIGHT * sum(max(0.0, cue) for cue in hinge_cues)
 
     return score, penalty
@@ -246,30 +260,35 @@ def _apply_deadlift_veto(
     agg: AggregateMetrics,
     bench_score: float,
     deadlift_score: float,
-) -> bool:
+) -> tuple[bool, Mapping[str, object]]:
     if bench_score > deadlift_score:
-        return False
+        return False, {}
 
-    cues = [
-        agg.torso_tilt_bottom >= DEADLIFT_TORSO_TILT_MIN_DEG,
-        agg.elbow_bottom >= DEADLIFT_ELBOW_MIN_DEG,
-        agg.knee_min >= DEADLIFT_KNEE_BOTTOM_MIN_DEG,
-        agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM,
-    ]
+    cues = {
+        "torso_tilt": bool(agg.torso_tilt_bottom >= DEADLIFT_TORSO_TILT_MIN_DEG),
+        "elbow_bottom": bool(agg.elbow_bottom >= DEADLIFT_ELBOW_MIN_DEG),
+        "knee_min": bool(agg.knee_min >= DEADLIFT_KNEE_BOTTOM_MIN_DEG),
+        "wrist_hip": bool(agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM),
+    }
     movement = max(agg.hip_rom, agg.bar_range_norm)
-    if sum(cues) >= 3 and movement >= DEADLIFT_VETO_MOVEMENT_MIN and deadlift_score > 0:
-        return True
-    return False
+    cues["movement"] = float(movement)
+    cue_count = sum(1 for value in cues.values() if isinstance(value, bool) and value)
+    if cue_count >= 3 and movement >= DEADLIFT_VETO_MOVEMENT_MIN and deadlift_score > 0:
+        return True, cues
+    return False, cues
 
 
-def _pick_label(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[str, float, Mapping[str, float]]:
+def _pick_label(
+    adjusted: Mapping[str, float],
+    agg: AggregateMetrics,
+) -> Tuple[str, float, Mapping[str, float], float, Mapping[str, object]]:
     scores = np.array([max(0.0, adjusted[label]) for label in LABELS], dtype=float)
     if not np.isfinite(scores).any():
-        return "unknown", 0.0, {label: 0.0 for label in LABELS}
+        return "unknown", 0.0, {label: 0.0 for label in LABELS}, 0.0, {"used": False, "rule": None}
 
     clipped = np.clip(scores, 0.0, None)
     if clipped.sum() == 0:
-        return "unknown", 0.0, {label: 0.0 for label in LABELS}
+        return "unknown", 0.0, {label: 0.0 for label in LABELS}, 0.0, {"used": False, "rule": None}
 
     exp_scores = np.exp(clipped - clipped.max())
     probabilities = exp_scores / exp_scores.sum()
@@ -280,47 +299,76 @@ def _pick_label(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[s
     best_score = clipped[best_idx]
     sorted_scores = np.sort(clipped)
     second_best = sorted_scores[-2] if clipped.size >= 2 else 0.0
+    margin = float(best_score - second_best)
+    tiebreak_info = {"used": False, "rule": None}
 
     if best_score < MIN_CONFIDENCE_SCORE:
-        return "unknown", 0.0, prob_map
+        return "unknown", 0.0, prob_map, margin, tiebreak_info
 
-    if best_score - second_best < CLASSIFICATION_MARGIN:
-        resolved = _tiebreak(adjusted, agg)
+    if margin < CLASSIFICATION_MARGIN:
+        resolved, rule = _tiebreak(adjusted, agg)
+        tiebreak_info = {"used": True, "rule": rule}
         if resolved == "unknown":
-            return "unknown", 0.0, prob_map
+            return "unknown", 0.0, prob_map, margin, tiebreak_info
         best_label = resolved
 
     confidence = prob_map.get(best_label, 0.0)
     if confidence < MIN_CONFIDENCE_SCORE:
-        return "unknown", 0.0, prob_map
-    return best_label, confidence, prob_map
+        return "unknown", 0.0, prob_map, margin, tiebreak_info
+    return best_label, confidence, prob_map, margin, tiebreak_info
 
 
-def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> str:
+def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> tuple[str, str]:
     squat_score = max(0.0, adjusted.get("squat", 0.0))
     deadlift_score = max(0.0, adjusted.get("deadlift", 0.0))
     bench_score = max(0.0, adjusted.get("bench_press", 0.0))
 
     if bench_score > max(squat_score, deadlift_score) and bench_score >= MIN_CONFIDENCE_SCORE:
-        return "bench_press"
+        return "bench_press", "bench_gate"
+
+    if _has_squat_evidence(agg):
+        return "squat", "squat_evidence"
 
     if np.isfinite(agg.wrist_hip_diff_norm) and agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
-        return "deadlift"
+        return "deadlift", "deadlift_wrist_hip"
     if np.isfinite(agg.elbow_bottom) and agg.elbow_bottom >= DEADLIFT_ELBOW_MIN_DEG:
-        return "deadlift"
+        return "deadlift", "deadlift_elbow"
     if np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= DEADLIFT_TORSO_TILT_MIN_DEG:
-        return "deadlift"
+        return "deadlift", "deadlift_torso"
     if np.isfinite(agg.knee_forward_norm) and abs(agg.knee_forward_norm) >= SQUAT_KNEE_FORWARD_MIN_NORM:
-        return "squat"
+        return "squat", "squat_knee_forward"
 
     squat_posture = _margin_below(agg.torso_tilt_bottom, SQUAT_TORSO_TILT_MAX_DEG)
     deadlift_posture = _margin_above(agg.torso_tilt_bottom, DEADLIFT_TORSO_TILT_MIN_DEG)
     if deadlift_posture > squat_posture:
-        return "deadlift"
+        return "deadlift", "posture_deadlift"
     if squat_posture > deadlift_posture:
-        return "squat"
+        return "squat", "posture_squat"
 
-    return "unknown"
+    return "unknown", "none"
+
+
+def _squat_bar_high_gate(agg: AggregateMetrics) -> float:
+    if not np.isfinite(agg.wrist_shoulder_diff_norm) or not np.isfinite(agg.elbow_bottom):
+        return 0.0
+    wrist_margin = _margin_below(np.abs(agg.wrist_shoulder_diff_norm), SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM)
+    elbow_margin = _margin_below(agg.elbow_bottom, SQUAT_ELBOW_BOTTOM_MAX_DEG)
+    if wrist_margin > 0.0 and elbow_margin > 0.0:
+        return float(min(wrist_margin, elbow_margin))
+    return 0.0
+
+
+def _has_squat_evidence(agg: AggregateMetrics) -> bool:
+    depth_ok = False
+    if np.isfinite(agg.knee_min):
+        depth_ok |= agg.knee_min <= SQUAT_KNEE_BOTTOM_MAX_DEG
+    if np.isfinite(agg.hip_min):
+        depth_ok |= agg.hip_min <= SQUAT_HIP_BOTTOM_MAX_DEG
+
+    knee_rom_ok = np.isfinite(agg.knee_rom) and agg.knee_rom >= SQUAT_MIN_ROM_DEG
+    bar_high_ok = np.isfinite(agg.wrist_shoulder_diff_norm) and np.abs(agg.wrist_shoulder_diff_norm) <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
+    elbow_flex_ok = np.isfinite(agg.elbow_bottom) and agg.elbow_bottom <= SQUAT_ELBOW_BOTTOM_MAX_DEG
+    return bool(depth_ok and knee_rom_ok and (bar_high_ok or elbow_flex_ok))
 
 
 def _margin_above(value: float, threshold: float) -> float:
@@ -349,4 +397,3 @@ def _bench_gate(agg: AggregateMetrics) -> bool:
             or agg.elbow_rom >= BENCH_ELBOW_ROM_MIN_DEG * BENCH_ELBOW_ROM_GATE_FACTOR
         )
     )
-

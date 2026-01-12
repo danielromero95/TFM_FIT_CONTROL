@@ -1,0 +1,67 @@
+Informe de mejoras de detección (squat / deadlift / bench)
+==========================================================
+
+Resumen de cambios y justificación (biomecánica + robustez)
+-----------------------------------------------------------
+1) Diagnóstico instrumentado:
+   - Se añadió un bloque de diagnostics estructurado con:
+     raw_scores, penalties, adjusted_scores, probabilities (softmax), margin,
+     uso de tiebreak y regla aplicada, deadlift_veto con cues,
+     y detalle de view_result (label, confidence, lateral_score, reliable_frames,
+     reliability_ratio, dispersion), además de un snapshot de métricas clave.
+   - Este diagnóstico se adjunta como campo opcional en RunStats (detection_diagnostics),
+     manteniendo compatibilidad con consumidores existentes.
+
+2) Reducción de falsos “squat -> deadlift”:
+   - Se separaron los umbrales de knee_forward (deadlift <= 0.03, squat >= 0.06)
+     para reducir el solape y crear un “gap” que ayude a discriminar patrones.
+   - Se añadió un gating explícito: si hay evidencia de barra alta y codos flexionados
+     (wrist_shoulder_diff_norm bajo y elbow_bottom bajo), se penaliza el score de deadlift.
+     Biomecánicamente esto es poco compatible con un deadlift estándar.
+   - La penalización hinge en squat ahora exige combinación de cues: la inclinación
+     del torso solo se penaliza si coexisten señales claras de hinge (wrist_hip_diff
+     elevado o codos extendidos). Así se evita castigar sentadillas con torso
+     algo inclinado.
+
+3) Tiebreak más equilibrado:
+   - Se prioriza squat en empates cuando hay evidencia mínima consistente
+     (depth + knee_rom + barra alta o codos flexionados), evitando sesgo a deadlift
+     por señales aisladas de hinge.
+
+4) Confidence más estable y realista:
+   - Se reemplazó el “min(exercise_conf, view_conf)” por un blend suave cuando la
+     vista es conocida, para no aplastar la confianza del ejercicio.
+   - Si la vista es “unknown”, se conserva la confianza del ejercicio sin caparla.
+
+Riesgos / posibles regresiones
+------------------------------
+- Separar umbrales de knee_forward puede reducir sensibilidad en casos límite
+  (p.ej., variantes de squat con rodilla poco adelantada).
+- El gating “barra alta / codos flexionados” puede penalizar deadlifts atípicos
+  (agarres o posiciones poco comunes con codos flexionados).
+- La nueva combinación de confidence puede aumentar valores en clips con vista
+  fiable pero señales de ejercicio aún ruidosas; se mitiga con la mezcla suave.
+
+Cómo interpretar diagnostics
+----------------------------
+- raw_scores / penalties / adjusted_scores: permiten ver qué señales aportan
+  o restan a cada hipótesis.
+- probabilities: softmax de adjusted_scores; su separación indica “distancia”
+  entre hipótesis.
+- margin: diferencia entre el mejor score y el segundo. Margen bajo dispara
+  tiebreak y puede reducir la estabilidad de la etiqueta.
+- tiebreak: indica si se activó y qué regla resolvió el empate.
+- deadlift_veto y deadlift_gate: muestran vetos o penalizaciones aplicadas por
+  biomecánica incompatible con deadlift.
+- view_result: resume la confianza de vista y su estabilidad (dispersion).
+
+Cómo ajustar constantes en el futuro
+------------------------------------
+- SQUAT_KNEE_FORWARD_MIN_NORM y DEADLIFT_KNEE_FORWARD_MAX_NORM:
+  aumente el gap si hay más confusión squat/deadlift; reduzca si hay falsos
+  “unknown” en rodillas adelantadas o retrasadas.
+- DEADLIFT_SQUAT_GATING_PENALTY_WEIGHT:
+  suba si aún hay confusión squat->deadlift con barra alta;
+  baje si penaliza deadlifts no estándar.
+- DEADLIFT_TORSO_TILT_MIN_DEG / SQUAT_TORSO_TILT_MAX_DEG:
+  ajuste si la inclinación del torso está siendo demasiado permisiva o restrictiva.

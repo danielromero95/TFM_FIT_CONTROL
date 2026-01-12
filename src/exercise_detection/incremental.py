@@ -24,7 +24,7 @@ from src.config.settings import (
 )
 from src.core.types import ExerciseType, ViewType
 
-from .classification import classify_features
+from .classification import _classify_features_with_diagnostics
 from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, MIN_VALID_FRAMES
 from .extraction import _append_nan, _append_reliability, _evaluate_view_reliability, _process_frame
 from .features import build_features_from_landmark_array
@@ -312,8 +312,8 @@ class IncrementalExerciseFeatureExtractor:
                     "reliable_frames_used": int(sum(self._reliability_flags)),
                 },
             )
-            label, view, confidence = classify_features(features)
-            return make_detection_result(label, view, confidence)
+            label, view, confidence, diagnostics = _classify_features_with_diagnostics(features)
+            return make_detection_result(label, view, confidence, diagnostics=diagnostics)
         finally:
             if self._initialised and self._pose is not None:
                 try:

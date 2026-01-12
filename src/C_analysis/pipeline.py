@@ -386,16 +386,19 @@ def run_pipeline(
             detected_label, detected_view, detected_confidence = normalize_detection(
                 prefetched_detection
             )
+            detection_diagnostics = None
         else:
             detection_output = streaming_result.detection
             if detection_output is None:
                 detected_label = ExerciseType.UNKNOWN
                 detected_view = ViewType.UNKNOWN
                 detected_confidence = 0.0
+                detection_diagnostics = None
             else:
                 detected_label = detection_output.label
                 detected_view = detection_output.view
                 detected_confidence = float(detection_output.confidence)
+                detection_diagnostics = getattr(detection_output, "diagnostics", None)
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
@@ -662,6 +665,7 @@ def run_pipeline(
         exercise_detected=detected_label,
         view_detected=detected_view,
         detection_confidence=float(detected_confidence),
+        detection_diagnostics=detection_diagnostics,
         primary_angle=primary_angle if primary_angle in df_metrics.columns else None,
         angle_range_deg=float(angle_range),
         min_prominence=float(cfg.counting.min_prominence),
