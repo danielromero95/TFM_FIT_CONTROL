@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
 
@@ -18,12 +18,18 @@ class DetectionResult:
     view: ViewType
     confidence: float
     side: str | None = None
+    diagnostics: Mapping[str, Any] | None = None
 
 
-def make_detection_result(label: str, view: str, confidence: float) -> "DetectionResult":
+def make_detection_result(
+    label: str,
+    view: str,
+    confidence: float,
+    diagnostics: Mapping[str, Any] | None = None,
+) -> "DetectionResult":
     """Convierte identificadores de texto legados en ``DetectionResult`` usando enumeraciones."""
 
-    return DetectionResult(as_exercise(label), as_view(view), float(confidence))
+    return DetectionResult(as_exercise(label), as_view(view), float(confidence), diagnostics=diagnostics)
 
 
 @dataclass
@@ -120,4 +126,3 @@ class ViewResult:
     lateral_score: float = float("nan")
     stats: Mapping[str, float] = field(default_factory=dict)
     side: str | None = None
-

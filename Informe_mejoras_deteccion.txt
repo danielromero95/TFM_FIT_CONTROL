@@ -1,0 +1,84 @@
+Mejoras de robustez en la detección de ejercicio (squat/deadlift/bench)
+======================================================================
+
+Resumen de cambios
+------------------
+1) Diagnóstico instrumentado
+   - Se añadió un bloque de diagnósticos estructurados accesible desde el pipeline:
+     - `DetectionResult.diagnostics` y `RunStats.detection_diagnostics`.
+     - Se serializa en `report.json` y se expone como campo nuevo en `run_stats.csv`.
+   - El diagnóstico incluye: `raw_scores`, `penalties`, `adjusted_scores`,
+     `probabilities` (softmax), `margin` (best-second), `tiebreak` (si se usó y regla),
+     `deadlift_veto` (activo + cues), `deadlift_gate` (penalización por cues de squat),
+     y `view_result` (label, confidence, lateral_score, reliable_frames, reliability_ratio, dispersion).
+
+2) Reducción de falsos “squat -> deadlift”
+   - Se separaron umbrales de rodilla adelantada para evitar solape:
+     - `SQUAT_KNEE_FORWARD_MIN_NORM = 0.06`
+     - `DEADLIFT_KNEE_FORWARD_MAX_NORM = 0.03`
+   - Se añadió un “gating” biomecánico contra deadlift cuando la barra está alta
+     (muñeca cerca del hombro) y los codos están flexionados:
+     - Si `wrist_shoulder_diff_norm` es pequeño y `elbow_bottom` es bajo, se aplica
+       una penalización explícita a `deadlift`.
+   - La penalización hinge del squat ya no cuenta el torso inclinado por sí solo:
+     - El cue de torso sólo penaliza si además hay señales de deadlift (muñeca
+       por debajo de la cadera o codos extendidos).
+
+3) _tiebreak más equilibrado
+   - El desempate ahora prioriza evidencia de squat cuando hay profundidad + ROM
+     de rodilla + (barra alta o codos flexionados), incluso si hay señales de hinge.
+   - Bench sigue siendo prioritario sólo si pasa el gate robusto.
+
+4) Confianza menos “capada” por la vista
+   - Antes: `confidence_final = min(exercise_conf, view_conf)`.
+   - Ahora: si la vista no es `unknown`, se combina suavemente:
+     `confidence_final = exercise_conf * (0.8 + 0.2 * view_conf)`.
+   - Si la vista es `unknown`, no se reduce la confianza del ejercicio.
+
+Justificación biomecánica y de robustez
+---------------------------------------
+- En sentadilla con barra alta/posición de brazos típica, la barra está cerca
+  del hombro y los codos están flexionados; esto es incompatible con un peso muerto
+  convencional. Penalizar deadlift en esa configuración reduce falsos positivos.
+- El torso inclinado aparece en ambos ejercicios; penalizar squat por “torso inclinado”
+  sin otras señales de hinge introducía confusión. Exigir combinación de cues hace
+  la regla más específica.
+- Separar los umbrales de rodilla adelantada crea una “zona de separación” que evita
+  conflictos en clips borderline y estabiliza el score.
+- El tiebreak ahora respeta evidencia profunda y ROM de rodilla propia de la sentadilla,
+  incluso si aparecen señales ambiguas de hinge.
+
+Riesgos / posibles regresiones
+------------------------------
+- El “gating” de deadlift podría penalizar variantes de peso muerto con brazos
+  flexionados o posición de barra atípica, aunque biomecánicamente son raras.
+- El gap de rodilla adelantada podría reducir sensibilidad a sentadillas con
+  rodilla muy retrasada (estilo muy dominante de cadera) o a deadlifts con
+  rodilla muy adelantada (estilo muy rodilla-dominante).
+- El tiebreak podría favorecer squat en clips muy cortos con evidencia parcial.
+
+Cómo interpretar los diagnostics
+--------------------------------
+- `raw_scores`: puntuaciones antes de penalizaciones.
+- `penalties`: penalizaciones totales aplicadas por ejercicio.
+- `adjusted_scores`: scores tras penalización y clamps.
+- `probabilities`: softmax de `adjusted_scores`.
+- `margin`: diferencia entre el mejor score y el segundo.
+- `tiebreak`: indica si se activó y la regla usada (p. ej. `squat_evidence`).
+- `deadlift_veto`: si se activó el veto y cues asociados.
+- `deadlift_gate`: si se activó el gate de “barra alta / codos flexionados”
+  y cuánto penalizó.
+- `view_result`: métricas de fiabilidad de vista (lateral_score, reliability, dispersion).
+
+Ajuste futuro de constantes
+---------------------------
+Las constantes relevantes están en `src/exercise_detection/constants.py`:
+- `SQUAT_KNEE_FORWARD_MIN_NORM` y `DEADLIFT_KNEE_FORWARD_MAX_NORM` controlan el gap.
+- `DEADLIFT_SQUAT_GATE_PENALTY_WEIGHT` controla la severidad del gate anti-deadlift.
+- `SQUAT_TORSO_TILT_MAX_DEG` y `DEADLIFT_TORSO_TILT_MIN_DEG` ajustan la sensibilidad
+  al torso.
+
+Para cambios finos:
+- Si se observan sentadillas confundidas como deadlift, aumentar ligeramente
+  `DEADLIFT_SQUAT_GATE_PENALTY_WEIGHT` o reducir `DEADLIFT_KNEE_FORWARD_MAX_NORM`.
+- Si deadlift reales caen a “unknown”, reducir el gate o ajustar el torso/rodilla.

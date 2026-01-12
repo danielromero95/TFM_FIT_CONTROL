@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -53,9 +53,23 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose."""
+    label, view_label, confidence, _ = _classify_features_with_diagnostics(features)
+    return label, view_label, confidence
 
+
+def classify_features_with_diagnostics(
+    features: FeatureSeries,
+) -> Tuple[str, str, float, Mapping[str, Any]]:
+    """Clasifica el ejercicio y añade diagnósticos para auditoría."""
+
+    return _classify_features_with_diagnostics(features)
+
+
+def _classify_features_with_diagnostics(
+    features: FeatureSeries,
+) -> Tuple[str, str, float, Mapping[str, Any]]:
     if features.valid_frames < MIN_VALID_FRAMES:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, {"reason": "min_frames"}
 
     series = _prepare_series(features)
     sampling_rate = float(features.sampling_rate or DEFAULT_SAMPLING_RATE)
@@ -82,7 +96,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         for name in ("shoulder_yaw_deg", "shoulder_z_delta_abs", "shoulder_width_norm", "ankle_width_norm")
     )
     if view_result.label == "unknown" and not view_cues_present:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, {"reason": "no_view_cues"}
 
     visibility = _compute_side_visibility(series)
     side = _select_visible_side(series, visibility=visibility)
@@ -94,7 +108,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     torso_tilt = get_series("torso_tilt_deg")
 
     if _is_invalid(knee_angle) or _is_invalid(hip_angle) or _is_invalid(elbow_angle):
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, {"reason": "invalid_series"}
 
     wrist_y_side = get_series(f"wrist_{side}_y")
     wrist_x_side = get_series(f"wrist_{side}_x")
@@ -129,9 +143,9 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     metrics = compute_metrics(rep_slices, metrics_series, torso_scale, sampling_rate)
     if metrics.rep_count == 0:
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, {"reason": "no_reps"}
 
-    label, confidence, scores, _ = classify_exercise(metrics)
+    label, confidence, scores, probabilities, classifier_diag = classify_exercise(metrics)
     view_label = view_result.label
 
     if (
@@ -146,11 +160,20 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         view_label = "unknown"
         confidence = 0.0
 
-    if np.isfinite(view_result.confidence):
-        confidence = float(min(confidence, view_result.confidence))
+    confidence = _combine_confidences(confidence, view_result, view_label)
+
+    diagnostics = _build_diagnostics(
+        metrics=metrics,
+        scores=scores,
+        probabilities=probabilities,
+        classifier_diag=classifier_diag,
+        view_result=view_result,
+        view_label=view_label,
+        confidence=confidence,
+    )
 
     _log_summary(side, view_label, metrics, scores, view_result)
-    return label, view_label, float(confidence)
+    return label, view_label, float(confidence), diagnostics
 
 
 def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
@@ -307,5 +330,63 @@ def _log_summary(
         )
 
 
-__all__ = ["classify_features"]
+def _combine_confidences(
+    exercise_conf: float, view_result: ViewResult, view_label: str
+) -> float:
+    if not np.isfinite(exercise_conf):
+        return 0.0
+    if view_label == "unknown":
+        return float(np.clip(exercise_conf, 0.0, 1.0))
+    view_conf = float(view_result.confidence) if np.isfinite(view_result.confidence) else 0.0
+    combined = exercise_conf * (0.8 + 0.2 * np.clip(view_conf, 0.0, 1.0))
+    return float(np.clip(combined, 0.0, 1.0))
 
+
+def _build_diagnostics(
+    *,
+    metrics: AggregateMetrics,
+    scores: ClassificationScores,
+    probabilities: Mapping[str, float],
+    classifier_diag: Mapping[str, Any],
+    view_result: ViewResult,
+    view_label: str,
+    confidence: float,
+) -> Mapping[str, Any]:
+    def _normalize_score_map(values: Mapping[str, float]) -> Dict[str, float]:
+        normalized = {k: float(v) for k, v in values.items()}
+        if "bench_press" in normalized:
+            normalized["bench"] = normalized.pop("bench_press")
+        return normalized
+
+    stats = getattr(view_result, "stats", {}) or {}
+    dispersion = float(np.nanmean([stats.get("width_mad", np.nan), stats.get("z_mad", np.nan), stats.get("vis_mad", np.nan)]))
+    if not np.isfinite(dispersion):
+        dispersion = float(stats.get("z_mad", np.nan))
+    view_snapshot = {
+        "label": view_label,
+        "confidence": float(view_result.confidence),
+        "lateral_score": float(getattr(view_result, "lateral_score", float("nan"))),
+        "reliable_frames": int(stats.get("reliable_frames", 0) or 0),
+        "reliability_ratio": float(stats.get("reliability_ratio", 0.0) or 0.0),
+        "dispersion": dispersion,
+    }
+
+    diagnostics = {
+        "raw_scores": _normalize_score_map(scores.raw),
+        "penalties": _normalize_score_map(scores.penalties),
+        "adjusted_scores": _normalize_score_map(scores.adjusted),
+        "probabilities": _normalize_score_map(probabilities),
+        "margin": float(classifier_diag.get("margin", 0.0) or 0.0),
+        "tiebreak": classifier_diag.get("tiebreak", {}),
+        "deadlift_veto": {
+            "active": bool(scores.deadlift_veto),
+            "cues": classifier_diag.get("deadlift_veto_cues", {}),
+        },
+        "deadlift_gate": classifier_diag.get("deadlift_squat_gate", {}),
+        "view_result": view_snapshot,
+        "confidence_final": float(confidence),
+    }
+    return diagnostics
+
+
+__all__ = ["classify_features"]

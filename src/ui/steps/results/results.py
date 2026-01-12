@@ -1848,6 +1848,13 @@ def _results_panel() -> Dict[str, bool]:
                     "Field": "detection_confidence",
                     "Value": f"{stats.detection_confidence:.0%}",
                 },
+                {
+                    "Field": "detection_diagnostics",
+                    "Value": json.dumps(
+                        getattr(stats, "detection_diagnostics", None),
+                        ensure_ascii=False,
+                    ),
+                },
                 {"Field": "primary_angle", "Value": stats.primary_angle or "N/A"},
                 {"Field": "angle_range_deg", "Value": f"{stats.angle_range_deg:.2f}"},
                 {"Field": "min_prominence", "Value": f"{stats.min_prominence:.2f}"},
