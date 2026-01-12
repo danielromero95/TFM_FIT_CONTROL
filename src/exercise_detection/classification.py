@@ -128,6 +128,8 @@ def classify_features_with_diagnostics(
         "wrist_x": wrist_x_side,
         "shoulder_y": shoulder_y_side,
         "hip_y": hip_y_side,
+        "hip_left_y": get_series("hip_left_y"),
+        "hip_right_y": get_series("hip_right_y"),
         "knee_x": knee_x_side,
         "knee_y": knee_y_side,
         "ankle_x": ankle_x_side,

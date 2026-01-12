@@ -56,6 +56,8 @@ def _compute_single_rep(
     wrist_x = _safe_slice(series.get("wrist_x"), start, end)
     shoulder_y = _safe_slice(series.get("shoulder_y"), start, end)
     hip_y = _safe_slice(series.get("hip_y"), start, end)
+    hip_left_y = _safe_slice(series.get("hip_left_y"), start, end)
+    hip_right_y = _safe_slice(series.get("hip_right_y"), start, end)
     knee_x = _safe_slice(series.get("knee_x"), start, end)
     knee_y = _safe_slice(series.get("knee_y"), start, end)
     ankle_x = _safe_slice(series.get("ankle_x"), start, end)
@@ -90,14 +92,21 @@ def _compute_single_rep(
     wrist_y_bottom = safe_nanmedian(wrist_y[bottom_mask])
     shoulder_bottom = safe_nanmedian(shoulder_y[bottom_mask])
     hip_y_bottom = safe_nanmedian(hip_y[bottom_mask])
+    hip_left_bottom = safe_nanmedian(hip_left_y[bottom_mask])
+    hip_right_bottom = safe_nanmedian(hip_right_y[bottom_mask])
+    hip_y_mean_bottom = safe_nanmedian([hip_left_bottom, hip_right_bottom])
+    if not np.isfinite(hip_y_mean_bottom):
+        hip_y_mean_bottom = hip_y_bottom
     ankle_x_bottom = safe_nanmedian(ankle_x[bottom_mask])
     knee_x_bottom = safe_nanmedian(knee_x[bottom_mask])
     ankle_y_bottom = safe_nanmedian(ankle_y[bottom_mask])
     knee_y_bottom = safe_nanmedian(knee_y[bottom_mask])
     bar_x_bottom = safe_nanmedian(bar_x[bottom_mask])
+    bar_y_bottom = safe_nanmedian(bar_y[bottom_mask])
 
     wrist_shoulder_diff_norm = _normed_difference(wrist_y_bottom, shoulder_bottom, torso_scale)
     wrist_hip_diff_norm = _normed_difference(wrist_y_bottom, hip_y_bottom, torso_scale)
+    bar_above_hip_norm = _normed_difference(hip_y_mean_bottom, bar_y_bottom, torso_scale)
     knee_forward_norm = _normed_difference(knee_x_bottom, ankle_x_bottom, torso_scale)
 
     delta_x = np.abs(knee_x_bottom - ankle_x_bottom)
@@ -120,6 +129,7 @@ def _compute_single_rep(
         torso_tilt_bottom=torso_bottom,
         wrist_shoulder_diff_norm=wrist_shoulder_diff_norm,
         wrist_hip_diff_norm=wrist_hip_diff_norm,
+        bar_above_hip_norm=bar_above_hip_norm,
         knee_forward_norm=knee_forward_norm,
         tibia_angle_deg=tibia_angle,
         bar_ankle_diff_norm=bar_ankle_diff_norm,
@@ -153,6 +163,7 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
         torso_tilt_bottom=med("torso_tilt_bottom"),
         wrist_shoulder_diff_norm=med("wrist_shoulder_diff_norm"),
         wrist_hip_diff_norm=med("wrist_hip_diff_norm"),
+        bar_above_hip_norm=med("bar_above_hip_norm"),
         knee_forward_norm=med("knee_forward_norm"),
         tibia_angle_deg=med("tibia_angle_deg"),
         bar_ankle_diff_norm=med("bar_ankle_diff_norm"),
@@ -211,4 +222,3 @@ def _series_std_norm(series: np.ndarray, torso_scale: float) -> float:
     if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
         return float("nan")
     return float(safe_nanstd(array) / torso_scale)
-
