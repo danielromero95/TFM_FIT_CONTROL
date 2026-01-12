@@ -59,6 +59,7 @@ class RunStats:
     t_metrics_ms: Optional[float] = None
     t_count_ms: Optional[float] = None
     t_total_ms: Optional[float] = None
+    detection_diagnostics: Optional[Dict[str, Any]] = None
 
 
 @dataclass
