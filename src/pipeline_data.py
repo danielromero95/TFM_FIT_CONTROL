@@ -52,6 +52,7 @@ class RunStats:
     debug_notes: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
     config_path: Optional[Path] = None
+    detection_diagnostics: Optional[Dict[str, Any]] = None
     # Tiempos por etapa (milisegundos). Opcional por compatibilidad retroactiva.
     t_extract_ms: Optional[float] = None
     t_pose_ms: Optional[float] = None
