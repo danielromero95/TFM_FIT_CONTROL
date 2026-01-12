@@ -64,6 +64,7 @@ class RepMetrics:
     torso_tilt_bottom: float
     wrist_shoulder_diff_norm: float
     wrist_hip_diff_norm: float
+    bar_above_hip_norm: float
     knee_forward_norm: float
     tibia_angle_deg: float
     bar_ankle_diff_norm: float
@@ -86,6 +87,7 @@ class AggregateMetrics:
     torso_tilt_bottom: float = np.nan
     wrist_shoulder_diff_norm: float = np.nan
     wrist_hip_diff_norm: float = np.nan
+    bar_above_hip_norm: float = np.nan
     knee_forward_norm: float = np.nan
     tibia_angle_deg: float = np.nan
     bar_ankle_diff_norm: float = np.nan

@@ -1,0 +1,72 @@
+Informe_arm_bar_discriminator
+==============================
+
+A) Auditoría del estado actual (solo lectura)
+---------------------------------------------
+1) Cómo se calculan las métricas existentes:
+- wrist_shoulder_diff_norm: en `src/exercise_detection/metrics.py::_compute_single_rep`, se calcula como
+  `wrist_y_bottom - shoulder_bottom` normalizado por `torso_scale` con `_normed_difference`. No se aplica valor absoluto
+  salvo que se use posteriormente en el clasificador. El cálculo usa el eje Y en coordenadas de MediaPipe (no se invierte
+  el eje). `wrist_y_bottom` y `shoulder_bottom` son medianas en la ventana inferior (bottom window). (Ver `metrics.py` y
+  `features.py` donde se usan `left_wrist[1]` y `left_shoulder[1]` directamente.)
+
+- wrist_hip_diff_norm: en el mismo lugar se calcula como `wrist_y_bottom - hip_y_bottom` normalizado por `torso_scale`.
+  NO pierde el signo en la métrica (no usa `abs` en `_normed_difference`). En el clasificador, sin embargo, algunas reglas
+  usan `abs` cuando comparan con el hombro, pero para la cadera se mantiene el signo.
+
+- bar_y / wrist_y_mean: en `src/exercise_detection/classification.py`, `bar_y` se define explícitamente como la media
+  de `wrist_left_y` y `wrist_right_y` (`wrist_y_mean`), y se pasa a `compute_metrics` con la clave `bar_y`.
+
+- hip_y: `hip_y` (por lado) se pasa al cálculo de métricas desde `classification.py` como `hip_y` y se usa para
+  `wrist_hip_diff_norm` en el bottom window.
+
+2) Signo y mezcla de vistas en wrist_hip_diff_norm:
+- wrist_hip_diff_norm mantiene el signo (NO es absoluto). Si el eje Y crece hacia abajo (convención de MediaPipe),
+  entonces muñecas por debajo de la cadera dan valores positivos y muñecas por encima dan valores negativos.
+- Actualmente no mezcla vistas: usa el lado visible (left/right) seleccionado en `classification.py` y no combina
+  ambos lados para la cadera (solo `hip_{side}_y`).
+
+B) Nueva métrica bar_above_hip_norm (implementación)
+---------------------------------------------------
+Se añadió una métrica explícita para “altura de barra vs cadera” en bottom window:
+
+  bar_above_hip_norm = (hip_y_mean_bottom - bar_y_bottom) / torso_scale
+
+- hip_y_mean_bottom: mediana de `hip_left_y` y `hip_right_y` en la ventana inferior; si no hay datos válidos, se
+  usa `hip_y` del lado visible (fallback seguro).
+- bar_y_bottom: mediana de `bar_y` en la ventana inferior (donde `bar_y` ya es la media de muñecas).
+- Se reutiliza EXACTAMENTE la ventana inferior ya existente (`BOTTOM_WINDOW_DEG` / `BOTTOM_FRACTION`).
+- Si `torso_scale` no es válido, el resultado es NaN y el clasificador lo ignora (degrada sin fallar).
+
+La métrica se añadió a `RepMetrics` y `AggregateMetrics`, y el agregador propaga la mediana entre repeticiones.
+
+C) Uso como discriminador fuerte en clasificación
+-------------------------------------------------
+1) Deadlift (clamp fuerte):
+- Se añadió un gate explícito: si `bar_above_hip_norm` es claramente positivo (barra alta respecto a la cadera),
+  se reduce fuertemente la puntuación de deadlift mediante `DEADLIFT_ARM_CLAMP`.
+- Justificación biomecánica: en peso muerto la barra está baja en la fase inferior, por debajo de la cadera,
+  por lo que una barra alta es un fuerte indicador de sentadilla o al menos NO de deadlift.
+
+2) Squat (premio y penalización):
+- Se añade un bonus proporcional cuando `bar_above_hip_norm` supera `SQUAT_BAR_ABOVE_HIP_MIN_NORM`.
+- Se añade una penalización explícita cuando `bar_above_hip_norm` es muy negativa (barra claramente por debajo
+  de la cadera), para reducir falsos positivos de squat en deadlift.
+
+3) Tiebreak actualizado:
+- Antes de devolver “deadlift” por cues de muñeca/codo/torso, se comprueba `bar_above_hip_norm`.
+  Si indica barra alta, se elige “squat”; si indica barra baja marcada, se elige “deadlift”.
+
+Cómo leer los diagnostics
+-------------------------
+En la salida de `classify_exercise`, los diagnostics incluyen:
+- `bar_above_hip_norm`: el valor agregado usado para decidir barra alta/baja.
+- `deadlift_arm_gate`: indica si el clamp fue aplicado (`active`), el umbral usado (`threshold`) y la penalización.
+- `deadlift_bar_gate`: gate previo (barra alta tipo squat) que también puede reducir deadlift.
+- `raw_scores`, `penalties` y `adjusted_scores`: permiten ver cuánto cambia cada señal.
+
+Interpretación rápida:
+- `bar_above_hip_norm` > 0: barra por encima de la cadera (propio de sentadilla con barra alta).
+- `bar_above_hip_norm` < 0: barra por debajo de la cadera (propio de peso muerto).
+- Si `deadlift_arm_gate.active` es True, deadlift fue recortado fuertemente por barra alta.
+
