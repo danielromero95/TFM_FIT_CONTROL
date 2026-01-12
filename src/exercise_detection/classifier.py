@@ -33,11 +33,13 @@ from .constants import (
     DEADLIFT_BAR_ANKLE_WEIGHT,
     DEADLIFT_BAR_HORIZONTAL_STD_MAX,
     DEADLIFT_BAR_HORIZONTAL_WEIGHT,
+    DEADLIFT_BAR_ABOVE_HIP_MAX_NORM,
     DEADLIFT_BAR_RANGE_MIN_NORM,
     DEADLIFT_BAR_RANGE_WEIGHT,
     DEADLIFT_BAR_SHOULDER_MIN_NORM,
     DEADLIFT_BAR_SHOULDER_PENALTY_WEIGHT,
     DEADLIFT_BENCH_PENALTY_WEIGHT,
+    DEADLIFT_ARM_CLAMP,
     DEADLIFT_ELBOW_MIN_DEG,
     DEADLIFT_ELBOW_WEIGHT,
     DEADLIFT_HIP_ROM_MIN_DEG,
@@ -56,9 +58,13 @@ from .constants import (
     DEADLIFT_WRIST_HIP_WEIGHT,
     MIN_CONFIDENCE_SCORE,
     SQUAT_ARM_BONUS_WEIGHT,
+    SQUAT_ARM_HEIGHT_WEIGHT,
     SQUAT_ARM_PENALTY_FACTOR,
     SQUAT_BAR_HIGH_BONUS_WEIGHT,
     SQUAT_BAR_SHOULDER_MAX_NORM,
+    SQUAT_BAR_ABOVE_HIP_MIN_NORM,
+    SQUAT_BAR_BELOW_HIP_MAX_NORM,
+    SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT,
     SQUAT_DEPTH_WEIGHT,
     SQUAT_ELBOW_BOTTOM_MAX_DEG,
     SQUAT_ELBOW_BOTTOM_MIN_DEG,
@@ -105,6 +111,18 @@ def classify_exercise(
     penalties["deadlift"] = deadlift_penalty
     deadlift_adjusted = max(0.0, deadlift_raw - deadlift_penalty)
 
+    deadlift_arm_gate = False
+    deadlift_arm_penalty = 0.0
+    if (
+        np.isfinite(agg.bar_above_hip_norm)
+        and agg.bar_above_hip_norm > DEADLIFT_BAR_ABOVE_HIP_MAX_NORM
+        and deadlift_adjusted > 0.0
+    ):
+        deadlift_arm_gate = True
+        deadlift_arm_penalty = deadlift_adjusted * (1.0 - DEADLIFT_ARM_CLAMP)
+        deadlift_adjusted = max(0.0, deadlift_adjusted * DEADLIFT_ARM_CLAMP)
+        penalties["deadlift"] += deadlift_arm_penalty
+
     deadlift_bar_gate = _squat_bar_gate(agg)
     deadlift_gate_penalty = 0.0
     if deadlift_bar_gate and deadlift_adjusted > 0.0:
@@ -130,6 +148,15 @@ def classify_exercise(
         "margin": float(margin),
         "tiebreak": tiebreak,
         "deadlift_veto": {"active": bool(deadlift_veto), "cues": deadlift_veto_cues},
+        "bar_above_hip_norm": float(agg.bar_above_hip_norm)
+        if np.isfinite(agg.bar_above_hip_norm)
+        else float("nan"),
+        "deadlift_arm_gate": {
+            "active": bool(deadlift_arm_gate),
+            "clamp": float(DEADLIFT_ARM_CLAMP),
+            "penalty": float(deadlift_arm_penalty),
+            "threshold": float(DEADLIFT_BAR_ABOVE_HIP_MAX_NORM),
+        },
         "deadlift_bar_gate": {
             "active": bool(deadlift_bar_gate),
             "clamp": float(DEADLIFT_SQUAT_BAR_CLAMP),
@@ -194,12 +221,16 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
             np.abs(agg.wrist_shoulder_diff_norm), SQUAT_BAR_SHOULDER_MAX_NORM
         )
 
+    arm_height_bonus = _margin_above(agg.bar_above_hip_norm, SQUAT_BAR_ABOVE_HIP_MIN_NORM)
+    bar_below_penalty = _margin_below(agg.bar_above_hip_norm, SQUAT_BAR_BELOW_HIP_MAX_NORM)
+
     score = 0.0
     score += SQUAT_DEPTH_WEIGHT * depth
     score += SQUAT_TORSO_WEIGHT * torso_upright
     score += SQUAT_KNEE_FORWARD_WEIGHT * knee_forward
     score += SQUAT_ROM_WEIGHT * knee_rom_margin
     score += SQUAT_BAR_HIGH_BONUS_WEIGHT * bar_high_bonus
+    score += SQUAT_ARM_HEIGHT_WEIGHT * arm_height_bonus
 
     if arm_ok:
         score += SQUAT_ARM_BONUS_WEIGHT
@@ -207,6 +238,7 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
         score *= SQUAT_ARM_PENALTY_FACTOR
 
     penalty = SQUAT_TIBIA_PENALTY_WEIGHT * max(0.0, tibia_penalty)
+    penalty += SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT * max(0.0, bar_below_penalty)
 
     elbow_hinge = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
     wrist_hinge = _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
@@ -275,6 +307,15 @@ def _apply_deadlift_veto(
     if bench_score > deadlift_score:
         return False, {}
 
+    if (
+        np.isfinite(agg.bar_above_hip_norm)
+        and agg.bar_above_hip_norm > DEADLIFT_BAR_ABOVE_HIP_MAX_NORM
+    ):
+        return False, {
+            "bar_above_hip_block": True,
+            "bar_above_hip_norm": float(agg.bar_above_hip_norm),
+        }
+
     cues = {
         "torso_tilt": bool(agg.torso_tilt_bottom >= DEADLIFT_TORSO_TILT_MIN_DEG),
         "elbow_extension": bool(agg.elbow_bottom >= DEADLIFT_ELBOW_MIN_DEG),
@@ -341,6 +382,12 @@ def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[str
 
     if _strong_squat_evidence(agg):
         return "squat", "squat_evidence"
+
+    if np.isfinite(agg.bar_above_hip_norm):
+        if agg.bar_above_hip_norm >= SQUAT_BAR_ABOVE_HIP_MIN_NORM:
+            return "squat", "bar_above_hip"
+        if agg.bar_above_hip_norm <= SQUAT_BAR_BELOW_HIP_MAX_NORM:
+            return "deadlift", "bar_below_hip"
 
     if np.isfinite(agg.wrist_hip_diff_norm) and agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
         return "deadlift", "deadlift_wrist_hip"
