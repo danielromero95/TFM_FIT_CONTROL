@@ -54,8 +54,17 @@ _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     """Clasifica el ejercicio y la vista de cámara a partir de rasgos de pose."""
 
+    label, view, confidence, _ = classify_features_with_diagnostics(features)
+    return label, view, confidence
+
+
+def classify_features_with_diagnostics(
+    features: FeatureSeries,
+) -> Tuple[str, str, float, Mapping[str, object] | None]:
+    """Clasifica el ejercicio y devuelve diagnósticos opcionales para auditoría."""
+
     if features.valid_frames < MIN_VALID_FRAMES:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, None
 
     series = _prepare_series(features)
     sampling_rate = float(features.sampling_rate or DEFAULT_SAMPLING_RATE)
@@ -82,7 +91,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         for name in ("shoulder_yaw_deg", "shoulder_z_delta_abs", "shoulder_width_norm", "ankle_width_norm")
     )
     if view_result.label == "unknown" and not view_cues_present:
-        return "unknown", "unknown", 0.0
+        return "unknown", "unknown", 0.0, None
 
     visibility = _compute_side_visibility(series)
     side = _select_visible_side(series, visibility=visibility)
@@ -94,7 +103,7 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
     torso_tilt = get_series("torso_tilt_deg")
 
     if _is_invalid(knee_angle) or _is_invalid(hip_angle) or _is_invalid(elbow_angle):
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, None
 
     wrist_y_side = get_series(f"wrist_{side}_y")
     wrist_x_side = get_series(f"wrist_{side}_x")
@@ -129,9 +138,9 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
 
     metrics = compute_metrics(rep_slices, metrics_series, torso_scale, sampling_rate)
     if metrics.rep_count == 0:
-        return "unknown", view_result.label, 0.0
+        return "unknown", view_result.label, 0.0, None
 
-    label, confidence, scores, _ = classify_exercise(metrics)
+    label, confidence, scores, probabilities, diagnostics = classify_exercise(metrics)
     view_label = view_result.label
 
     if (
@@ -146,11 +155,34 @@ def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
         view_label = "unknown"
         confidence = 0.0
 
-    if np.isfinite(view_result.confidence):
-        confidence = float(min(confidence, view_result.confidence))
+    if np.isfinite(view_result.confidence) and view_label != "unknown":
+        confidence = float(
+            np.clip(confidence * (0.6 + 0.4 * view_result.confidence), 0.0, 1.0)
+        )
+
+    if diagnostics is not None:
+        diagnostics["probabilities"] = {key: float(value) for key, value in probabilities.items()}
+        diagnostics["margin"] = float(diagnostics.get("margin", 0.0))
+        diagnostics["view_result"] = _build_view_diagnostics(view_label, view_result)
 
     _log_summary(side, view_label, metrics, scores, view_result)
-    return label, view_label, float(confidence)
+    return label, view_label, float(confidence), diagnostics
+
+
+def _build_view_diagnostics(view_label: str, view_result: ViewResult) -> Dict[str, float | str | int]:
+    stats = getattr(view_result, "stats", {}) or {}
+    width_mad = stats.get("width_mad", float("nan"))
+    z_mad = stats.get("z_mad", float("nan"))
+    vis_mad = stats.get("vis_mad", float("nan"))
+    dispersion = float(np.nanmean([width_mad, z_mad, vis_mad])) if np.isfinite(width_mad) else float(z_mad)
+    return {
+        "label": view_label,
+        "confidence": float(view_result.confidence),
+        "lateral_score": float(view_result.lateral_score),
+        "reliable_frames": int(stats.get("reliable_frames", 0)),
+        "reliability_ratio": float(stats.get("reliability_ratio", 0.0)),
+        "dispersion": float(dispersion),
+    }
 
 
 def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
@@ -307,5 +339,4 @@ def _log_summary(
         )
 
 
-__all__ = ["classify_features"]
-
+__all__ = ["classify_features", "classify_features_with_diagnostics"]

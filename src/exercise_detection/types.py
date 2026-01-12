@@ -18,6 +18,7 @@ class DetectionResult:
     view: ViewType
     confidence: float
     side: str | None = None
+    diagnostics: Mapping[str, object] | None = None
 
 
 def make_detection_result(label: str, view: str, confidence: float) -> "DetectionResult":
@@ -120,4 +121,3 @@ class ViewResult:
     lateral_score: float = float("nan")
     stats: Mapping[str, float] = field(default_factory=dict)
     side: str | None = None
-

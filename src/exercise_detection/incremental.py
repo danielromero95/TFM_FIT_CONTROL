@@ -22,13 +22,13 @@ from src.config.settings import (
     MODEL_COMPLEXITY,
     build_pose_kwargs,
 )
-from src.core.types import ExerciseType, ViewType
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 
-from .classification import classify_features
+from .classification import classify_features_with_diagnostics
 from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, MIN_VALID_FRAMES
 from .extraction import _append_nan, _append_reliability, _evaluate_view_reliability, _process_frame
 from .features import build_features_from_landmark_array
-from .types import DetectionResult, FeatureSeries, make_detection_result
+from .types import DetectionResult, FeatureSeries
 
 logger = logging.getLogger(__name__)
 
@@ -312,8 +312,13 @@ class IncrementalExerciseFeatureExtractor:
                     "reliable_frames_used": int(sum(self._reliability_flags)),
                 },
             )
-            label, view, confidence = classify_features(features)
-            return make_detection_result(label, view, confidence)
+            label, view, confidence, diagnostics = classify_features_with_diagnostics(features)
+            return DetectionResult(
+                label=as_exercise(label),
+                view=as_view(view),
+                confidence=float(confidence),
+                diagnostics=diagnostics,
+            )
         finally:
             if self._initialised and self._pose is not None:
                 try:
