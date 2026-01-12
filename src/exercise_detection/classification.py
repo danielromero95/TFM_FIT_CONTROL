@@ -338,8 +338,7 @@ def _combine_confidences(
     if view_label == "unknown":
         return float(np.clip(exercise_conf, 0.0, 1.0))
     view_conf = float(view_result.confidence) if np.isfinite(view_result.confidence) else 0.0
-    view_weight = np.clip(view_conf, 0.0, 1.0)
-    combined = exercise_conf * (0.98 + 0.02 * view_weight) + 0.02 * view_weight
+    combined = exercise_conf * (0.8 + 0.2 * np.clip(view_conf, 0.0, 1.0))
     return float(np.clip(combined, 0.0, 1.0))
 
 

@@ -34,6 +34,7 @@ class RunStats:
     exercise_detected: ExerciseType | str
     view_detected: ViewType | str
     detection_confidence: float
+    detection_diagnostics: Optional[Dict[str, Any]] = None
     primary_angle: Optional[str]
     angle_range_deg: float
     min_prominence: float
