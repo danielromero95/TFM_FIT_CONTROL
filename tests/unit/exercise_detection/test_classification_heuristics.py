@@ -23,6 +23,8 @@ def _make_agg(**overrides):
         hip_range_norm=0.05,
         bar_vertical_range_norm=0.05,
         bar_horizontal_std_norm=0.02,
+        arms_high_fraction=0.3,
+        bar_near_shoulders_fraction=0.2,
         duration_s=2.0,
         rep_count=1,
     )

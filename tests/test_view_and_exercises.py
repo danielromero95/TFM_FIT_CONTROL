@@ -8,9 +8,10 @@ from exercise_detection import classify_features
 from exercise_detection.classifier import classify_exercise
 from exercise_detection.classification import (
     SMOOTH_KEYS,
-    _nanmean_pair,
+    classify_features_with_diagnostics,
     _prepare_series,
     _resolve_torso_scale,
+    _select_bar_proxy,
     _select_visible_side,
 )
 from exercise_detection.constants import DEFAULT_SAMPLING_RATE
@@ -18,6 +19,7 @@ from exercise_detection.metrics import compute_metrics
 from exercise_detection.segmentation import segment_reps
 from exercise_detection.smoothing import smooth
 from exercise_detection.types import FeatureSeries
+from exercise_detection.utils import nanmean_pair
 from exercise_detection.view import classify_view
 
 
@@ -49,6 +51,26 @@ def test_squat_lateral():
     metrics, scores = _internal_metrics(features)
     assert scores.deadlift_veto is False
     assert metrics.wrist_shoulder_diff_norm <= 0.18
+
+
+def test_side_squat_diagnostics_prefer_left_and_high_arms():
+    features = make_squat_features()
+
+    label, view, _confidence, diagnostics = classify_features_with_diagnostics(features)
+    assert label == "squat"
+    assert view == "side"
+    assert diagnostics["visible_side"]["side"] == "left"
+    assert diagnostics["bar_source"] == "wrist"
+    assert diagnostics["arms_high_fraction"] >= 0.6
+
+
+def test_deadlift_low_arms_fraction_prefers_deadlift():
+    features = make_deadlift_features()
+
+    label, view, _confidence, diagnostics = classify_features_with_diagnostics(features)
+    assert label == "deadlift"
+    assert view == "side"
+    assert diagnostics["arms_high_fraction"] <= 0.2
 
 
 def test_low_bar_squat_remains_squat():
@@ -194,17 +216,22 @@ def _internal_metrics(features: FeatureSeries):
         return smoothed.get(name, series.get(name))
 
     torso_scale = _resolve_torso_scale(get("torso_length"), get("torso_length_world"))
-    side = _select_visible_side(series)
+    side = _select_visible_side(series, view_label="side")
 
     knee = get(f"knee_angle_{side}")
     hip = get(f"hip_angle_{side}")
     elbow = get(f"elbow_angle_{side}")
     torso = get("torso_tilt_deg")
 
-    wrist_y_mean = _nanmean_pair(get("wrist_left_y"), get("wrist_right_y"))
-    wrist_x_mean = _nanmean_pair(get("wrist_left_x"), get("wrist_right_x"))
+    wrist_y_mean = nanmean_pair(get("wrist_left_y"), get("wrist_right_y"))
+    wrist_x_mean = nanmean_pair(get("wrist_left_x"), get("wrist_right_x"))
+    elbow_y_mean = nanmean_pair(get("elbow_left_y"), get("elbow_right_y"))
+    shoulder_y_mean = nanmean_pair(get("shoulder_left_y"), get("shoulder_right_y"))
+    bar_y_proxy, _bar_source, _bar_ratios = _select_bar_proxy(
+        wrist_y_mean, elbow_y_mean, shoulder_y_mean
+    )
 
-    rep_slices = segment_reps(knee, wrist_y_mean, torso_scale, sr)
+    rep_slices = segment_reps(knee, bar_y_proxy, torso_scale, sr)
 
     series_bundle = {
         "knee_angle": knee,
@@ -219,13 +246,24 @@ def _internal_metrics(features: FeatureSeries):
         "knee_y": get(f"knee_{side}_y"),
         "ankle_x": get(f"ankle_{side}_x"),
         "ankle_y": get(f"ankle_{side}_y"),
-        "bar_y": wrist_y_mean,
+        "bar_y": bar_y_proxy,
         "bar_x": wrist_x_mean,
+        "shoulder_left_y": get("shoulder_left_y"),
+        "shoulder_right_y": get("shoulder_right_y"),
     }
 
     metrics = compute_metrics(rep_slices, series_bundle, torso_scale, sr)
     _, _, scores, _, _ = classify_exercise(metrics)
     return metrics, scores
+
+
+def test_visible_side_picker_prefers_left_when_right_missing():
+    features = make_squat_features()
+    series = _prepare_series(features)
+    diagnostics: dict[str, object] = {}
+    side = _select_visible_side(series, view_label="side", diagnostics=diagnostics)
+    assert side == "left"
+    assert diagnostics["side"] == "left"
 
 
 def make_deadlift_features() -> FeatureSeries:
