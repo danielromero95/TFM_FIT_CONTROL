@@ -40,6 +40,7 @@ from .constants import (
     DEADLIFT_BAR_SHOULDER_PENALTY_WEIGHT,
     DEADLIFT_BENCH_PENALTY_WEIGHT,
     DEADLIFT_ARM_CLAMP,
+    DEADLIFT_ARM_HIGH_CLAMP,
     DEADLIFT_ELBOW_MIN_DEG,
     DEADLIFT_ELBOW_WEIGHT,
     DEADLIFT_HIP_ROM_MIN_DEG,
@@ -58,7 +59,11 @@ from .constants import (
     DEADLIFT_WRIST_HIP_WEIGHT,
     MIN_CONFIDENCE_SCORE,
     SQUAT_ARM_BONUS_WEIGHT,
+    SQUAT_ARM_HIGH_BONUS_WEIGHT,
     SQUAT_ARM_HEIGHT_WEIGHT,
+    SQUAT_ARM_HIGH_FRACTION_LOW,
+    SQUAT_ARM_HIGH_FRACTION_STRONG,
+    SQUAT_ARM_LOW_PENALTY_WEIGHT,
     SQUAT_ARM_PENALTY_FACTOR,
     SQUAT_BAR_HIGH_BONUS_WEIGHT,
     SQUAT_BAR_SHOULDER_MAX_NORM,
@@ -130,6 +135,31 @@ def classify_exercise(
         deadlift_adjusted = max(0.0, deadlift_adjusted * DEADLIFT_SQUAT_BAR_CLAMP)
         penalties["deadlift"] += deadlift_gate_penalty
 
+    bench_like = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG
+
+    deadlift_arm_high_gate = False
+    deadlift_arm_high_penalty = 0.0
+    if (
+        not bench_like
+        and bench_score < MIN_CONFIDENCE_SCORE
+        and np.isfinite(agg.arms_high_fraction)
+        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+        and deadlift_adjusted > 0.0
+    ):
+        deadlift_arm_high_gate = True
+        deadlift_arm_high_penalty = deadlift_adjusted * (1.0 - DEADLIFT_ARM_HIGH_CLAMP)
+        deadlift_adjusted = max(0.0, deadlift_adjusted * DEADLIFT_ARM_HIGH_CLAMP)
+        penalties["deadlift"] += deadlift_arm_high_penalty
+
+    if (
+        squat_raw > 0.0
+        and not bench_like
+        and bench_score < MIN_CONFIDENCE_SCORE
+        and np.isfinite(agg.arms_high_fraction)
+        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+    ):
+        squat_adjusted += SQUAT_ARM_HIGH_BONUS_WEIGHT
+
     deadlift_veto, deadlift_veto_cues = _apply_deadlift_veto(agg, bench_score, deadlift_adjusted)
     if deadlift_veto:
         squat_adjusted *= DEADLIFT_VETO_SCORE_CLAMP
@@ -162,6 +192,15 @@ def classify_exercise(
             "clamp": float(DEADLIFT_SQUAT_BAR_CLAMP),
             "penalty": float(deadlift_gate_penalty),
         },
+        "deadlift_arm_high_gate": {
+            "active": bool(deadlift_arm_high_gate),
+            "clamp": float(DEADLIFT_ARM_HIGH_CLAMP),
+            "penalty": float(deadlift_arm_high_penalty),
+            "threshold": float(SQUAT_ARM_HIGH_FRACTION_STRONG),
+        },
+        "arms_high_fraction": float(agg.arms_high_fraction)
+        if np.isfinite(agg.arms_high_fraction)
+        else float("nan"),
     }
     return label, confidence, scores, probabilities, diagnostics
 
@@ -211,7 +250,12 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     knee_forward = _margin_above(np.abs(agg.knee_forward_norm), SQUAT_KNEE_FORWARD_MIN_NORM)
     tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
-    if knee_rom_margin <= 0.0:
+    bench_like = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG
+    arms_high_strong = (
+        np.isfinite(agg.arms_high_fraction)
+        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+    )
+    if knee_rom_margin <= 0.0 and not (arms_high_strong and not bench_like and depth > 0.0):
         return 0.0, 0.0
 
     squat_posture_ok = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom <= (
@@ -234,13 +278,19 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     score += SQUAT_BAR_HIGH_BONUS_WEIGHT * bar_high_bonus
     score += SQUAT_ARM_HEIGHT_WEIGHT * arm_height_bonus
 
+    penalty = SQUAT_TIBIA_PENALTY_WEIGHT * max(0.0, tibia_penalty)
+    penalty += SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT * max(0.0, bar_below_penalty)
+
     if arm_ok:
         score += SQUAT_ARM_BONUS_WEIGHT
     else:
         score *= SQUAT_ARM_PENALTY_FACTOR
 
-    penalty = SQUAT_TIBIA_PENALTY_WEIGHT * max(0.0, tibia_penalty)
-    penalty += SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT * max(0.0, bar_below_penalty)
+    if np.isfinite(agg.arms_high_fraction) and not bench_like:
+        if agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG:
+            score += SQUAT_ARM_HIGH_BONUS_WEIGHT
+        elif agg.arms_high_fraction <= SQUAT_ARM_HIGH_FRACTION_LOW:
+            penalty += SQUAT_ARM_LOW_PENALTY_WEIGHT
 
     elbow_hinge = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
     wrist_hinge = _margin_above(agg.wrist_hip_diff_norm, DEADLIFT_WRIST_HIP_DIFF_MIN_NORM)
@@ -390,6 +440,12 @@ def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[str
             return "squat", "bar_above_hip"
         if agg.bar_above_hip_norm <= SQUAT_BAR_BELOW_HIP_MAX_NORM:
             return "deadlift", "bar_below_hip"
+
+    if np.isfinite(agg.arms_high_fraction):
+        if agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG:
+            return "squat", "arms_high"
+        if agg.arms_high_fraction <= SQUAT_ARM_HIGH_FRACTION_LOW:
+            return "deadlift", "arms_low"
 
     if np.isfinite(agg.wrist_hip_diff_norm) and agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
         return "deadlift", "deadlift_wrist_hip"

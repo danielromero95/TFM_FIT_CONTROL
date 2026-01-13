@@ -6,8 +6,10 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 
+from .constants import ARM_ABOVE_HIP_THRESH, BAR_NEAR_SHOULDER_THRESH
 from .stats import safe_nanmax, safe_nanmedian, safe_nanmin, safe_nanstd
 from .types import AggregateMetrics, RepMetrics, RepSlice
+from .utils import nanmean_pair
 
 
 BOTTOM_WINDOW_DEG = 10.0
@@ -148,12 +150,31 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
         return safe_nanmedian(values)
 
     hip_series = series.get("hip_y", np.array([]))
+    hip_left_y = series.get("hip_left_y", np.array([]))
+    hip_right_y = series.get("hip_right_y", np.array([]))
+    shoulder_left_y = series.get("shoulder_left_y", np.array([]))
+    shoulder_right_y = series.get("shoulder_right_y", np.array([]))
+    shoulder_series = series.get("shoulder_y", np.array([]))
     bar_y_series = series.get("bar_y", np.array([]))
     bar_x_series = series.get("bar_x", np.array([]))
+
+    hip_mean = nanmean_pair(hip_left_y, hip_right_y)
+    if hip_mean.size == 0 or not np.isfinite(hip_mean).any():
+        hip_mean = np.asarray(hip_series, dtype=float)
+
+    shoulder_mean = nanmean_pair(shoulder_left_y, shoulder_right_y)
+    if shoulder_mean.size == 0 or not np.isfinite(shoulder_mean).any():
+        shoulder_mean = np.asarray(shoulder_series, dtype=float)
 
     hip_range_norm = _series_range_norm(hip_series, torso_scale)
     bar_vertical_range_norm = _series_range_norm(bar_y_series, torso_scale)
     bar_horizontal_std_norm = _series_std_norm(bar_x_series, torso_scale)
+    arms_high_fraction = _series_fraction_above(
+        hip_mean, bar_y_series, torso_scale, ARM_ABOVE_HIP_THRESH
+    )
+    bar_near_shoulders_fraction = _series_fraction_below(
+        bar_y_series, shoulder_mean, torso_scale, BAR_NEAR_SHOULDER_THRESH
+    )
 
     return AggregateMetrics(
         per_rep=tuple(per_rep),
@@ -174,6 +195,8 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
         hip_range_norm=hip_range_norm,
         bar_vertical_range_norm=bar_vertical_range_norm,
         bar_horizontal_std_norm=bar_horizontal_std_norm,
+        arms_high_fraction=arms_high_fraction,
+        bar_near_shoulders_fraction=bar_near_shoulders_fraction,
         duration_s=safe_nanmedian([rep.duration_s for rep in per_rep]),
         rep_count=len(per_rep),
     )
@@ -222,3 +245,51 @@ def _series_std_norm(series: np.ndarray, torso_scale: float) -> float:
     if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
         return float("nan")
     return float(safe_nanstd(array) / torso_scale)
+
+
+def _series_fraction_above(
+    upper: np.ndarray,
+    lower: np.ndarray,
+    torso_scale: float,
+    threshold: float,
+) -> float:
+    if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
+        return float("nan")
+    upper_arr = np.asarray(upper, dtype=float)
+    lower_arr = np.asarray(lower, dtype=float)
+    if upper_arr.size == 0 or lower_arr.size == 0:
+        return float("nan")
+    length = max(upper_arr.size, lower_arr.size)
+    if upper_arr.size != length:
+        upper_arr = np.pad(upper_arr, (0, length - upper_arr.size), constant_values=np.nan)
+    if lower_arr.size != length:
+        lower_arr = np.pad(lower_arr, (0, length - lower_arr.size), constant_values=np.nan)
+    valid = np.isfinite(upper_arr) & np.isfinite(lower_arr)
+    if not valid.any():
+        return float("nan")
+    diff = (upper_arr[valid] - lower_arr[valid]) / torso_scale
+    return float(np.mean(diff > threshold))
+
+
+def _series_fraction_below(
+    primary: np.ndarray,
+    reference: np.ndarray,
+    torso_scale: float,
+    threshold: float,
+) -> float:
+    if not np.isfinite(torso_scale) or torso_scale <= 1e-6:
+        return float("nan")
+    primary_arr = np.asarray(primary, dtype=float)
+    reference_arr = np.asarray(reference, dtype=float)
+    if primary_arr.size == 0 or reference_arr.size == 0:
+        return float("nan")
+    length = max(primary_arr.size, reference_arr.size)
+    if primary_arr.size != length:
+        primary_arr = np.pad(primary_arr, (0, length - primary_arr.size), constant_values=np.nan)
+    if reference_arr.size != length:
+        reference_arr = np.pad(reference_arr, (0, length - reference_arr.size), constant_values=np.nan)
+    valid = np.isfinite(primary_arr) & np.isfinite(reference_arr)
+    if not valid.any():
+        return float("nan")
+    diff = np.abs(primary_arr[valid] - reference_arr[valid]) / torso_scale
+    return float(np.mean(diff < threshold))

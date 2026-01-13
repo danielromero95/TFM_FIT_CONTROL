@@ -98,6 +98,8 @@ class AggregateMetrics:
     hip_range_norm: float = np.nan
     bar_vertical_range_norm: float = np.nan
     bar_horizontal_std_norm: float = np.nan
+    arms_high_fraction: float = np.nan
+    bar_near_shoulders_fraction: float = np.nan
     duration_s: float = np.nan
     rep_count: int = 0
 

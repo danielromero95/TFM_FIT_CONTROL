@@ -8,11 +8,18 @@ from typing import Dict, Mapping, Tuple
 import numpy as np
 
 from .classifier import classify_exercise
-from .constants import DEFAULT_SAMPLING_RATE, FEATURE_NAMES, MIN_VALID_FRAMES
+from .constants import (
+    BAR_PROXY_MIN_FINITE_RATIO,
+    DEFAULT_SAMPLING_RATE,
+    FEATURE_NAMES,
+    MIN_VALID_FRAMES,
+    SIDE_VISIBILITY_SCORE_MARGIN,
+)
 from .metrics import compute_metrics
 from .segmentation import segment_reps
 from .smoothing import smooth
 from .types import AggregateMetrics, ClassificationScores, FeatureSeries, ViewResult
+from .utils import nanmean_pair
 from .view import classify_view
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,15 @@ _SIDE_VISIBILITY_KEYS = (
 )
 
 _BOTH_SIDES_VISIBLE_MIN_RATIO = 0.35
+_SIDE_COMPLETENESS_KEYS = (
+    "knee_angle_{side}",
+    "hip_angle_{side}",
+    "ankle_{side}_x",
+    "ankle_{side}_y",
+    "hip_{side}_y",
+    "shoulder_{side}_y",
+    "wrist_{side}_y",
+)
 
 
 def classify_features(features: FeatureSeries) -> Tuple[str, str, float]:
@@ -94,7 +110,13 @@ def classify_features_with_diagnostics(
         return "unknown", "unknown", 0.0, None
 
     visibility = _compute_side_visibility(series)
-    side = _select_visible_side(series, visibility=visibility)
+    side_diagnostics: Dict[str, object] = {}
+    side = _select_visible_side(
+        series,
+        visibility=visibility,
+        view_label=view_result.label,
+        diagnostics=side_diagnostics,
+    )
     both_sides_visible = _both_sides_visible(visibility)
 
     knee_angle = get_series(f"knee_angle_{side}")
@@ -114,10 +136,16 @@ def classify_features_with_diagnostics(
     ankle_x_side = get_series(f"ankle_{side}_x")
     ankle_y_side = get_series(f"ankle_{side}_y")
 
-    wrist_y_mean = _nanmean_pair(get_series("wrist_left_y"), get_series("wrist_right_y"))
-    wrist_x_mean = _nanmean_pair(get_series("wrist_left_x"), get_series("wrist_right_x"))
+    wrist_y_mean = nanmean_pair(get_series("wrist_left_y"), get_series("wrist_right_y"))
+    wrist_x_mean = nanmean_pair(get_series("wrist_left_x"), get_series("wrist_right_x"))
+    elbow_y_mean = nanmean_pair(get_series("elbow_left_y"), get_series("elbow_right_y"))
+    shoulder_y_mean = nanmean_pair(get_series("shoulder_left_y"), get_series("shoulder_right_y"))
 
-    rep_slices = segment_reps(knee_angle, wrist_y_mean, torso_scale, sampling_rate)
+    bar_y_proxy, bar_source, bar_source_ratios = _select_bar_proxy(
+        wrist_y_mean, elbow_y_mean, shoulder_y_mean
+    )
+
+    rep_slices = segment_reps(knee_angle, bar_y_proxy, torso_scale, sampling_rate)
 
     metrics_series = {
         "knee_angle": knee_angle,
@@ -134,8 +162,10 @@ def classify_features_with_diagnostics(
         "knee_y": knee_y_side,
         "ankle_x": ankle_x_side,
         "ankle_y": ankle_y_side,
-        "bar_y": wrist_y_mean,
+        "bar_y": bar_y_proxy,
         "bar_x": wrist_x_mean,
+        "shoulder_left_y": get_series("shoulder_left_y"),
+        "shoulder_right_y": get_series("shoulder_right_y"),
     }
 
     metrics = compute_metrics(rep_slices, metrics_series, torso_scale, sampling_rate)
@@ -166,6 +196,9 @@ def classify_features_with_diagnostics(
         diagnostics["probabilities"] = {key: float(value) for key, value in probabilities.items()}
         diagnostics["margin"] = float(diagnostics.get("margin", 0.0))
         diagnostics["view_result"] = _build_view_diagnostics(view_label, view_result)
+        diagnostics["visible_side"] = side_diagnostics
+        diagnostics["bar_source"] = bar_source
+        diagnostics["bar_source_ratios"] = bar_source_ratios
 
     _log_summary(side, view_label, metrics, scores, view_result)
     return label, view_label, float(confidence), diagnostics
@@ -217,14 +250,46 @@ def _resolve_torso_scale(torso_length: np.ndarray, torso_world: np.ndarray) -> f
 
 
 def _select_visible_side(
-    series: Dict[str, np.ndarray], *, visibility: Mapping[str, Tuple[int, float]] | None = None
+    series: Dict[str, np.ndarray],
+    *,
+    visibility: Mapping[str, Tuple[int, float]] | None = None,
+    view_label: str | None = None,
+    diagnostics: Dict[str, object] | None = None,
 ) -> str:
     if visibility is None:
         visibility = _compute_side_visibility(series)
 
+    ratios: Dict[str, Dict[str, float]] = {"left": {}, "right": {}}
+    scores: Dict[str, float] = {"left": 0.0, "right": 0.0}
+    frame_count = int(series.get("_length", 0) or 0)
+    for side in ("left", "right"):
+        for key_template in _SIDE_COMPLETENESS_KEYS:
+            key = key_template.format(side=side)
+            ratios[side][key] = _finite_ratio(series.get(key), frame_count)
+        if ratios[side]:
+            scores[side] = float(np.nanmean(list(ratios[side].values())))
+
     left_count = visibility.get("left", (0, 0.0))[0]
     right_count = visibility.get("right", (0, 0.0))[0]
-    return "left" if left_count >= right_count else "right"
+    side = "left" if left_count >= right_count else "right"
+    reason = "visibility_count"
+
+    if view_label == "side" and frame_count > 0:
+        diff = abs(scores["left"] - scores["right"])
+        if diff >= SIDE_VISIBILITY_SCORE_MARGIN:
+            side = "left" if scores["left"] >= scores["right"] else "right"
+            reason = "finite_ratio"
+
+    if diagnostics is not None:
+        diagnostics["side"] = side
+        diagnostics["reason"] = reason
+        diagnostics["scores"] = {key: float(value) for key, value in scores.items()}
+        diagnostics["ratios"] = {
+            side_key: {key: float(value) for key, value in side_ratios.items()}
+            for side_key, side_ratios in ratios.items()
+        }
+
+    return side
 
 
 def _compute_side_visibility(series: Dict[str, np.ndarray]) -> Dict[str, Tuple[int, float]]:
@@ -264,25 +329,40 @@ def _is_invalid(series: np.ndarray) -> bool:
     return series.size == 0 or np.isfinite(series).sum() < 3
 
 
-def _nanmean_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    if left.size == 0 and right.size == 0:
-        return np.array([], dtype=float)
-    if left.size == 0:
-        return np.asarray(right, dtype=float)
-    if right.size == 0:
-        return np.asarray(left, dtype=float)
-    left_arr = np.asarray(left, dtype=float)
-    right_arr = np.asarray(right, dtype=float)
-    stacked = np.vstack([left_arr, right_arr])
-    finite_mask = np.isfinite(stacked)
-    counts = finite_mask.sum(axis=0)
-    if not counts.any():
-        return np.full(stacked.shape[1], np.nan)
-    sums = np.nansum(stacked, axis=0)
-    result = np.full(stacked.shape[1], np.nan)
-    valid = counts > 0
-    result[valid] = sums[valid] / counts[valid]
-    return result
+def _finite_ratio(values: np.ndarray | None, frame_count: int) -> float:
+    if values is None or frame_count <= 0:
+        return float("nan")
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return float("nan")
+    return float(np.isfinite(arr).sum() / frame_count)
+
+
+def _select_bar_proxy(
+    wrist_y: np.ndarray,
+    elbow_y: np.ndarray,
+    shoulder_y: np.ndarray,
+) -> Tuple[np.ndarray, str, Dict[str, float]]:
+    ratios = {
+        "wrist": _finite_ratio(wrist_y, wrist_y.size),
+        "elbow": _finite_ratio(elbow_y, elbow_y.size),
+        "shoulder": _finite_ratio(shoulder_y, shoulder_y.size),
+    }
+    for source in ("wrist", "elbow", "shoulder"):
+        ratio = ratios.get(source, float("nan"))
+        if np.isfinite(ratio) and ratio >= BAR_PROXY_MIN_FINITE_RATIO:
+            if source == "wrist":
+                return wrist_y, source, ratios
+            if source == "elbow":
+                return elbow_y, source, ratios
+            return shoulder_y, source, ratios
+
+    best_source = max(ratios, key=lambda key: ratios[key] if np.isfinite(ratios[key]) else -1.0)
+    if best_source == "elbow":
+        return elbow_y, best_source, ratios
+    if best_source == "shoulder":
+        return shoulder_y, best_source, ratios
+    return wrist_y, "wrist", ratios
 
 
 def _log_summary(
