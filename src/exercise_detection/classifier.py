@@ -25,6 +25,7 @@ from .constants import (
     BENCH_HIP_RANGE_MAX_NORM,
     BENCH_HIP_ROM_MAX_DEG,
     BENCH_KNEE_ROM_MAX_DEG,
+    BENCH_LOWER_BODY_PENALTY_WEIGHT,
     BENCH_POSTURE_WEIGHT,
     BENCH_ROM_PENALTY_WEIGHT,
     BENCH_TORSO_HORIZONTAL_DEG,
@@ -72,7 +73,6 @@ from .constants import (
     SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT,
     SQUAT_DEPTH_WEIGHT,
     SQUAT_ELBOW_BOTTOM_MAX_DEG,
-    SQUAT_ELBOW_BOTTOM_MIN_DEG,
     SQUAT_HINGE_PENALTY_WEIGHT,
     SQUAT_HIP_BOTTOM_MAX_DEG,
     SQUAT_KNEE_BOTTOM_MAX_DEG,
@@ -85,6 +85,12 @@ from .constants import (
     SQUAT_TORSO_TILT_MAX_DEG,
     SQUAT_TORSO_WEIGHT,
     SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM,
+    ARM_ABOVE_HIP_HIGH_FRAC,
+    ARM_ABOVE_HIP_LOW_FRAC,
+    ARM_HIGH_DEADLIFT_CLAMP,
+    ARM_HIGH_SQUAT_BONUS,
+    ARM_LOW_DEADLIFT_BONUS,
+    ARM_LOW_SQUAT_CLAMP,
 )
 from .types import AggregateMetrics, ClassificationScores
 
@@ -136,14 +142,28 @@ def classify_exercise(
         penalties["deadlift"] += deadlift_gate_penalty
 
     bench_like = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG
+    arms_above_hip = _arms_above_hip_fraction(agg)
+    lower_body_active = _lower_body_active(agg)
+    arms_high = np.isfinite(arms_above_hip) and arms_above_hip >= ARM_ABOVE_HIP_HIGH_FRAC
+    arms_low = np.isfinite(arms_above_hip) and arms_above_hip <= ARM_ABOVE_HIP_LOW_FRAC
+    arm_height_gate = None
+    if lower_body_active and not bench_like:
+        if arms_high:
+            arm_height_gate = "high"
+            squat_adjusted += ARM_HIGH_SQUAT_BONUS
+            deadlift_adjusted = max(0.0, deadlift_adjusted * ARM_HIGH_DEADLIFT_CLAMP)
+        elif arms_low:
+            arm_height_gate = "low"
+            deadlift_adjusted += ARM_LOW_DEADLIFT_BONUS
+            squat_adjusted = max(0.0, squat_adjusted * ARM_LOW_SQUAT_CLAMP)
 
     deadlift_arm_high_gate = False
     deadlift_arm_high_penalty = 0.0
     if (
         not bench_like
         and bench_score < MIN_CONFIDENCE_SCORE
-        and np.isfinite(agg.arms_high_fraction)
-        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+        and np.isfinite(arms_above_hip)
+        and arms_above_hip >= SQUAT_ARM_HIGH_FRACTION_STRONG
         and deadlift_adjusted > 0.0
     ):
         deadlift_arm_high_gate = True
@@ -155,8 +175,8 @@ def classify_exercise(
         squat_raw > 0.0
         and not bench_like
         and bench_score < MIN_CONFIDENCE_SCORE
-        and np.isfinite(agg.arms_high_fraction)
-        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+        and np.isfinite(arms_above_hip)
+        and arms_above_hip >= SQUAT_ARM_HIGH_FRACTION_STRONG
     ):
         squat_adjusted += SQUAT_ARM_HIGH_BONUS_WEIGHT
 
@@ -201,6 +221,24 @@ def classify_exercise(
         "arms_high_fraction": float(agg.arms_high_fraction)
         if np.isfinite(agg.arms_high_fraction)
         else float("nan"),
+        "arms_above_hip_fraction": float(arms_above_hip) if np.isfinite(arms_above_hip) else float("nan"),
+        "knee_rom": float(agg.knee_rom) if np.isfinite(agg.knee_rom) else float("nan"),
+        "hip_rom": float(agg.hip_rom) if np.isfinite(agg.hip_rom) else float("nan"),
+        "elbow_rom": float(agg.elbow_rom) if np.isfinite(agg.elbow_rom) else float("nan"),
+        "torso_tilt_bottom": float(agg.torso_tilt_bottom)
+        if np.isfinite(agg.torso_tilt_bottom)
+        else float("nan"),
+        "arm_height_gate": {
+            "active": arm_height_gate is not None,
+            "mode": arm_height_gate,
+            "arms_high": bool(arms_high),
+            "arms_low": bool(arms_low),
+            "lower_body_active": bool(lower_body_active),
+            "clamp_deadlift": float(ARM_HIGH_DEADLIFT_CLAMP),
+            "clamp_squat": float(ARM_LOW_SQUAT_CLAMP),
+            "bonus_squat": float(ARM_HIGH_SQUAT_BONUS),
+            "bonus_deadlift": float(ARM_LOW_DEADLIFT_BONUS),
+        },
     }
     return label, confidence, scores, probabilities, diagnostics
 
@@ -226,6 +264,10 @@ def _bench_score(agg: AggregateMetrics) -> float:
     score -= BENCH_ROM_PENALTY_WEIGHT * hip_penalty
     score -= BENCH_ROM_PENALTY_WEIGHT * hip_range_penalty
     score -= BENCH_BAR_HORIZONTAL_PENALTY_WEIGHT * bar_horizontal_penalty
+    if np.isfinite(agg.knee_rom) and agg.knee_rom > BENCH_KNEE_ROM_MAX_DEG:
+        score -= BENCH_LOWER_BODY_PENALTY_WEIGHT * _margin_above(agg.knee_rom, BENCH_KNEE_ROM_MAX_DEG)
+    if np.isfinite(agg.hip_rom) and agg.hip_rom > BENCH_HIP_ROM_MAX_DEG:
+        score -= BENCH_LOWER_BODY_PENALTY_WEIGHT * _margin_above(agg.hip_rom, BENCH_HIP_ROM_MAX_DEG)
 
     if _bench_gate(agg):
         score += BENCH_GATE_BONUS
@@ -240,20 +282,16 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     torso_upright = _margin_below(agg.torso_tilt_bottom, SQUAT_TORSO_TILT_MAX_DEG)
 
     wrist_diff = np.abs(agg.wrist_shoulder_diff_norm)
-    arm_ok = (
-        np.isfinite(wrist_diff)
-        and wrist_diff <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
-        and np.isfinite(agg.elbow_bottom)
-        and SQUAT_ELBOW_BOTTOM_MIN_DEG <= agg.elbow_bottom <= SQUAT_ELBOW_BOTTOM_MAX_DEG
-    )
+    arm_ok = np.isfinite(wrist_diff) and wrist_diff <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
 
     knee_forward = _margin_above(np.abs(agg.knee_forward_norm), SQUAT_KNEE_FORWARD_MIN_NORM)
     tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
     bench_like = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG
+    arms_above_hip = _arms_above_hip_fraction(agg)
     arms_high_strong = (
-        np.isfinite(agg.arms_high_fraction)
-        and agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG
+        np.isfinite(arms_above_hip)
+        and arms_above_hip >= SQUAT_ARM_HIGH_FRACTION_STRONG
     )
     if knee_rom_margin <= 0.0 and not (arms_high_strong and not bench_like and depth > 0.0):
         return 0.0, 0.0
@@ -286,10 +324,10 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     else:
         score *= SQUAT_ARM_PENALTY_FACTOR
 
-    if np.isfinite(agg.arms_high_fraction) and not bench_like:
-        if agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG:
+    if np.isfinite(arms_above_hip) and not bench_like:
+        if arms_above_hip >= SQUAT_ARM_HIGH_FRACTION_STRONG:
             score += SQUAT_ARM_HIGH_BONUS_WEIGHT
-        elif agg.arms_high_fraction <= SQUAT_ARM_HIGH_FRACTION_LOW:
+        elif arms_above_hip <= SQUAT_ARM_HIGH_FRACTION_LOW:
             penalty += SQUAT_ARM_LOW_PENALTY_WEIGHT
 
     elbow_hinge = _margin_above(agg.elbow_bottom, DEADLIFT_ELBOW_MIN_DEG)
@@ -441,10 +479,11 @@ def _tiebreak(adjusted: Mapping[str, float], agg: AggregateMetrics) -> Tuple[str
         if agg.bar_above_hip_norm <= SQUAT_BAR_BELOW_HIP_MAX_NORM:
             return "deadlift", "bar_below_hip"
 
-    if np.isfinite(agg.arms_high_fraction):
-        if agg.arms_high_fraction >= SQUAT_ARM_HIGH_FRACTION_STRONG:
+    arms_above_hip = _arms_above_hip_fraction(agg)
+    if np.isfinite(arms_above_hip):
+        if arms_above_hip >= SQUAT_ARM_HIGH_FRACTION_STRONG:
             return "squat", "arms_high"
-        if agg.arms_high_fraction <= SQUAT_ARM_HIGH_FRACTION_LOW:
+        if arms_above_hip <= SQUAT_ARM_HIGH_FRACTION_LOW:
             return "deadlift", "arms_low"
 
     if np.isfinite(agg.wrist_hip_diff_norm) and agg.wrist_hip_diff_norm >= DEADLIFT_WRIST_HIP_DIFF_MIN_NORM:
@@ -471,8 +510,6 @@ def _squat_bar_gate(agg: AggregateMetrics) -> bool:
     return (
         np.isfinite(wrist_diff)
         and wrist_diff <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
-        and np.isfinite(agg.elbow_bottom)
-        and agg.elbow_bottom <= SQUAT_ELBOW_BOTTOM_MAX_DEG
     )
 
 
@@ -485,6 +522,19 @@ def _strong_squat_evidence(agg: AggregateMetrics) -> bool:
     bar_high = _margin_below(np.abs(agg.wrist_shoulder_diff_norm), SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM)
     elbow_flex = _margin_below(agg.elbow_bottom, SQUAT_ELBOW_BOTTOM_MAX_DEG)
     return depth > 0.0 and knee_rom > 0.0 and (bar_high > 0.0 or elbow_flex > 0.0)
+
+
+def _arms_above_hip_fraction(agg: AggregateMetrics) -> float:
+    if np.isfinite(agg.arms_above_hip_fraction):
+        return float(agg.arms_above_hip_fraction)
+    return float(agg.arms_high_fraction)
+
+
+def _lower_body_active(agg: AggregateMetrics) -> bool:
+    return bool(
+        (np.isfinite(agg.knee_rom) and agg.knee_rom >= SQUAT_MIN_ROM_DEG)
+        or (np.isfinite(agg.hip_rom) and agg.hip_rom >= DEADLIFT_HIP_ROM_MIN_DEG)
+    )
 
 
 def _margin_above(value: float, threshold: float) -> float:
