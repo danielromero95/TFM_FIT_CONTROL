@@ -169,14 +169,32 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
     if shoulder_mean.size == 0 or not np.isfinite(shoulder_mean).any():
         shoulder_mean = np.asarray(shoulder_series, dtype=float)
 
+    fallback_scale = float("nan")
+    if shoulder_mean.size > 0 and hip_mean.size > 0:
+        shoulder_arr = np.asarray(shoulder_mean, dtype=float)
+        hip_arr = np.asarray(hip_mean, dtype=float)
+        length = max(shoulder_arr.size, hip_arr.size)
+        if shoulder_arr.size != length:
+            shoulder_arr = np.pad(shoulder_arr, (0, length - shoulder_arr.size), constant_values=np.nan)
+        if hip_arr.size != length:
+            hip_arr = np.pad(hip_arr, (0, length - hip_arr.size), constant_values=np.nan)
+        valid = np.isfinite(shoulder_arr) & np.isfinite(hip_arr)
+        if valid.any():
+            fallback_scale = float(np.nanmedian(np.abs(shoulder_arr[valid] - hip_arr[valid])))
+            if not np.isfinite(fallback_scale) or fallback_scale <= 1e-6:
+                fallback_scale = float("nan")
+
     hip_range_norm = _series_range_norm(hip_series, torso_scale)
     bar_vertical_range_norm = _series_range_norm(bar_y_series, torso_scale)
     bar_horizontal_std_norm = _series_std_norm(bar_x_series, torso_scale)
+    scale_for_fractions = torso_scale
+    if not np.isfinite(scale_for_fractions) or scale_for_fractions <= 1e-6:
+        scale_for_fractions = fallback_scale
     arms_above_hip_fraction = _series_fraction_above(
-        hip_mean, arm_y_series, torso_scale, ARM_ABOVE_HIP_THRESH
+        hip_mean, arm_y_series, scale_for_fractions, ARM_ABOVE_HIP_THRESH
     )
     bar_near_shoulders_fraction = _series_fraction_below(
-        bar_y_series, shoulder_mean, torso_scale, BAR_NEAR_SHOULDER_THRESH
+        bar_y_series, shoulder_mean, scale_for_fractions, BAR_NEAR_SHOULDER_THRESH
     )
 
     return AggregateMetrics(

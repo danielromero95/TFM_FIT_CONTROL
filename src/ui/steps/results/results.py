@@ -241,6 +241,7 @@ def _build_debug_report_bundle(
     stats_df: pd.DataFrame,
     metrics_df: pd.DataFrame | None,
     metrics_csv: str | None,
+    arm_debug_csv: str | None,
     effective_config_bytes: bytes | None,
     video_name: str | None,
     video_path: str | Path | None = None,
@@ -332,6 +333,8 @@ def _build_debug_report_bundle(
         zf.writestr("video_data.json", _metadata_to_json_bytes(video_metadata))
         if metrics_csv:
             zf.writestr("metrics.csv", metrics_csv)
+        if arm_debug_csv:
+            zf.writestr("arm_debug_timeseries.csv", arm_debug_csv)
         if effective_config:
             zf.writestr("effective_config.json", effective_config)
 
@@ -1953,6 +1956,17 @@ def _results_panel() -> Dict[str, bool]:
                     st.error("The metrics file for download was not found.")
                 except OSError as exc:
                     st.error(f"Could not read metrics: {exc}")
+
+            arm_debug_data: str | None = None
+            if state.arm_debug_timeseries_path is not None:
+                try:
+                    arm_debug_data = Path(state.arm_debug_timeseries_path).read_text(
+                        encoding="utf-8"
+                    )
+                except FileNotFoundError:
+                    st.error("The arm debug timeseries file was not found.")
+                except OSError as exc:
+                    st.error(f"Could not read arm debug timeseries: {exc}")
                 
             video_original_name = getattr(state, "video_original_name", None)
             video_name_for_report = video_original_name
@@ -1968,6 +1982,7 @@ def _results_panel() -> Dict[str, bool]:
                     stats_df=stats_df,
                     metrics_df=metrics_df,
                     metrics_csv=metrics_data,
+                    arm_debug_csv=arm_debug_data,
                     effective_config_bytes=eff_bytes,
                     video_name=video_name_for_report,
                     video_path=Path(state.video_path) if state.video_path else None,

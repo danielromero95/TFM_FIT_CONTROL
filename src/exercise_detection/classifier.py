@@ -201,6 +201,12 @@ def classify_exercise(
         "bar_above_hip_norm": float(agg.bar_above_hip_norm)
         if np.isfinite(agg.bar_above_hip_norm)
         else float("nan"),
+        "wrist_shoulder_diff_norm": float(agg.wrist_shoulder_diff_norm)
+        if np.isfinite(agg.wrist_shoulder_diff_norm)
+        else float("nan"),
+        "wrist_hip_diff_norm": float(agg.wrist_hip_diff_norm)
+        if np.isfinite(agg.wrist_hip_diff_norm)
+        else float("nan"),
         "deadlift_arm_gate": {
             "active": bool(deadlift_arm_gate),
             "clamp": float(DEADLIFT_ARM_CLAMP),

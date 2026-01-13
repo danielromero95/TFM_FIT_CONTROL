@@ -120,6 +120,7 @@ class AppState:
     report: Optional[Any] = None
     pipeline_error: Optional[str] = None
     metrics_path: Optional[str] = None
+    arm_debug_timeseries_path: Optional[str] = None
     cfg_fingerprint: Optional[str] = None
     last_run_success: bool = False
     video_uploader: Any = None

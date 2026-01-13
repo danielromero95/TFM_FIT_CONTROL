@@ -76,6 +76,7 @@ class Report:
     overlay_video_path: Optional[Path] = None
     overlay_video_stream_path: Optional[Path] = None
     effective_config_path: Optional[Path] = None
+    arm_debug_timeseries_path: Optional[Path] = None
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Convierte el reporte en el diccionario esperado por los clientes heredados."""

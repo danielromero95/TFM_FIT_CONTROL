@@ -50,6 +50,7 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.report = None
     state.pipeline_error = None
     state.metrics_path = None
+    state.arm_debug_timeseries_path = None
     state.cfg_fingerprint = None
     state.last_run_success = False
     state.analysis_future = None

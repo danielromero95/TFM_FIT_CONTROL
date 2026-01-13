@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 import streamlit as st
 
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
-from src.exercise_detection.exercise_detector import detect_exercise
+from src.exercise_detection.exercise_detector import detect_exercise_with_diagnostics
 from src.ui.metrics_sync.run_tokens import metrics_run_token, sync_channel_for_run
 from src.ui.state import Step, get_state, go_to, safe_rerun
 from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
@@ -148,11 +148,14 @@ def _render_autodetect_button(
 
     with st.spinner("Detecting exercise…"):
         try:
-            label_key, detected_view, confidence = detect_exercise(str(video_path))
+            detection = detect_exercise_with_diagnostics(str(video_path))
         except Exception as exc:
             st.error(f"Automatic exercise detection failed: {exc}")
             return current_ex_label, current_view_label
 
+    label_key = detection.label.value
+    detected_view = detection.view.value
+    confidence = detection.confidence
     detected_label = next((lbl for (lbl, key) in EXERCISE_ITEMS if key == label_key), "")
     view_label = VIEW_KEY_TO_LABEL.get(detected_view, "")
     state.detect_result = {
@@ -160,6 +163,8 @@ def _render_autodetect_button(
         "view": detected_view or "",
         "confidence": float(confidence),
     }
+    if detection.diagnostics is not None:
+        state.detect_result["diagnostics"] = detection.diagnostics
     state.exercise_selected = None
     state.view_selected = None
     state.ui_rev += 1
