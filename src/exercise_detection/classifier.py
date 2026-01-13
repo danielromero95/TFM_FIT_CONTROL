@@ -211,6 +211,8 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     knee_forward = _margin_above(np.abs(agg.knee_forward_norm), SQUAT_KNEE_FORWARD_MIN_NORM)
     tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
+    if knee_rom_margin <= 0.0:
+        return 0.0, 0.0
 
     squat_posture_ok = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom <= (
         SQUAT_TORSO_TILT_MAX_DEG + 5.0

@@ -8,7 +8,7 @@ import streamlit as st
 
 from src.config.settings import DEFAULT_PREVIEW_FPS
 
-from .model import AppState, CONFIG_DEFAULTS, DEFAULT_EXERCISE_LABEL, Step
+from .model import AppState, CONFIG_DEFAULTS, Step
 
 
 def get_state() -> AppState:
@@ -62,9 +62,9 @@ def reset_state(*, preserve_upload: bool = False) -> None:
     state.preview_last_ts_ms = 0.0
     state.overlay_video_stream_path = None
     state.overlay_video_download_path = None
-    state.exercise = DEFAULT_EXERCISE_LABEL
+    state.exercise_selected = None
     state.exercise_pending_update = None
-    state.view = ""
+    state.view_selected = None
     state.view_pending_update = None
     state.detect_result = None
     state.configure_values = CONFIG_DEFAULTS.copy()

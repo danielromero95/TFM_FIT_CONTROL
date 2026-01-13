@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from src import config
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.ui.state import (
     AppState,
     CONFIG_DEFAULTS,
-    DEFAULT_EXERCISE_LABEL,
     EXERCISE_THRESHOLDS,
     get_state,
     default_configure_values,
@@ -55,8 +55,6 @@ def prepare_pipeline_inputs(
 ) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
     """Prepara video, configuración y detecciones previas para ``run_pipeline``."""
 
-    from src.ui.steps.detect import EXERCISE_TO_CONFIG
-
     video_path = state.video_path
     if not video_path:
         raise ValueError("The video to process was not found.")
@@ -65,11 +63,19 @@ def prepare_pipeline_inputs(
     cfg_values = default_configure_values()
     cfg_values.update(state.configure_values or {})
 
-    exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
-    ex_key = EXERCISE_TO_CONFIG.get(
-        exercise_label,
-        EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat"),
-    )
+    selected_key = state.exercise_selected
+    if selected_key and as_exercise(selected_key) is ExerciseType.UNKNOWN:
+        selected_key = None
+
+    detected_key = None
+    if state.detect_result:
+        detected_key = state.detect_result.get("label")
+        if detected_key and as_exercise(detected_key) is ExerciseType.UNKNOWN:
+            detected_key = None
+
+    ex_key = selected_key or detected_key
+    if not ex_key:
+        raise ValueError("Please select an exercise before continuing.")
     cfg_values = migrate_thresholds_config(cfg_values, ex_key)
 
     defaults = EXERCISE_THRESHOLDS.get(ex_key, EXERCISE_THRESHOLDS["squat"])
@@ -105,5 +111,15 @@ def prepare_pipeline_inputs(
             det.get("view", "unknown"),
             float(det.get("confidence", 0.0)),
         )
+
+    effective_view = None
+    if state.view_selected and as_view(state.view_selected) is not ViewType.UNKNOWN:
+        effective_view = state.view_selected
+    elif det:
+        detected_view = det.get("view")
+        if detected_view and as_view(detected_view) is not ViewType.UNKNOWN:
+            effective_view = detected_view
+    if not effective_view:
+        raise ValueError("Please select a view before continuing.")
 
     return str(video_path), cfg, prefetched_detection

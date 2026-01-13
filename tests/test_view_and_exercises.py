@@ -224,7 +224,7 @@ def _internal_metrics(features: FeatureSeries):
     }
 
     metrics = compute_metrics(rep_slices, series_bundle, torso_scale, sr)
-    _, _, scores, _ = classify_exercise(metrics)
+    _, _, scores, _, _ = classify_exercise(metrics)
     return metrics, scores
 
 
@@ -468,4 +468,3 @@ def _assemble_clip(
         "ankle_width_norm": np.full(FRAMES, ankle_width),
     }
     return data
-

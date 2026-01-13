@@ -111,9 +111,9 @@ class AppState:
     ui_rev: int = 0
     video_path: Optional[str] = None
     video_original_name: Optional[str] = None
-    exercise: str = DEFAULT_EXERCISE_LABEL
+    exercise_selected: Optional[str] = None
     exercise_pending_update: Optional[str] = None
-    view: str = ""  # "", "front", "side"
+    view_selected: Optional[str] = None  # None, "front", "side"
     view_pending_update: Optional[str] = None
     detect_result: Optional[Dict[str, Any]] = None
     configure_values: Dict[str, Any] = field(default_factory=default_configure_values)

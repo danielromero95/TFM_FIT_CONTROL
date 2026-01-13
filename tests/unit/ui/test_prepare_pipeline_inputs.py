@@ -18,7 +18,12 @@ def test_prepare_pipeline_inputs_propagates_thresholds_enable(tmp_path) -> None:
             "squat": {"low": 30.0, "high": 120.0, "custom": True},
         },
     }
-    state = AppState(video_path=str(video_path), configure_values=cfg_values)
+    state = AppState(
+        video_path=str(video_path),
+        exercise_selected="squat",
+        view_selected="front",
+        configure_values=cfg_values,
+    )
 
     _, cfg, _ = prepare_pipeline_inputs(state)
 
@@ -32,7 +37,11 @@ def test_prepare_pipeline_inputs_defaults_thresholds_enable_true(tmp_path) -> No
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"content")
 
-    state = AppState(video_path=str(video_path))
+    state = AppState(
+        video_path=str(video_path),
+        exercise_selected="squat",
+        view_selected="front",
+    )
 
     _, cfg, _ = prepare_pipeline_inputs(state)
 
@@ -47,7 +56,8 @@ def test_prepare_pipeline_inputs_apply_deadlift_defaults_when_not_custom(tmp_pat
 
     state = AppState(
         video_path=str(video_path),
-        exercise="Deadlift",
+        exercise_selected="deadlift",
+        view_selected="front",
         configure_values=default_configure_values(),
     )
 
@@ -63,7 +73,8 @@ def test_prepare_pipeline_inputs_preserves_custom_thresholds(tmp_path) -> None:
 
     state = AppState(
         video_path=str(video_path),
-        exercise="Deadlift",
+        exercise_selected="deadlift",
+        view_selected="front",
         configure_values={
             **default_configure_values(),
             "thresholds_by_exercise": {
@@ -85,7 +96,8 @@ def test_switching_exercises_keeps_custom_per_exercise(tmp_path) -> None:
     custom_squat = {"low": 110.0, "high": 150.0, "custom": True}
     state = AppState(
         video_path=str(video_path),
-        exercise="Deadlift",
+        exercise_selected="deadlift",
+        view_selected="front",
         configure_values={
             **default_configure_values(),
             "thresholds_by_exercise": {"squat": custom_squat},
@@ -105,7 +117,8 @@ def test_custom_thresholds_persist_per_exercise(tmp_path) -> None:
     custom_squat = {"low": 95.0, "high": 165.0, "custom": True}
     state = AppState(
         video_path=str(video_path),
-        exercise="Squat",
+        exercise_selected="squat",
+        view_selected="front",
         configure_values={
             **default_configure_values(),
             "thresholds_by_exercise": {"squat": custom_squat},

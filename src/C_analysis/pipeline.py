@@ -175,6 +175,8 @@ def run_pipeline(
     progress_callback: Optional[Callable[..., None]] = None,
     *,
     prefetched_detection: Optional[Union[Tuple[str, str, float], 'DetectionResult']] = None,
+    exercise_selected: Optional[str] = None,
+    view_selected: Optional[str] = None,
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
 ) -> Report:
@@ -527,6 +529,25 @@ def run_pipeline(
     elif cfg.debug.generate_debug_video:
         logger.info("Overlay omitido por heurísticas de medio pesado.")
 
+    selected_exercise = (
+        as_exercise(exercise_selected) if exercise_selected else ExerciseType.UNKNOWN
+    )
+    selected_view = as_view(view_selected) if view_selected else ViewType.UNKNOWN
+    effective_exercise = (
+        selected_exercise
+        if selected_exercise is not ExerciseType.UNKNOWN
+        else detected_label
+        if detected_label is not ExerciseType.UNKNOWN
+        else ExerciseType.UNKNOWN
+    )
+    effective_view = (
+        selected_view
+        if selected_view is not ViewType.UNKNOWN
+        else detected_view
+        if detected_view is not ViewType.UNKNOWN
+        else ViewType.UNKNOWN
+    )
+
     t3 = time.perf_counter()
     notify(75, "STAGE 4: Computing biomechanical metrics...")
     (
@@ -540,8 +561,8 @@ def run_pipeline(
         filtered_sequence,
         cfg.counting.primary_angle,
         fps_effective,
-        exercise=detected_label,
-        view=detected_view,
+        exercise=effective_exercise,
+        view=effective_view,
         quality_mask=quality_mask,
         analysis_frame_idx=kept_indices,
     )
@@ -561,12 +582,12 @@ def run_pipeline(
     primary_angle = chosen_primary or cfg.counting.primary_angle
 
     auto_params = auto_counting_params(
-        detected_label,
+        effective_exercise,
         df_metrics,
         chosen_primary,
         fps_effective,
         cfg.counting,
-        view=detected_view,
+        view=effective_view,
     )
     cfg.counting.min_prominence = float(auto_params.min_prominence)
     cfg.counting.min_distance_sec = float(auto_params.min_distance_sec)
@@ -578,7 +599,7 @@ def run_pipeline(
     )
     logger.info(
         "COUNT AUTO-TUNE: exercise=%s primary=%s -> prominence=%.1f° distance=%.2fs refractory=%.2fs",
-        getattr(as_exercise(detected_label), "value", str(detected_label)),
+        getattr(as_exercise(effective_exercise), "value", str(effective_exercise)),
         primary_angle,
         auto_params.min_prominence,
         auto_params.min_distance_sec,
@@ -590,7 +611,7 @@ def run_pipeline(
         logger.info("DEBUG TELEMETRY: smoothing=%s", smoothing_info)
         logger.info(
             "DEBUG TELEMETRY: view=%s multipliers=%s cadence=%.2fs IQR=%.1f° → prominence=%.1f° distance=%.2fs refractory=%.2fs",
-            getattr(as_view(detected_view), "value", str(detected_view)),
+            getattr(as_view(effective_view), "value", str(effective_view)),
             auto_params.multipliers,
             auto_params.cadence_period_sec if auto_params.cadence_period_sec is not None else float("nan"),
             auto_params.iqr_deg if auto_params.iqr_deg is not None else float("nan"),
@@ -660,9 +681,10 @@ def run_pipeline(
         fps_original=float(fps_original),
         fps_effective=float(fps_effective),
         frames=frames_processed,
-        exercise_selected=as_exercise(cfg.counting.exercise),
+        exercise_selected=exercise_selected,
         exercise_detected=detected_label,
         view_detected=detected_view,
+        view_selected=view_selected,
         detection_confidence=float(detected_confidence),
         detection_diagnostics=detection_diagnostics,
         primary_angle=primary_angle if primary_angle in df_metrics.columns else None,

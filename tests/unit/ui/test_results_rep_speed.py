@@ -23,6 +23,7 @@ def _dummy_stats(primary_angle: str = "angle", fps: float = 30.0, exercise: str 
         exercise_selected=None,
         exercise_detected=exercise,
         view_detected="side",
+        view_selected=None,
         detection_confidence=1.0,
         primary_angle=primary_angle,
         angle_range_deg=0.0,

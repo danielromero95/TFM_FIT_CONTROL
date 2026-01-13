@@ -13,6 +13,7 @@ def _dummy_stats() -> RunStats:
         exercise_selected=None,
         exercise_detected="squat",
         view_detected="front",
+        view_selected=None,
         detection_confidence=1.0,
         primary_angle="knee",
         angle_range_deg=0.0,

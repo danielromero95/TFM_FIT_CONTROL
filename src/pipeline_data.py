@@ -33,6 +33,7 @@ class RunStats:
     exercise_selected: Optional[ExerciseType | str]
     exercise_detected: ExerciseType | str
     view_detected: ViewType | str
+    view_selected: Optional[ViewType | str]
     detection_confidence: float
     primary_angle: Optional[str]
     angle_range_deg: float
@@ -79,7 +80,7 @@ class Report:
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Convierte el reporte en el diccionario esperado por los clientes heredados."""
         stats_dict = asdict(self.stats)
-        for key in ("exercise_selected", "exercise_detected", "view_detected"):
+        for key in ("exercise_selected", "exercise_detected", "view_detected", "view_selected"):
             val = stats_dict.get(key)
             if isinstance(val, Enum):
                 stats_dict[key] = val.value
