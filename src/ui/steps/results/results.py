@@ -26,7 +26,7 @@ except Exception:
 
 from src.A_preprocessing.video_metadata import get_video_metadata
 from src.C_analysis.repetition_counter import count_repetitions_with_config
-from src.core.types import ViewType, as_view
+from src.core.types import EXERCISE_HUMAN_LABEL, ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import Report, RunStats
 from src.ui.metrics_catalog import (
     human_metric_name,
@@ -123,11 +123,41 @@ def _format_run_duration(duration_ms: float | None) -> str | None:
 
 
 def _serialize_stat_value(value: object) -> object:
+    if isinstance(value, ExerciseType):
+        return EXERCISE_HUMAN_LABEL.get(value, value.value)
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Path):
         return str(value)
     return value
+
+
+def _format_exercise_label(value: object) -> str:
+    if value in (None, ""):
+        return "N/A"
+    if isinstance(value, ExerciseType):
+        return EXERCISE_HUMAN_LABEL.get(value, value.value)
+    ex = as_exercise(str(value))
+    if ex is not ExerciseType.UNKNOWN:
+        return EXERCISE_HUMAN_LABEL.get(ex, str(value))
+    return str(value)
+
+
+def _format_view_label(value: object) -> str:
+    if value in (None, ""):
+        return "N/A"
+    if isinstance(value, ViewType):
+        if value is ViewType.FRONT:
+            return "Front"
+        if value is ViewType.SIDE:
+            return "Lateral"
+        return value.value
+    view = as_view(str(value))
+    if view is ViewType.FRONT:
+        return "Front"
+    if view is ViewType.SIDE:
+        return "Lateral"
+    return str(value)
 
 
 def _serialize_stats(stats: RunStats) -> Dict[str, object]:
@@ -1654,7 +1684,11 @@ def _results_panel() -> Dict[str, bool]:
                     numeric_columns=(numeric_columns if numeric_columns else metric_options),
                     exercise_key=exercise_key,
                 )
-                view_value = state.view or getattr(stats, "view_detected", None)
+                view_value = (
+                    state.view_selected
+                    or getattr(stats, "view_selected", None)
+                    or getattr(stats, "view_detected", None)
+                )
                 view = as_view(view_value)
                 visible_side = None
                 metric_options_filtered = metric_options
@@ -1670,8 +1704,7 @@ def _results_panel() -> Dict[str, bool]:
                         )
                 if metric_options_filtered:
                     # Prefer exercise-specific metrics for defaults
-                    ex = getattr(stats, "exercise_detected", "")
-                    ex_str = getattr(ex, "value", str(ex))
+                    ex_str = exercise_key or ""
                     preferred_by_ex = {
                         "squat": ["left_knee", "right_knee", "trunk_inclination_deg"],
                         "bench_press": ["left_elbow", "right_elbow", "shoulder_width"],
@@ -1840,10 +1873,17 @@ def _results_panel() -> Dict[str, bool]:
                 {"Field": "frames", "Value": stats.frames},
                 {
                     "Field": "exercise_selected",
-                    "Value": stats.exercise_selected or "N/A",
+                    "Value": _format_exercise_label(stats.exercise_selected),
                 },
-                {"Field": "exercise_detected", "Value": stats.exercise_detected},
-                {"Field": "view_detected", "Value": stats.view_detected},
+                {
+                    "Field": "exercise_detected",
+                    "Value": _format_exercise_label(stats.exercise_detected),
+                },
+                {
+                    "Field": "view_selected",
+                    "Value": _format_view_label(getattr(stats, "view_selected", None)),
+                },
+                {"Field": "view_detected", "Value": _format_view_label(stats.view_detected)},
                 {
                     "Field": "detection_confidence",
                     "Value": f"{stats.detection_confidence:.0%}",

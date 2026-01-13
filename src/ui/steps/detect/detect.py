@@ -7,10 +7,10 @@ from typing import Dict, List, Tuple
 
 import streamlit as st
 
-from src.core.types import ExerciseType
+from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.exercise_detection.exercise_detector import detect_exercise
 from src.ui.metrics_sync.run_tokens import metrics_run_token, sync_channel_for_run
-from src.ui.state import DEFAULT_EXERCISE_LABEL, Step, get_state, go_to, safe_rerun
+from src.ui.state import Step, get_state, go_to, safe_rerun
 from src.ui.video import VIDEO_VIEWPORT_HEIGHT_PX, render_uniform_video
 
 from ..utils import step_container
@@ -29,10 +29,12 @@ EXERCISE_ITEMS: List[Tuple[str, str]] = [
 ]
 EX_LABELS: List[str] = [""] + [label for (label, _) in EXERCISE_ITEMS]
 EX_TO_KEY: Dict[str, str] = {label: key for (label, key) in EXERCISE_ITEMS}
-# Mapear Auto-Detect a un ejercicio real para no romper el pipeline.
-EXERCISE_TO_CONFIG: Dict[str, str] = {DEFAULT_EXERCISE_LABEL: ExerciseType.SQUAT.value} | EX_TO_KEY
+KEY_TO_EX_LABEL: Dict[str, str] = {key: label for (label, key) in EXERCISE_ITEMS}
+EXERCISE_TO_CONFIG: Dict[str, str] = dict(EX_TO_KEY)
 
 VIEW_LABELS = ["", "Front", "Lateral"]
+VIEW_LABEL_TO_KEY = {"Front": "front", "Lateral": "side"}
+VIEW_KEY_TO_LABEL = {"front": "Front", "side": "Lateral"}
 
 EX_WIDGET_KEY = "detect_exercise_value"
 VIEW_WIDGET_KEY = "detect_view_value"
@@ -110,9 +112,17 @@ def _build_sync_channel(state) -> str | None:
 def _current_widget_labels(state) -> tuple[str, str]:
     """Obtiene las etiquetas iniciales de ejercicio y vista."""
 
-    current_ex_label = "" if (state.exercise == DEFAULT_EXERCISE_LABEL) else (state.exercise or "")
-    view_key_to_label = {"front": "Front", "side": "Lateral"}
-    current_view_label = view_key_to_label.get(getattr(state, "view", "") or "", "")
+    current_ex_label = KEY_TO_EX_LABEL.get(state.exercise_selected or "", "")
+    if not current_ex_label and state.detect_result:
+        detected_label = state.detect_result.get("label")
+        if detected_label:
+            current_ex_label = KEY_TO_EX_LABEL.get(str(detected_label), "")
+
+    current_view_label = VIEW_KEY_TO_LABEL.get(state.view_selected or "", "")
+    if not current_view_label and state.detect_result:
+        detected_view = state.detect_result.get("view")
+        if detected_view:
+            current_view_label = VIEW_KEY_TO_LABEL.get(str(detected_view), "")
     return current_ex_label, current_view_label
 
 
@@ -144,21 +154,20 @@ def _render_autodetect_button(
             return current_ex_label, current_view_label
 
     detected_label = next((lbl for (lbl, key) in EXERCISE_ITEMS if key == label_key), "")
-    view_label = {"front": "Front", "side": "Lateral"}.get(detected_view, "")
-
-    state.exercise = detected_label or DEFAULT_EXERCISE_LABEL
-    state.view = detected_view if view_label else ""
+    view_label = VIEW_KEY_TO_LABEL.get(detected_view, "")
     state.detect_result = {
         "label": label_key,
         "view": detected_view or "",
         "confidence": float(confidence),
     }
+    state.exercise_selected = None
+    state.view_selected = None
     state.ui_rev += 1
 
     if detected_label and view_label:
         st.success(f"Detected: **{detected_label}** — **{view_label}** view.")
 
-    return detected_label or "", view_label or ""
+    return _current_widget_labels(state)
 
 
 def _render_selectors(
@@ -201,17 +210,51 @@ def _render_selectors(
 def _persist_manual_selection(state, *, selected_exercise: str, selected_view: str) -> None:
     """Sincroniza la selección manual con el ``AppState``."""
 
-    state.exercise = selected_exercise or DEFAULT_EXERCISE_LABEL
-    state.view = {"Front": "front", "Lateral": "side"}.get(selected_view or "", "")
+    selected_key = EX_TO_KEY.get(selected_exercise) if selected_exercise else None
+    detected_key = None
     if state.detect_result:
-        new_label_key = EX_TO_KEY.get(selected_exercise)
-        if new_label_key:
-            state.detect_result["label"] = new_label_key
-        if state.view:
-            state.detect_result["view"] = state.view
+        detected_key = state.detect_result.get("label")
+
+    if selected_key == detected_key:
+        state.exercise_selected = None
+    else:
+        state.exercise_selected = selected_key
+
+    selected_view_key = VIEW_LABEL_TO_KEY.get(selected_view or "", None)
+    detected_view_key = None
+    if state.detect_result:
+        detected_view_key = state.detect_result.get("view")
+
+    if selected_view_key == detected_view_key:
+        state.view_selected = None
+    else:
+        state.view_selected = selected_view_key
 
 
-def _render_navigation(selected_exercise: str, selected_view: str) -> None:
+def _resolve_effective_exercise_key(state) -> str | None:
+    if (
+        state.exercise_selected
+        and as_exercise(state.exercise_selected) is not ExerciseType.UNKNOWN
+    ):
+        return state.exercise_selected
+    if state.detect_result:
+        detected_label = state.detect_result.get("label")
+        if detected_label and as_exercise(detected_label) is not ExerciseType.UNKNOWN:
+            return str(detected_label)
+    return None
+
+
+def _resolve_effective_view_key(state) -> str | None:
+    if state.view_selected and as_view(state.view_selected) is not ViewType.UNKNOWN:
+        return state.view_selected
+    if state.detect_result:
+        detected_view = state.detect_result.get("view")
+        if detected_view and as_view(detected_view) is not ViewType.UNKNOWN:
+            return str(detected_view)
+    return None
+
+
+def _render_navigation(*, can_continue: bool) -> None:
     """Construye los botones de navegación inferiores del paso."""
 
     state = get_state()
@@ -225,7 +268,6 @@ def _render_navigation(selected_exercise: str, selected_view: str) -> None:
             safe_rerun()
         st.markdown("</div>", unsafe_allow_html=True)
     with continue_col:
-        can_continue = bool(selected_exercise and selected_view)
         st.markdown('<div class="btn--continue">', unsafe_allow_html=True)
         if st.button(
             "Continue",
@@ -292,4 +334,9 @@ def _detect_step() -> None:
             selected_view=selected_view,
         )
 
-        _render_navigation(selected_exercise, selected_view)
+        effective_exercise = _resolve_effective_exercise_key(state)
+        effective_view = _resolve_effective_view_key(state)
+        if not effective_exercise or not effective_view:
+            st.info("Please select both Exercise and View to continue.")
+
+        _render_navigation(can_continue=bool(effective_exercise and effective_view))

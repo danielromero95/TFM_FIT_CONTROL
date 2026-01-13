@@ -47,6 +47,8 @@ def start_run(
     video_path: str,
     cfg,
     prefetched_detection: Optional[Tuple[str, str, float]],
+    exercise_selected: Optional[str] = None,
+    view_selected: Optional[str] = None,
     debug_enabled: bool,
     preview_callback: Optional[Callable[[np.ndarray, int, float], None]] = None,
     preview_fps: Optional[float] = None,
@@ -74,6 +76,8 @@ def start_run(
             cfg,
             progress_callback=cb,
             prefetched_detection=prefetched_detection,
+            exercise_selected=exercise_selected,
+            view_selected=view_selected,
             preview_callback=preview_callback,
             preview_fps=preview_fps,
         )

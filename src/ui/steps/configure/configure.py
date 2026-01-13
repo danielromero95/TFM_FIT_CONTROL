@@ -3,9 +3,9 @@ from __future__ import annotations
 import streamlit as st
 
 from src.ui.metrics_catalog import human_metric_name, metric_base_description
+from src.core.types import EXERCISE_HUMAN_LABEL, ExerciseType, as_exercise
 from src.ui.state import (
     CONFIG_DEFAULTS,
-    DEFAULT_EXERCISE_LABEL,
     EXERCISE_THRESHOLDS,
     Step,
     default_configure_values,
@@ -13,7 +13,6 @@ from src.ui.state import (
     go_to,
     migrate_thresholds_config,
 )
-from src.ui.steps.detect import EXERCISE_TO_CONFIG
 from ..utils import step_container
 
 
@@ -37,10 +36,16 @@ def _configure_step(*, disabled: bool = False, show_actions: bool = True) -> Non
             cfg_values.update(dict(stored_cfg))
         cfg_values["use_crop"] = True
 
-        exercise_label = state.exercise or DEFAULT_EXERCISE_LABEL
-        ex_key = EXERCISE_TO_CONFIG.get(
-            exercise_label, EXERCISE_TO_CONFIG.get(DEFAULT_EXERCISE_LABEL, "squat")
-        )
+        selected_key = state.exercise_selected
+        if selected_key and as_exercise(selected_key) is ExerciseType.UNKNOWN:
+            selected_key = None
+        detected_key = None
+        if state.detect_result:
+            detected_key = state.detect_result.get("label")
+            if detected_key and as_exercise(detected_key) is ExerciseType.UNKNOWN:
+                detected_key = None
+        ex_key = selected_key or detected_key or ExerciseType.SQUAT.value
+        exercise_label = EXERCISE_HUMAN_LABEL.get(as_exercise(ex_key), ex_key)
 
         cfg_values = migrate_thresholds_config(cfg_values, ex_key)
 
