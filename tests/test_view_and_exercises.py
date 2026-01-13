@@ -11,6 +11,7 @@ from exercise_detection.classification import (
     classify_features_with_diagnostics,
     _prepare_series,
     _resolve_torso_scale,
+    _is_inconsistent_wrist_proxy,
     _select_arm_proxy,
     _select_bar_proxy,
     _select_visible_side,
@@ -72,6 +73,50 @@ def test_deadlift_low_arms_fraction_prefers_deadlift():
     assert label == "deadlift"
     assert view == "side"
     assert diagnostics["arms_above_hip_fraction"] <= 0.2
+
+
+def test_y_up_squat_flips_axis_and_restores_arm_metrics():
+    features = make_squat_features()
+    y_up_features = FeatureSeries(
+        data=_flip_y_features(features.data),
+        sampling_rate=SAMPLING_RATE,
+        valid_frames=FRAMES,
+        total_frames=FRAMES,
+    )
+
+    label, view, _confidence, diagnostics = classify_features_with_diagnostics(y_up_features)
+
+    assert label == "squat"
+    assert view == "side"
+    assert diagnostics["y_axis_flipped"] is True
+    assert diagnostics["arms_above_hip_fraction"] >= 0.6
+
+
+def test_arm_proxy_logic_consistent_after_y_flip():
+    features = make_squat_features()
+    y_up_features = FeatureSeries(
+        data=_flip_y_features(features.data),
+        sampling_rate=SAMPLING_RATE,
+        valid_frames=FRAMES,
+        total_frames=FRAMES,
+    )
+
+    normal_series = _prepare_series(features)
+    flipped_series = _prepare_series(y_up_features)
+
+    normal_wrist = nanmean_pair(normal_series["wrist_left_y"], normal_series["wrist_right_y"])
+    normal_elbow = nanmean_pair(normal_series["elbow_left_y"], normal_series["elbow_right_y"])
+    normal_shoulder = nanmean_pair(normal_series["shoulder_left_y"], normal_series["shoulder_right_y"])
+    flipped_wrist = nanmean_pair(flipped_series["wrist_left_y"], flipped_series["wrist_right_y"])
+    flipped_elbow = nanmean_pair(flipped_series["elbow_left_y"], flipped_series["elbow_right_y"])
+    flipped_shoulder = nanmean_pair(flipped_series["shoulder_left_y"], flipped_series["shoulder_right_y"])
+
+    assert _is_inconsistent_wrist_proxy(normal_wrist, normal_elbow, normal_shoulder) == _is_inconsistent_wrist_proxy(
+        flipped_wrist, flipped_elbow, flipped_shoulder
+    )
+    assert _select_arm_proxy(normal_wrist, normal_elbow, normal_shoulder)[1] == _select_arm_proxy(
+        flipped_wrist, flipped_elbow, flipped_shoulder
+    )[1]
 
 
 def test_arm_proxy_prefers_elbow_when_wrist_erratic():
@@ -556,3 +601,13 @@ def _assemble_clip(
         "ankle_width_norm": np.full(FRAMES, ankle_width),
     }
     return data
+
+
+def _flip_y_features(data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    flipped: dict[str, np.ndarray] = {}
+    for key, value in data.items():
+        arr = np.asarray(value, dtype=float)
+        if key.endswith("_y"):
+            arr = -arr
+        flipped[key] = arr
+    return flipped
