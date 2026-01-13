@@ -147,6 +147,7 @@ def classify_features_with_diagnostics(
     wrist_x_mean = nanmean_pair(get_series("wrist_left_x"), get_series("wrist_right_x"))
     elbow_y_mean = nanmean_pair(elbow_y_left, elbow_y_right)
     shoulder_y_mean = nanmean_pair(shoulder_y_left, shoulder_y_right)
+    hip_y_mean = nanmean_pair(get_series("hip_left_y"), get_series("hip_right_y"))
 
     bar_y_proxy, bar_source, bar_source_ratios = _select_bar_proxy(
         wrist_y_mean, elbow_y_mean, shoulder_y_mean
@@ -158,6 +159,7 @@ def classify_features_with_diagnostics(
         shoulder_y_mean,
         side_wrist_y=wrist_y_side,
         side_elbow_y=elbow_y_side,
+        hip_y=hip_y_mean,
     )
 
     rep_slices = segment_reps(knee_angle, bar_y_proxy, torso_scale, sampling_rate)
@@ -218,6 +220,9 @@ def classify_features_with_diagnostics(
         diagnostics["arm_proxy_source"] = arm_source
         diagnostics["arm_proxy_ratios"] = arm_source_ratios
         diagnostics["torso_scale"] = float(torso_scale) if np.isfinite(torso_scale) else float("nan")
+        diagnostics["y_axis_flipped"] = bool(series.get("_y_axis_flipped", False))
+        shoulder_minus_hip = series.get("_shoulder_minus_hip_median", float("nan"))
+        diagnostics["shoulder_minus_hip_median"] = float(shoulder_minus_hip) if np.isfinite(shoulder_minus_hip) else float("nan")
         diagnostics["arm_debug_timeseries"] = _build_arm_debug_timeseries(
             hip_mean=nanmean_pair(get_series("hip_left_y"), get_series("hip_right_y")),
             shoulder_mean=nanmean_pair(get_series("shoulder_left_y"), get_series("shoulder_right_y")),
@@ -264,6 +269,23 @@ def _prepare_series(features: FeatureSeries) -> Dict[str, np.ndarray]:
             elif arr.size > frame_count:
                 data[key] = arr[:frame_count]
 
+    shoulder_mean = nanmean_pair(data.get("shoulder_left_y"), data.get("shoulder_right_y"))
+    hip_mean = nanmean_pair(data.get("hip_left_y"), data.get("hip_right_y"))
+    shoulder_median = (
+        float(np.nanmedian(shoulder_mean)) if shoulder_mean.size and np.isfinite(shoulder_mean).any() else float("nan")
+    )
+    hip_median = float(np.nanmedian(hip_mean)) if hip_mean.size and np.isfinite(hip_mean).any() else float("nan")
+    shoulder_minus_hip_median = (
+        shoulder_median - hip_median if np.isfinite(shoulder_median) and np.isfinite(hip_median) else float("nan")
+    )
+    y_axis_flipped = bool(np.isfinite(shoulder_minus_hip_median) and shoulder_minus_hip_median > 0)
+    if y_axis_flipped:
+        for key in list(data.keys()):
+            if key.endswith("_y"):
+                data[key] = -data[key]
+
+    data["_y_axis_flipped"] = y_axis_flipped
+    data["_shoulder_minus_hip_median"] = shoulder_minus_hip_median
     data["_length"] = frame_count
     return data
 
@@ -437,6 +459,7 @@ def _select_arm_proxy(
     *,
     side_wrist_y: np.ndarray | None = None,
     side_elbow_y: np.ndarray | None = None,
+    hip_y: np.ndarray | None = None,
 ) -> Tuple[np.ndarray, str, Dict[str, float]]:
     candidates: Dict[str, np.ndarray] = {
         "wrist_mean": wrist_y,
@@ -469,6 +492,8 @@ def _select_arm_proxy(
 
     if wrist_ok and not _is_unstable_arm_proxy(wrist_series, elbow_series):
         if elbow_ok and _is_inconsistent_wrist_proxy(wrist_series, elbow_series, shoulder_y):
+            if hip_y is not None and _wrist_below_hip_fraction(wrist_series, hip_y) >= 0.7:
+                return wrist_series, "wrist", ratios
             return elbow_series, "elbow", ratios
         return wrist_series, "wrist", ratios
     if elbow_ok:
@@ -499,6 +524,22 @@ def _is_unstable_arm_proxy(primary: np.ndarray, fallback: np.ndarray) -> bool:
     if fallback_std <= std_floor:
         return primary_std > std_abs_max
     return primary_std > fallback_std * std_ratio_max
+
+
+def _wrist_below_hip_fraction(wrist_y: np.ndarray, hip_y: np.ndarray) -> float:
+    wrist_arr = np.asarray(wrist_y, dtype=float)
+    hip_arr = np.asarray(hip_y, dtype=float)
+    if wrist_arr.size == 0 or hip_arr.size == 0:
+        return float("nan")
+    length = max(wrist_arr.size, hip_arr.size)
+    if wrist_arr.size != length:
+        wrist_arr = np.pad(wrist_arr, (0, length - wrist_arr.size), constant_values=np.nan)
+    if hip_arr.size != length:
+        hip_arr = np.pad(hip_arr, (0, length - hip_arr.size), constant_values=np.nan)
+    valid = np.isfinite(wrist_arr) & np.isfinite(hip_arr)
+    if not valid.any():
+        return float("nan")
+    return float(np.mean(wrist_arr[valid] > hip_arr[valid]))
 
 
 def _is_inconsistent_wrist_proxy(
