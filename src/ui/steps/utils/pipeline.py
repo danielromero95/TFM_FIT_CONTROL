@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 from src import config
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
+from src.exercise_detection.types import DetectionResult
 from src.ui.state import (
     AppState,
     CONFIG_DEFAULTS,
@@ -52,7 +53,7 @@ def ensure_video_path() -> None:
 
 def prepare_pipeline_inputs(
     state: AppState,
-) -> Tuple[str, config.Config, Optional[Tuple[str, str, float]]]:
+) -> Tuple[str, config.Config, Optional[Union[Tuple[str, str, float], DetectionResult]]]:
     """Prepara video, configuración y detecciones previas para ``run_pipeline``."""
 
     video_path = state.video_path
@@ -104,13 +105,21 @@ def prepare_pipeline_inputs(
     cfg.counting.exercise = ex_key
 
     det = state.detect_result
-    prefetched_detection: Optional[Tuple[str, str, float]] = None
+    prefetched_detection: Optional[Union[Tuple[str, str, float], DetectionResult]] = None
     if det:
-        prefetched_detection = (
-            det.get("label", "unknown"),
-            det.get("view", "unknown"),
-            float(det.get("confidence", 0.0)),
-        )
+        label = det.get("label", "unknown")
+        view = det.get("view", "unknown")
+        confidence = float(det.get("confidence", 0.0))
+        diagnostics = det.get("diagnostics")
+        if diagnostics:
+            prefetched_detection = DetectionResult(
+                as_exercise(label),
+                as_view(view),
+                confidence,
+                diagnostics=diagnostics,
+            )
+        else:
+            prefetched_detection = (label, view, confidence)
 
     effective_view = None
     if state.view_selected and as_view(state.view_selected) is not ViewType.UNKNOWN:

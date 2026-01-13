@@ -24,6 +24,7 @@ from src.A_preprocessing.frame_extraction.utils import normalize_rotation_deg
 from src.B_pose_estimation.estimators.mediapipe_pool import PoseGraphPool
 from src.core.types import ExerciseType, ViewType, as_exercise, as_view
 from src.pipeline_data import OutputPaths, Report, RunStats
+from src.exercise_detection.types import DetectionResult
 from .errors import NoFramesExtracted
 from .repetition_counter import CountingDebugInfo
 
@@ -169,6 +170,36 @@ def _prepare_output_paths(video_path: Path, output_cfg: config.OutputConfig) -> 
     return OutputPaths(base_dir=base_dir, session_dir=session_dir)
 
 
+def _write_arm_debug_timeseries(
+    session_dir: Path, payload: object
+) -> Optional[Path]:
+    if payload is None:
+        return None
+    try:
+        if isinstance(payload, dict):
+            df = pd.DataFrame(payload)
+        else:
+            df = pd.DataFrame(list(payload))  # type: ignore[arg-type]
+    except Exception:
+        logger.exception("Failed to build arm debug timeseries dataframe")
+        return None
+    if df.empty:
+        return None
+    ordered_cols = [
+        "frame_idx",
+        "hip_mean_y",
+        "shoulder_mean_y",
+        "arm_y",
+        "bar_y",
+        "wrist_y_mean",
+        "elbow_y_mean",
+    ]
+    df = df.reindex(columns=ordered_cols)
+    output_path = session_dir / "arm_debug_timeseries.csv"
+    df.to_csv(output_path, index=False)
+    return output_path
+
+
 def run_pipeline(
     video_path: str,
     cfg: config.Config,
@@ -220,6 +251,7 @@ def run_pipeline(
     detected_view = ViewType.UNKNOWN
     detected_confidence = 0.0
     detection_diagnostics = None
+    arm_debug_timeseries_path: Optional[Path] = None
     debug_video_path_stream: Optional[Path] = None
     processed_frame_size: Optional[tuple[int, int]] = None
 
@@ -389,6 +421,8 @@ def run_pipeline(
             detected_label, detected_view, detected_confidence = normalize_detection(
                 prefetched_detection
             )
+            if isinstance(prefetched_detection, DetectionResult):
+                detection_diagnostics = prefetched_detection.diagnostics
         else:
             detection_output = streaming_result.detection
             if detection_output is None:
@@ -400,6 +434,12 @@ def run_pipeline(
                 detected_view = detection_output.view
                 detected_confidence = float(detection_output.confidence)
                 detection_diagnostics = getattr(detection_output, "diagnostics", None)
+        if detection_diagnostics is not None:
+            detection_diagnostics = dict(detection_diagnostics)
+            arm_series = detection_diagnostics.pop("arm_debug_timeseries", None)
+            arm_debug_timeseries_path = _write_arm_debug_timeseries(
+                output_paths.session_dir, arm_series
+            )
         if df_raw_landmarks.empty:
             raise NoFramesExtracted("No frames could be extracted from the video.")
     finally:
@@ -731,6 +771,7 @@ def run_pipeline(
         stats=stats,
         config_used=cfg,
         metrics_path=metrics_path,
+        arm_debug_timeseries_path=arm_debug_timeseries_path,
         effective_config_path=config_path,
     )
 

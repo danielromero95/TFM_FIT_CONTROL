@@ -91,6 +91,17 @@ def test_arm_proxy_prefers_elbow_when_wrist_erratic():
     assert label == "squat"
 
 
+def test_arm_proxy_prefers_elbow_when_wrist_is_low_but_stable():
+    wrist_y = np.full(FRAMES, 0.92)
+    elbow_y = np.full(FRAMES, 0.42)
+    shoulder_y = np.full(FRAMES, 0.32)
+
+    arm_y, source, _ratios = _select_arm_proxy(wrist_y, elbow_y, shoulder_y)
+
+    assert np.allclose(arm_y, elbow_y)
+    assert source == "elbow"
+
+
 def test_deadlift_with_missing_wrists_uses_elbow_proxy():
     features = make_deadlift_features()
     data = dict(features.data)

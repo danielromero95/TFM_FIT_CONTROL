@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from queue import Empty, SimpleQueue
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import streamlit as st
@@ -46,7 +46,7 @@ def start_run(
     *,
     video_path: str,
     cfg,
-    prefetched_detection: Optional[Tuple[str, str, float]],
+    prefetched_detection: Optional[Union[Tuple[str, str, float], "DetectionResult"]],
     exercise_selected: Optional[str] = None,
     view_selected: Optional[str] = None,
     debug_enabled: bool,

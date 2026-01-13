@@ -105,6 +105,7 @@ def _running_step() -> None:
             state.pipeline_error = None
             state.report = None
             state.metrics_path = None
+            state.arm_debug_timeseries_path = None
             state.cfg_fingerprint = None
             state.overlay_video_stream_path = None
             state.overlay_video_download_path = None
@@ -205,6 +206,7 @@ def _running_step() -> None:
                 if state.run_id is None:
                     state.report = None
                     state.metrics_path = None
+                    state.arm_debug_timeseries_path = None
                     state.cfg_fingerprint = None
                     state.overlay_video_stream_path = None
                     state.overlay_video_download_path = None
@@ -255,6 +257,7 @@ def _running_step() -> None:
                 state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
                 state.metrics_path = None
+                state.arm_debug_timeseries_path = None
                 state.cfg_fingerprint = None
                 state.overlay_video_stream_path = None
                 state.overlay_video_download_path = None
@@ -295,6 +298,7 @@ def _running_step() -> None:
                 state.pipeline_error = "Analysis canceled by the user."
                 state.report = None
                 state.metrics_path = None
+                state.arm_debug_timeseries_path = None
                 state.cfg_fingerprint = None
                 state.overlay_video_stream_path = None
                 state.overlay_video_download_path = None
@@ -417,6 +421,11 @@ def _running_step() -> None:
                 state.metrics_path = str(metrics_path)
             else:
                 state.metrics_path = None
+            arm_debug_path = getattr(report, "arm_debug_timeseries_path", None)
+            if arm_debug_path and Path(arm_debug_path).exists():
+                state.arm_debug_timeseries_path = str(arm_debug_path)
+            else:
+                state.arm_debug_timeseries_path = None
 
             latest_progress = 100
             latest_phase = phase_for(100, debug_enabled=debug_enabled)
@@ -447,6 +456,7 @@ def _running_step() -> None:
             state.pipeline_error = f"Error in analysis thread: {exc}"
             state.report = None
             state.metrics_path = None
+            state.arm_debug_timeseries_path = None
             state.cfg_fingerprint = None
             state.overlay_video_stream_path = None
             state.overlay_video_download_path = None

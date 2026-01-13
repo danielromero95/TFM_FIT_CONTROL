@@ -108,6 +108,7 @@ def test_debug_bundle_contains_rep_speed_artifacts():
         stats_df=stats_df,
         metrics_df=metrics_df,
         metrics_csv=metrics_csv,
+        arm_debug_csv=None,
         effective_config_bytes=None,
         video_name="video.mp4",
         rep_intervals=rep_intervals,
@@ -162,6 +163,7 @@ def test_debug_bundle_handles_missing_metrics():
         stats_df=stats_df,
         metrics_df=None,
         metrics_csv=None,
+        arm_debug_csv=None,
         effective_config_bytes=None,
         video_name=None,
     )
@@ -228,6 +230,7 @@ def test_bundle_contains_video_metadata_csv():
             stats_df=stats_df,
             metrics_df=None,
             metrics_csv=None,
+            arm_debug_csv=None,
             effective_config_bytes=None,
             video_name=video_path.name,
             video_path=video_path,
