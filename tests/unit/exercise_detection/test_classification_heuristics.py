@@ -24,6 +24,7 @@ def _make_agg(**overrides):
         bar_vertical_range_norm=0.05,
         bar_horizontal_std_norm=0.02,
         arms_high_fraction=0.3,
+        arms_above_hip_fraction=0.3,
         bar_near_shoulders_fraction=0.2,
         duration_s=2.0,
         rep_count=1,
@@ -167,3 +168,67 @@ def test_deadlift_veto_does_not_trigger_when_bar_is_high():
     _label, _confidence, _scores, _probabilities, diagnostics = classify_exercise(agg)
     assert diagnostics["deadlift_veto"]["active"] is False
     assert diagnostics["deadlift_veto"]["cues"].get("bar_above_hip_block") is True
+
+
+def test_lateral_air_squat_with_extended_elbows_is_squat():
+    agg = _make_agg(
+        knee_min=90.0,
+        hip_min=120.0,
+        elbow_bottom=170.0,
+        torso_tilt_bottom=35.0,
+        wrist_shoulder_diff_norm=0.08,
+        wrist_hip_diff_norm=0.05,
+        knee_forward_norm=0.12,
+        knee_rom=65.0,
+        hip_rom=45.0,
+        bar_range_norm=0.12,
+        bar_ankle_diff_norm=0.06,
+        arms_above_hip_fraction=0.72,
+        arms_high_fraction=0.72,
+    )
+    label, _confidence, _scores, _probabilities, diagnostics = classify_exercise(agg)
+    assert diagnostics["arms_above_hip_fraction"] >= 0.6
+    assert label == "squat"
+
+
+def test_deadlift_typical_low_arms_is_deadlift():
+    agg = _make_agg(
+        knee_min=135.0,
+        hip_min=150.0,
+        elbow_bottom=175.0,
+        torso_tilt_bottom=55.0,
+        wrist_shoulder_diff_norm=0.35,
+        wrist_hip_diff_norm=0.35,
+        knee_forward_norm=0.0,
+        knee_rom=35.0,
+        hip_rom=70.0,
+        bar_range_norm=0.22,
+        bar_ankle_diff_norm=0.02,
+        arms_above_hip_fraction=0.15,
+        arms_high_fraction=0.15,
+    )
+    label, _confidence, _scores, _probabilities, diagnostics = classify_exercise(agg)
+    assert diagnostics["arms_above_hip_fraction"] <= 0.2
+    assert label == "deadlift"
+
+
+def test_bench_press_requires_quiet_legs():
+    agg = _make_agg(
+        knee_min=165.0,
+        hip_min=170.0,
+        elbow_bottom=150.0,
+        torso_tilt_bottom=72.0,
+        wrist_shoulder_diff_norm=0.05,
+        wrist_hip_diff_norm=0.0,
+        knee_forward_norm=0.0,
+        knee_rom=12.0,
+        hip_rom=12.0,
+        elbow_rom=50.0,
+        bar_range_norm=0.2,
+        hip_range_norm=0.05,
+        bar_horizontal_std_norm=0.02,
+        arms_above_hip_fraction=0.35,
+        arms_high_fraction=0.35,
+    )
+    label, _confidence, _scores, _probabilities, _diagnostics = classify_exercise(agg)
+    assert label == "bench_press"

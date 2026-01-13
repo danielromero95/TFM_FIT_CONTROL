@@ -50,6 +50,7 @@ BENCH_ELBOW_ROM_WEIGHT = 0.6
 BENCH_BAR_RANGE_WEIGHT = 0.5
 BENCH_ROM_PENALTY_WEIGHT = 0.4
 BENCH_BAR_HORIZONTAL_PENALTY_WEIGHT = 0.7
+BENCH_LOWER_BODY_PENALTY_WEIGHT = 0.6
 
 # ---------------------------------------------------------------------------
 # Heurísticas para sentadilla
@@ -81,6 +82,12 @@ SQUAT_ARM_HIGH_BONUS_WEIGHT = 0.8
 SQUAT_ARM_LOW_PENALTY_WEIGHT = 0.6
 SQUAT_HINGE_PENALTY_WEIGHT = 0.5
 SQUAT_BAR_BELOW_HIP_PENALTY_WEIGHT = 0.75
+ARM_ABOVE_HIP_HIGH_FRAC = 0.60
+ARM_ABOVE_HIP_LOW_FRAC = 0.25
+ARM_HIGH_SQUAT_BONUS = 0.8
+ARM_LOW_DEADLIFT_BONUS = 0.8
+ARM_HIGH_DEADLIFT_CLAMP = 0.15
+ARM_LOW_SQUAT_CLAMP = 0.15
 
 # ---------------------------------------------------------------------------
 # Heurísticas para peso muerto

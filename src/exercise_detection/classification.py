@@ -144,6 +144,9 @@ def classify_features_with_diagnostics(
     bar_y_proxy, bar_source, bar_source_ratios = _select_bar_proxy(
         wrist_y_mean, elbow_y_mean, shoulder_y_mean
     )
+    arm_y_proxy, arm_source, arm_source_ratios = _select_arm_proxy(
+        wrist_y_mean, elbow_y_mean, shoulder_y_mean
+    )
 
     rep_slices = segment_reps(knee_angle, bar_y_proxy, torso_scale, sampling_rate)
 
@@ -164,6 +167,7 @@ def classify_features_with_diagnostics(
         "ankle_y": ankle_y_side,
         "bar_y": bar_y_proxy,
         "bar_x": wrist_x_mean,
+        "arm_y": arm_y_proxy,
         "shoulder_left_y": get_series("shoulder_left_y"),
         "shoulder_right_y": get_series("shoulder_right_y"),
     }
@@ -199,6 +203,8 @@ def classify_features_with_diagnostics(
         diagnostics["visible_side"] = side_diagnostics
         diagnostics["bar_source"] = bar_source
         diagnostics["bar_source_ratios"] = bar_source_ratios
+        diagnostics["arm_proxy_source"] = arm_source
+        diagnostics["arm_proxy_ratios"] = arm_source_ratios
 
     _log_summary(side, view_label, metrics, scores, view_result)
     return label, view_label, float(confidence), diagnostics
@@ -363,6 +369,50 @@ def _select_bar_proxy(
     if best_source == "shoulder":
         return shoulder_y, best_source, ratios
     return wrist_y, "wrist", ratios
+
+
+def _select_arm_proxy(
+    wrist_y: np.ndarray,
+    elbow_y: np.ndarray,
+    shoulder_y: np.ndarray,
+) -> Tuple[np.ndarray, str, Dict[str, float]]:
+    ratios = {
+        "wrist": _finite_ratio(wrist_y, wrist_y.size),
+        "elbow": _finite_ratio(elbow_y, elbow_y.size),
+        "shoulder": _finite_ratio(shoulder_y, shoulder_y.size),
+    }
+    wrist_ok = np.isfinite(ratios["wrist"]) and ratios["wrist"] >= BAR_PROXY_MIN_FINITE_RATIO
+    elbow_ok = np.isfinite(ratios["elbow"]) and ratios["elbow"] >= BAR_PROXY_MIN_FINITE_RATIO
+    if wrist_ok and not _is_unstable_arm_proxy(wrist_y, elbow_y):
+        return wrist_y, "wrist", ratios
+    if elbow_ok:
+        return elbow_y, "elbow", ratios
+    if np.isfinite(ratios["wrist"]) and ratios["wrist"] > 0:
+        return wrist_y, "wrist", ratios
+    if np.isfinite(ratios["elbow"]) and ratios["elbow"] > 0:
+        return elbow_y, "elbow", ratios
+    return shoulder_y, "shoulder", ratios
+
+
+def _is_unstable_arm_proxy(primary: np.ndarray, fallback: np.ndarray) -> bool:
+    std_floor = 1e-6
+    std_abs_max = 0.08
+    std_ratio_max = 1.5
+    if primary.size == 0:
+        return True
+    primary_std = float(np.nanstd(primary))
+    if not np.isfinite(primary_std):
+        return True
+    if primary_std <= std_abs_max:
+        return False
+    if fallback.size == 0:
+        return True
+    fallback_std = float(np.nanstd(fallback))
+    if not np.isfinite(fallback_std):
+        return primary_std > std_abs_max
+    if fallback_std <= std_floor:
+        return primary_std > std_abs_max
+    return primary_std > fallback_std * std_ratio_max
 
 
 def _log_summary(

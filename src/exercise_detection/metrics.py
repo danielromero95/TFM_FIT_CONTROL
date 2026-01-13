@@ -157,6 +157,9 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
     shoulder_series = series.get("shoulder_y", np.array([]))
     bar_y_series = series.get("bar_y", np.array([]))
     bar_x_series = series.get("bar_x", np.array([]))
+    arm_y_series = series.get("arm_y")
+    if arm_y_series is None or np.asarray(arm_y_series, dtype=float).size == 0:
+        arm_y_series = bar_y_series
 
     hip_mean = nanmean_pair(hip_left_y, hip_right_y)
     if hip_mean.size == 0 or not np.isfinite(hip_mean).any():
@@ -169,8 +172,8 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
     hip_range_norm = _series_range_norm(hip_series, torso_scale)
     bar_vertical_range_norm = _series_range_norm(bar_y_series, torso_scale)
     bar_horizontal_std_norm = _series_std_norm(bar_x_series, torso_scale)
-    arms_high_fraction = _series_fraction_above(
-        hip_mean, bar_y_series, torso_scale, ARM_ABOVE_HIP_THRESH
+    arms_above_hip_fraction = _series_fraction_above(
+        hip_mean, arm_y_series, torso_scale, ARM_ABOVE_HIP_THRESH
     )
     bar_near_shoulders_fraction = _series_fraction_below(
         bar_y_series, shoulder_mean, torso_scale, BAR_NEAR_SHOULDER_THRESH
@@ -195,7 +198,8 @@ def _aggregate(per_rep: Sequence[RepMetrics], series: Dict[str, np.ndarray], tor
         hip_range_norm=hip_range_norm,
         bar_vertical_range_norm=bar_vertical_range_norm,
         bar_horizontal_std_norm=bar_horizontal_std_norm,
-        arms_high_fraction=arms_high_fraction,
+        arms_high_fraction=arms_above_hip_fraction,
+        arms_above_hip_fraction=arms_above_hip_fraction,
         bar_near_shoulders_fraction=bar_near_shoulders_fraction,
         duration_s=safe_nanmedian([rep.duration_s for rep in per_rep]),
         rep_count=len(per_rep),

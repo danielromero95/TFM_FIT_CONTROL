@@ -11,6 +11,7 @@ from exercise_detection.classification import (
     classify_features_with_diagnostics,
     _prepare_series,
     _resolve_torso_scale,
+    _select_arm_proxy,
     _select_bar_proxy,
     _select_visible_side,
 )
@@ -61,7 +62,7 @@ def test_side_squat_diagnostics_prefer_left_and_high_arms():
     assert view == "side"
     assert diagnostics["visible_side"]["side"] == "left"
     assert diagnostics["bar_source"] == "wrist"
-    assert diagnostics["arms_high_fraction"] >= 0.6
+    assert diagnostics["arms_above_hip_fraction"] >= 0.6
 
 
 def test_deadlift_low_arms_fraction_prefers_deadlift():
@@ -70,7 +71,41 @@ def test_deadlift_low_arms_fraction_prefers_deadlift():
     label, view, _confidence, diagnostics = classify_features_with_diagnostics(features)
     assert label == "deadlift"
     assert view == "side"
-    assert diagnostics["arms_high_fraction"] <= 0.2
+    assert diagnostics["arms_above_hip_fraction"] <= 0.2
+
+
+def test_arm_proxy_prefers_elbow_when_wrist_erratic():
+    features = make_squat_features()
+    data = dict(features.data)
+    t = np.linspace(0, 1, FRAMES)
+    cycle = 0.5 - 0.5 * np.cos(2 * np.pi * t)
+    data["wrist_left_y"] = 0.72 + 0.18 * np.sin(8 * np.pi * t)
+    data["wrist_right_y"] = data["wrist_left_y"].copy()
+    data["elbow_left_y"] = 0.4 + 0.01 * cycle
+    data["elbow_right_y"] = data["elbow_left_y"].copy()
+    features = FeatureSeries(data=data, sampling_rate=SAMPLING_RATE, valid_frames=FRAMES, total_frames=FRAMES)
+
+    label, view, _confidence, diagnostics = classify_features_with_diagnostics(features)
+    assert view == "side"
+    assert diagnostics["arm_proxy_source"] == "elbow"
+    assert label == "squat"
+
+
+def test_deadlift_with_missing_wrists_uses_elbow_proxy():
+    features = make_deadlift_features()
+    data = dict(features.data)
+    t = np.linspace(0, 1, FRAMES)
+    cycle = 0.5 - 0.5 * np.cos(2 * np.pi * t)
+    data["wrist_left_y"] = np.full(FRAMES, np.nan)
+    data["wrist_right_y"] = np.full(FRAMES, np.nan)
+    data["elbow_left_y"] = 0.62 + 0.12 * cycle
+    data["elbow_right_y"] = data["elbow_left_y"].copy()
+    features = FeatureSeries(data=data, sampling_rate=SAMPLING_RATE, valid_frames=FRAMES, total_frames=FRAMES)
+
+    label, view, _confidence, diagnostics = classify_features_with_diagnostics(features)
+    assert view == "side"
+    assert diagnostics["arm_proxy_source"] == "elbow"
+    assert label == "deadlift"
 
 
 def test_low_bar_squat_remains_squat():
@@ -230,6 +265,9 @@ def _internal_metrics(features: FeatureSeries):
     bar_y_proxy, _bar_source, _bar_ratios = _select_bar_proxy(
         wrist_y_mean, elbow_y_mean, shoulder_y_mean
     )
+    arm_y_proxy, _arm_source, _arm_ratios = _select_arm_proxy(
+        wrist_y_mean, elbow_y_mean, shoulder_y_mean
+    )
 
     rep_slices = segment_reps(knee, bar_y_proxy, torso_scale, sr)
 
@@ -248,6 +286,7 @@ def _internal_metrics(features: FeatureSeries):
         "ankle_y": get(f"ankle_{side}_y"),
         "bar_y": bar_y_proxy,
         "bar_x": wrist_x_mean,
+        "arm_y": arm_y_proxy,
         "shoulder_left_y": get("shoulder_left_y"),
         "shoulder_right_y": get("shoulder_right_y"),
     }
