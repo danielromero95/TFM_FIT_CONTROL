@@ -275,6 +275,40 @@ mientras se preserva el comportamiento actual.
 
 ---
 
+## Notas para desarrolladores: `model_complexity` en MediaPipe Pose
+
+Resumen de findings para el parámetro `model_complexity` que controla el tamaño
+del modelo de MediaPipe Pose y su impacto en la pipeline principal:
+
+- **El selector de la UI llega al pipeline principal.** El valor elegido en la
+  UI se guarda en `cfg.pose.model_complexity` y la creación de
+  `PoseEstimator/CroppedPoseEstimator/RoiPoseEstimator` pasa
+  `model_complexity=cfg.pose.model_complexity`, garantizando que cada run use el
+  modelo seleccionado y evitando resultados idénticos entre 0/1/2.
+- **Rastro de dónde se define y cómo fluye el valor.** Se define en
+  `MODEL_COMPLEXITY` / `POSE_MODEL_COMPLEXITY` (`src/config/settings.py`), se
+  expone en `PoseConfig` (`src/config/models.py`), se ajusta en la UI con
+  `configure_values` y llega a `cfg.pose.model_complexity` en la preparación de
+  pipeline (`src/ui/steps/utils/pipeline.py`).
+- **Instrumentación para validar el modelo activo.** `PoseGraphPool.acquire()`
+  registra en `INFO` cuando crea instancias nuevas e imprime `run_id`,
+  `model_complexity` y `static_image_mode`. Esto permite comprobar en consola
+  que los runs 0/1/2 instancian modelos distintos.
+- **Comportamiento del fallback.** Si `enable_recovery_pass` está activo,
+  `_process_with_recovery()` fuerza `model_complexity=2` en el fallback; así que
+  incluso un run con 0/1 puede elevarse a 2 cuando se pierde el tracking.
+- **Pipelines alternativos no consumen `cfg.pose.model_complexity`.** La
+  detección de ejercicio en `src/exercise_detection/extraction.py` e
+  `incremental.py` construye `mp_pose.Pose` con `MODEL_COMPLEXITY` fijo (2); si se
+  desea coherencia total, habría que inyectar el valor configurado allí.
+- **Qué esperar del parámetro.** `model_complexity=0` prioriza velocidad,
+  `1` equilibra, y `2` prioriza precisión. Las diferencias se notan más en
+  escenas complejas (oclusión, iluminación difícil, video con ruido). Con
+  `static_image_mode=False` el tracking puede suavizar diferencias; con
+  `static_image_mode=True` tienden a ser más visibles.
+
+---
+
 ## NOTA:
 En entornos Windows, si el vídeo con landmarks no se genera, reinstalar opencv-python puede resolver conflictos de codecs (OpenH264/FFmpeg).
 uv pip uninstall opencv-python opencv-contrib-python opencv-python-headless uv pip install opencv-python
