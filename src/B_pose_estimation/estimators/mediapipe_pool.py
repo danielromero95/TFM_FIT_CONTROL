@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import logging
 import threading
 from typing import Dict, List, Tuple
 
@@ -18,6 +19,7 @@ class PoseGraphPool:
     _imported = False
     mp_pose = None
     mp_drawing = None
+    _logger = logging.getLogger(__name__)
 
     @classmethod
     def _ensure_imports(cls) -> None:
@@ -63,9 +65,21 @@ class PoseGraphPool:
             bucket = cls._free.get(key)
             if bucket:
                 try:
-                    return bucket.pop(), key
+                    inst = bucket.pop()
+                    cls._logger.debug(
+                        "Reusing MediaPipe Pose instance (run_id=%s, model_complexity=%s).",
+                        run_id,
+                        pose_kwargs.get("model_complexity"),
+                    )
+                    return inst, key
                 except IndexError:
                     pass
+        cls._logger.info(
+            "Creating MediaPipe Pose instance (run_id=%s, model_complexity=%s, static_image_mode=%s).",
+            run_id,
+            pose_kwargs.get("model_complexity"),
+            pose_kwargs.get("static_image_mode"),
+        )
         inst = cls.mp_pose.Pose(**pose_kwargs)  # type: ignore[arg-type]
         with cls._lock:
             cls._all.setdefault(str(run_id), []).append(inst)

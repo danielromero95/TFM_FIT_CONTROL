@@ -1,0 +1,96 @@
+A) Resumen ejecutivo
+- El valor seleccionado en la UI se guarda en el estado y se copia a `cfg.pose.model_complexity`, pero antes NO llegaba al constructor real de `mp.solutions.pose.Pose` en el pipeline principal (streaming), porque `stream_pose_and_detection()` creaba el estimador sin pasar `model_complexity` y éste usaba el default global (2). Esto explica resultados casi idénticos entre runs 0/1/2.
+- Se añadió instrumentación mínima: logs en `PoseGraphPool.acquire()` para confirmar el `model_complexity` aplicado cuando se instancia/reutiliza el modelo.
+- Se aplicó un fix concreto: `stream_pose_and_detection()` ahora pasa `cfg.pose.model_complexity` al estimador.
+
+B) Dónde se define/pasa/modifica `model_complexity`
+1) Valores por defecto / configuración global
+- `MODEL_COMPLEXITY = 2` y `POSE_MODEL_COMPLEXITY = MODEL_COMPLEXITY` en `src/config/settings.py`.
+- `build_pose_kwargs()` usa `POSE_MODEL_COMPLEXITY` cuando `model_complexity` es `None` (por defecto fuerza 2).
+
+2) Config tipada
+- `PoseConfig.model_complexity` en `src/config/models.py` (default = `MODEL_COMPLEXITY`).
+
+3) UI (Streamlit)
+- `src/ui/steps/configure/configure.py`: selectbox para `model_complexity` (0/1/2) y lo guarda en `state.configure_values`.
+- `src/ui/state/model.py`: `CONFIG_DEFAULTS` incluye `model_complexity` = `MODEL_COMPLEXITY`.
+- `src/ui/steps/utils/pipeline.py`: copia `state.configure_values` a `cfg.pose.model_complexity`.
+
+4) Pipeline principal (streaming)
+- `src/C_analysis/streaming.py`: crea `PoseEstimator/CroppedPoseEstimator/RoiPoseEstimator`.
+  - Antes: no pasaba `model_complexity` ⇒ quedaba en el default 2 de los estimadores.
+  - Ahora: pasa `model_complexity=cfg.pose.model_complexity`.
+
+5) Estimadores y pool
+- `src/B_pose_estimation/estimators/mediapipe_estimators.py`: los estimadores reciben `model_complexity` y lo pasan a `PoseGraphPool.acquire()`.
+- `src/B_pose_estimation/estimators/mediapipe_pool.py`: construye `pose_kwargs` con `model_complexity` y crea `mp_pose.Pose(**pose_kwargs)`.
+- `_process_with_recovery()` fuerza `model_complexity=max(model_complexity, 2)` en el fallback (si está activo `enable_recovery_pass`).
+
+6) Detección de ejercicio (otros pipelines)
+- `src/exercise_detection/extraction.py` y `src/exercise_detection/incremental.py` usan `MODEL_COMPLEXITY` directo (hardcoded al default 2) al construir `mp_pose.Pose`. No consumen `cfg.pose.model_complexity`.
+
+C) Flujo completo UI -> Pose (diagrama textual)
+UI (selectbox `model_complexity` en configure)
+  -> `state.configure_values["model_complexity"]`
+  -> `prepare_pipeline_inputs()` copia a `cfg.pose.model_complexity`
+  -> `run_pipeline()` llama `stream_pose_and_detection(cfg, run_id=...)`
+  -> `stream_pose_and_detection()` crea `PoseEstimator/Cropped/Roi` con `model_complexity=cfg.pose.model_complexity`
+  -> `PoseGraphPool.acquire()` -> `build_pose_kwargs(model_complexity=...)`
+  -> `mp.solutions.pose.Pose(**pose_kwargs)`
+
+D) Evidencia runtime (logs sugeridos/implementados)
+- Se añadieron logs en `PoseGraphPool.acquire()`:
+  - INFO al crear una instancia nueva: imprime `run_id`, `model_complexity` y `static_image_mode`.
+  - DEBUG al reutilizar instancias del pool.
+- Con esto, al ejecutar un run, se verá en consola algo como:
+  - "Creating MediaPipe Pose instance (run_id=..., model_complexity=0, static_image_mode=False)."
+  - y para el fallback de recuperación (si está activo): model_complexity=2.
+
+E) Notas sobre MediaPipe Pose y `model_complexity`
+- `model_complexity` controla el tamaño/precisión del modelo:
+  - 0: modelo más ligero/rápido, menor precisión.
+  - 1: equilibrio entre velocidad y precisión.
+  - 2: modelo más pesado, mayor precisión (más lento).
+- Se espera mayor diferencia en escenas complejas: oclusiones, variaciones de iluminación, poses de perfil con auto-ocultación, vídeo con ruido o baja resolución.
+- Con `static_image_mode=False` (tracking) las diferencias pueden notarse menos en escenas limpias; con `static_image_mode=True` puede notarse más al no usar tracking.
+- En este repo, el fallback `_process_with_recovery()` fuerza `model_complexity=2` si se activa `enable_recovery_pass`, por lo que aunque el run use 0/1, la recuperación se eleva a 2 en casos de pérdida de tracking.
+
+F) Recomendaciones y fixes (snippets)
+1) FIX aplicado en pipeline principal (streaming)
+Archivo: `src/C_analysis/streaming.py`
+```python
+with estimator_cls(
+    run_id=run_id,
+    static_image_mode=False,
+    model_complexity=int(getattr(cfg.pose, "model_complexity", MODEL_COMPLEXITY)),
+    min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+    min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
+) as estimator:
+```
+
+2) Instrumentación (logs) aplicada
+Archivo: `src/B_pose_estimation/estimators/mediapipe_pool.py`
+```python
+cls._logger.info(
+    "Creating MediaPipe Pose instance (run_id=%s, model_complexity=%s, static_image_mode=%s).",
+    run_id,
+    pose_kwargs.get("model_complexity"),
+    pose_kwargs.get("static_image_mode"),
+)
+```
+
+3) Recomendación adicional (no implementada)
+- Si se desea que la detección de ejercicio (preclasificador) también respete `cfg.pose.model_complexity`, habría que inyectar ese valor en:
+  - `src/exercise_detection/extraction.py`
+  - `src/exercise_detection/incremental.py`
+  (actualmente usan `MODEL_COMPLEXITY` fijo).
+
+G) Checklist para validar el fix
+1) En la UI, ejecutar 3 runs (0, 1, 2) con el mismo video.
+2) Ver en consola los logs del pool:
+   - Run 0: `model_complexity=0`
+   - Run 1: `model_complexity=1`
+   - Run 2: `model_complexity=2`
+3) Confirmar que el `run_id` cambia entre ejecuciones (debe crear nuevas instancias).
+4) Verificar que los resultados del pipeline sí cambian en frames difíciles (oclusiones, movimiento rápido).
+5) Si está activo `enable_recovery_pass`, comprobar que el fallback loguea `model_complexity=2`.
