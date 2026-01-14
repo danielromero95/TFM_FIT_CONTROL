@@ -57,7 +57,7 @@ DEFAULT_LANDMARK_MIN_VISIBILITY = 0.5
 # Umbrales usados por el contador de repeticiones y la validación de profundidad.
 # Rango de ángulos aceptado para clasificar una sentadilla como profunda.
 SQUAT_HIGH_THRESH = 130.0
-SQUAT_LOW_THRESH = 80.0
+SQUAT_LOW_THRESH = 90.0
 PEAK_PROMINENCE = 10  # Prominencia usada por el detector de picos
 PEAK_DISTANCE = 15    # Distancia mínima en fotogramas entre repeticiones
 
