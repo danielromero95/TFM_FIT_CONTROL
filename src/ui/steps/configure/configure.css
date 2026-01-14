@@ -5,12 +5,17 @@
 
 .step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2)
   [data-testid="stWidgetLabel"] {
+  display: flex;
   justify-content: center;
+  align-items: center;
+  gap: var(--fc-space-1, 0.35rem);
+  margin: 0 auto;
   text-align: center;
 }
 
 .step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2) label {
-  width: 100%;
+  width: auto;
+  margin: 0 auto;
   text-align: center;
 }
 
@@ -18,7 +23,6 @@
   [data-testid="stCheckbox"]
   label {
   display: inline-flex;
-  width: 100%;
   align-items: center;
   justify-content: center;
   gap: var(--fc-space-1, 0.35rem);
@@ -28,6 +32,14 @@
   [data-testid="stCheckbox"]
   label
   p {
-  width: 100%;
+  width: auto;
+  margin: 0;
   text-align: center;
+}
+
+.step--configure [data-testid="stHorizontalBlock"]:nth-of-type(-n + 2)
+  [data-testid="stWidgetLabel"]
+  p {
+  margin: 0;
+  width: auto;
 }
