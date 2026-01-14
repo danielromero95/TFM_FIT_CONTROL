@@ -27,6 +27,7 @@ from src.config.constants import MIN_DETECTION_CONFIDENCE, MIN_TRACKING_CONFIDEN
 from src.config.settings import (
     DEFAULT_LANDMARK_MIN_VISIBILITY,
     DETECTION_SAMPLE_FPS as DEFAULT_DETECTION_SAMPLE_FPS,
+    MODEL_COMPLEXITY,
 )
 from src.B_pose_estimation.estimators import (
     CroppedPoseEstimator,
@@ -261,6 +262,7 @@ def stream_pose_and_detection(
         with estimator_cls(
             run_id=run_id,
             static_image_mode=False,
+            model_complexity=int(getattr(cfg.pose, "model_complexity", MODEL_COMPLEXITY)),
             min_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         ) as estimator:
