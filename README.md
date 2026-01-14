@@ -2,7 +2,7 @@
 
 **Repositorio:** `TFM_FIT_CONTROL`
 **Autor:** Daniel Romero
-**Versión:** 3.2 (30-12-2025)
+**Versión:** 3.3 (14-01-2026)
 
 ---
 
@@ -65,6 +65,14 @@ Es opcional: la generación de resultados sigue funcionando con la información 
    también `video_data.csv`/`video_data.json` con metadatos del vídeo de entrada junto con la configuración efectiva, estadísticas,
    métricas y resto de artefactos.
 
+
+## Novedades en 3.3
+
+- **Diagnósticos completos de detección exportables.** La detección de ejercicio/vista ahora publica un bloque de diagnósticos con puntuaciones crudas/ajustadas, penalizaciones, probabilidades, márgenes, gates de deadlift y resumen de vista. Estos datos se guardan en `RunStats` y se exponen en el reporte; además, cuando hay series de depuración de brazo/barra, se exportan a `arm_debug_timeseries.csv` para auditoría visual.
+- **Separación más robusta entre sentadilla y peso muerto.** Se añade `bar_above_hip_norm` (altura de la barra respecto a la cadera en la ventana inferior) y se utiliza para premiar sentadilla, penalizar peso muerto y desempatar cuando la barra está claramente alta/baja.
+- **Selección de barra/brazo más fiable.** La heurística ahora prioriza proxies con mayor ratio de frames válidos (muñeca/codo/hombro) y evita señales inestables o inconsistentes, reduciendo falsos positivos en clips con tracking parcial.
+- **Normalización del eje Y para métricas.** Se detecta si el eje vertical viene invertido y se corrigen automáticamente las series `*_y`, manteniendo coherencia en comparativas y diagnósticos.
+- **Sincronización vídeo ↔ métricas endurecida.** Se corrigieron desajustes de timebase y repeticiones, mejorando la alineación de overlays, gráficas y marcas de repetición en toda la UI.
 
 ## Novedades en 3.2
 
@@ -248,6 +256,14 @@ valores agregados y las puntuaciones brutas/ajustadas. El log `DEBUG` incluye lo
 fondos por repetición. Son la forma más rápida de comprobar qué señales dominan
 una predicción al calibrar las constantes.
 
+Detalles clave para auditar y ajustar la detección:
+
+- **Diagnósticos serializables.** El clasificador devuelve `raw_scores`, `penalties`, `adjusted_scores`, `probabilities`, `margin`, `tiebreak` y señales específicas como `deadlift_veto`, `bar_above_hip_norm`, `wrist_shoulder_diff_norm` o `wrist_hip_diff_norm`. La clasificación de vista añade un resumen con `lateral_score`, `reliable_frames` y `dispersion`. Todos estos campos se propagan a `RunStats.detection_diagnostics` y, si existe `arm_debug_timeseries`, se exporta a `arm_debug_timeseries.csv` en el reporte para inspección manual.
+- **Métrica de barra vs cadera.** `bar_above_hip_norm` se calcula en la ventana inferior como la diferencia normalizada entre la cadera media y la barra (`bar_y`). Esta señal alimenta gates de deadlift (clamps) y bonos/penalizaciones de sentadilla, además de los desempates.
+- **Selección de proxy de barra/brazo.** `bar_y` se elige entre muñecas/codos/hombros según el ratio de frames válidos; `arm_y` prefiere muñeca/codo pero evita proxies inestables o inconsistentes con la altura de la cadera. Esto reduce ruido cuando hay landmarks incompletos.
+- **Normalización de eje Y.** Si el eje vertical viene invertido (hombros por debajo de cadera en la mediana), las series `*_y` se invierten antes del análisis y se registra `y_axis_flipped` en los diagnósticos.
+- **Confianza combinada con vista.** Cuando la vista es conocida, la confianza final del ejercicio se suaviza con la fiabilidad de la vista (`confidence * (0.6 + 0.4 * view_conf)`), evitando el efecto “cap” cuando la vista es “unknown”.
+
 Ejecuta los tests sintéticos con `pytest -q` para confirmar que los refactors
 mantienen el comportamiento cualitativo esperado en sentadilla, peso muerto,
 press de banca y escenarios desconocidos.
@@ -261,4 +277,4 @@ mientras se preserva el comportamiento actual.
 
 ## NOTA:
 En entornos Windows, si el vídeo con landmarks no se genera, reinstalar opencv-python puede resolver conflictos de codecs (OpenH264/FFmpeg).
-uv pip uninstall opencv-python opencv-contrib-python opencv-python-headless uv pip install opencv-python 
+uv pip uninstall opencv-python opencv-contrib-python opencv-python-headless uv pip install opencv-python
