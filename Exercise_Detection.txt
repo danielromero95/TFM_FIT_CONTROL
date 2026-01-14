@@ -1,0 +1,363 @@
+DETECCIÓN AUTOMÁTICA DEL EJERCICIO: GUÍA COMPLETA
+===============================================
+
+Este documento explica, paso a paso y con todo el detalle relevante, cómo el
+sistema detecta automáticamente el ejercicio (sentadilla, peso muerto, press
+banca) y la vista de cámara (frontal/lateral). Se cubren el flujo completo,
+los módulos implicados, los datos intermedios, la lógica de clasificación y
+las consideraciones de diagnóstico y fiabilidad.
+
+1) VISIÓN GENERAL DEL FLUJO
+---------------------------
+La detección automática se apoya en un pipeline heurístico con tres grandes
+bloques:
+
+1. Extracción de landmarks y series de características.
+2. Segmentación en repeticiones y cálculo de métricas agregadas.
+3. Clasificación del ejercicio y la vista con puntuaciones y reglas.
+
+Hay dos variantes de ejecución:
+
+- **Offline (video en disco):** usa `detect_exercise()` o
+  `detect_exercise_with_diagnostics()`.
+- **Streaming/incremental (frames en vivo):** usa
+  `IncrementalExerciseFeatureExtractor` o `detect_exercise_from_frames()`.
+
+En ambos casos el resultado final es: etiqueta de ejercicio, vista y
+confianza (0-1), con diagnósticos detallados cuando se solicita.
+
+
+2) PUNTO DE ENTRADA: DETECTOR DE EJERCICIOS
+-------------------------------------------
+Módulo: `src/exercise_detection/exercise_detector.py`
+
+Funciones principales:
+
+- `detect_exercise(video_path, max_frames=300)`
+- `detect_exercise_from_frames(frames, fps, max_frames=300)`
+- `detect_exercise_with_diagnostics(video_path, max_frames=300)`
+
+Todas ellas siguen el mismo patrón:
+
+1. Extraen series de características desde frames.
+2. Verifican que hay suficientes frames válidos.
+3. Clasifican ejercicio y vista.
+4. Devuelven etiqueta, vista y confianza.
+
+Si la extracción falla o no hay suficientes frames válidos, se devuelve
+`unknown` con confianza 0.
+
+
+3) EXTRACCIÓN DE FRAMES Y LANDMARKS
+-----------------------------------
+Módulo: `src/exercise_detection/extraction.py`
+
+3.1. Lectura de video y muestreo
+- Se usa `read_video_file_info()` para conocer FPS, número de frames y
+  rotación embebida.
+- Se calcula un *stride* para submuestrear el clip a un máximo de
+  `max_frames` (por defecto 300).
+- La lectura real la hace `extract_frames_stream()` del preprocesado, para
+  reutilizar la lógica de rotación y manejo de contenedores.
+
+3.2. Estimación de pose (MediaPipe)
+- Se crea un `mp_pose.Pose` con:
+  - `model_complexity` fijo (configuración global).
+  - `min_detection_confidence` y `min_tracking_confidence` configurados.
+  - `static_image_mode=False` (tracking temporal).
+
+3.3. Procesamiento por frame
+Cada frame se procesa con `_process_frame()`:
+
+- Convierte a RGB y pasa por MediaPipe.
+- Si no hay landmarks: rellena con NaN.
+- Si hay landmarks:
+  - Se filtran landmarks con `visibility` < mínimo -> se consideran NaN.
+  - Se convierten a diccionarios homogéneos `x,y,z,visibility`.
+  - Se calcula la fiabilidad de la vista con `_evaluate_view_reliability()`.
+  - Se calculan features geométricos con `build_features_from_landmarks()`.
+
+3.4. Fiabilidad para la vista
+La fiabilidad (`reliability`) depende de:
+- Visibilidad suficiente en hombros y caderas.
+- Coordenadas finitas en esos puntos.
+Se guarda además meta‑información: visibilidades y diferencias de signo en `z`
+entre izquierda/derecha, usada para inferir si la cámara está a la izquierda
+o derecha en vista lateral.
+
+3.5. Resultado de la extracción
+La extracción devuelve un `FeatureSeries` con:
+- `data`: series de tiempo para cada feature.
+- `sampling_rate`: tasa efectiva de muestreo.
+- `valid_frames`, `total_frames`: recuentos.
+- `view_reliability`: señales de fiabilidad.
+
+
+4) CONSTRUCCIÓN DE FEATURES
+---------------------------
+Módulo: `src/exercise_detection/features.py`
+
+A partir de landmarks de MediaPipe, se derivan:
+
+- Ángulos articulares: rodilla, cadera, codo, hombro.
+- Medidas geométricas: ancho de hombros, longitud del torso.
+- Puntos clave: pelvis, muñecas, hombros, rodillas, tobillos.
+- Orientación: yaw de hombros, inclinación del torso, etc.
+
+Los cálculos son robustos a NaN y errores de entrada. Se requiere siempre un
+vector mínimo de 33 landmarks, o se lanza error.
+
+
+5) PREPROCESADO: SERIE NORMALIZADA Y SUAVIZADO
+----------------------------------------------
+Módulo: `src/exercise_detection/classification.py`
+
+5.1. Preparación de series
+- Se fuerza que todas las series tengan la misma longitud.
+- Si faltan datos, se rellenan con NaN.
+
+5.2. Corrección del eje Y
+- Se calcula la mediana de hombro‑cadera.
+- Si el eje Y está invertido (hombros por debajo de la cadera), se invierte
+  el signo en todas las series `*_y`.
+- Se registra `y_axis_flipped` en diagnósticos.
+
+5.3. Suavizado
+- Se aplican filtros Savitzky–Golay a series clave (ángulos, ancho, yaw, etc.).
+- El tamaño de ventana depende del FPS efectivo.
+
+
+6) CLASIFICACIÓN DE LA VISTA
+----------------------------
+Módulo: `src/exercise_detection/view.py`
+
+Se calcula una etiqueta de vista (`front`, `side`, `unknown`) con:
+
+- `shoulder_width_norm`: ancho normalizado de hombros.
+- `shoulder_z_delta_abs`: separación en Z entre hombros.
+- `visibility delta`: diferencia de visibilidad entre hombros (para detectar
+  cámara lateral).
+
+Se construye un `lateral_score` ponderado con:
+
+- ancho en pantalla (más estrecho -> lateral),
+- delta en Z,
+- diferencia de visibilidad.
+
+Luego:
+- Si el score ≥ umbral alto -> vista lateral.
+- Si el score ≤ umbral bajo -> vista frontal.
+- Si está en zona intermedia -> se decide por mayor cercanía y baja confianza.
+
+La confianza de vista considera:
+- número de frames fiables,
+- dispersión estadística (MAD de señales),
+- ratio de fiabilidad.
+
+En vista lateral se intenta inferir el lado (izquierda/derecha) usando el
+signo mediano de `z` en hombro/cadera.
+
+
+7) SELECCIÓN DE LADO VISIBLE (LEFT/RIGHT)
+-----------------------------------------
+Módulo: `src/exercise_detection/classification.py`
+
+Para estimar correctamente los ángulos se elige el lado más visible:
+
+- Se cuentan valores finitos en `hip/knee/ankle` por lado.
+- En vista lateral se evalúa además la completitud relativa.
+- Se guarda diagnóstico del lado elegido y la razón.
+
+
+8) PROXY DE BARRA Y BRAZO
+-------------------------
+Módulo: `src/exercise_detection/classification.py`
+
+Como no hay una barra detectada, se usa un proxy basado en:
+
+- `bar_y`: se elige entre muñecas, codos o hombros según ratio de frames
+  válidos y estabilidad.
+- `arm_y`: preferencia por muñecas/codos, pero con reglas de estabilidad y
+  consistencia con hombros y caderas para evitar proxies erráticos.
+
+Esto afecta directamente las métricas del deadlift y squat.
+
+
+9) SEGMENTACIÓN DE REPETICIONES
+-------------------------------
+Módulo: `src/exercise_detection/segmentation.py`
+
+La segmentación se basa en histéresis de rodilla:
+
+- **Bajada:** rodilla <= umbral bajo.
+- **Subida:** rodilla >= umbral alto.
+- Se aplican gaps mínimos para evitar dobles conteos.
+
+Además se valida que exista caída de la barra (proxy `bar_y`) suficiente.
+Si no hay caída, se descarta la repetición.
+
+Resultado: lista de `RepSlice(start, end)` que define cada repetición.
+
+Si no se detecta nada claro, se usa un slice único con todo el clip, pero
+la fase posterior puede decidir que no hay reps y devolver `unknown`.
+
+
+10) MÉTRICAS POR REPETICIÓN Y AGREGADAS
+---------------------------------------
+Módulo: `src/exercise_detection/metrics.py`
+
+Por cada repetición se calculan:
+
+- **Profundidad:** mínimos de rodilla y cadera.
+- **Inclinación:** torso en el punto más bajo.
+- **ROM:** rango de rodilla, cadera, codo.
+- **Barra y brazo:** rango vertical, relación con cadera, distancia a tobillo.
+- **Knee forward y tibia angle.**
+
+Luego se agregan métricas robustas (medianas) para el clip completo:
+
+- `knee_min`, `hip_min`, `elbow_bottom`, `torso_tilt_bottom`, etc.
+- `bar_range_norm`, `hip_range_norm`, `bar_horizontal_std_norm`.
+- Fracciones como `arms_above_hip_fraction` o `bar_near_shoulders_fraction`.
+
+Estas métricas son la base del clasificador final.
+
+
+11) CLASIFICADOR HEURÍSTICO DEL EJERCICIO
+-----------------------------------------
+Módulo: `src/exercise_detection/classifier.py`
+
+Se puntúan tres etiquetas: `squat`, `deadlift`, `bench_press`.
+Cada una tiene:
+
+- **Score bruto** (sumas de señales positivas).
+- **Penalizaciones** por señales contradictorias.
+- **Score ajustado** = max(0, score - penalizaciones).
+
+11.1. Bench press
+- Requisito mínimo: torso casi horizontal.
+- Requiere ROM de codo y barra, penaliza movimiento excesivo de rodilla/cadera.
+- Penaliza barra con movimiento horizontal excesivo.
+- Hay un “gate bonus” si cumple umbrales clave.
+
+11.2. Squat
+- Profundidad de rodilla/cadera, torso relativamente vertical.
+- Señales de rodilla hacia adelante y ROM mínimo.
+- Bonificaciones si la barra está alta (muñeca cerca del hombro).
+- Penalización por tibia muy inclinada y por barra baja.
+- Penaliza señales tipo “bisagra” (deadlift‑like) cuando el torso cae demasiado
+  o la barra está muy por debajo.
+
+11.3. Deadlift
+- Torso inclinado, muñeca baja respecto a la cadera, codo casi extendido.
+- Barra alineada con tobillo y rango vertical suficiente.
+- Penalizaciones si hay señales de squat o bench.
+- Penaliza demasiada oscilación horizontal de la barra.
+
+11.4. Gates y vetos
+- **Deadlift arm gate:** si la barra está demasiado arriba de la cadera, se
+  aplica un clamp.
+- **Deadlift bar gate:** si la barra parece de sentadilla, se clampa.
+- **Arm height gate:** si los brazos están muy altos o muy bajos se ajustan
+  scores de squat/deadlift.
+- **Deadlift veto:** si señales de deadlift fuertes pero condiciones de
+  movimiento insuficientes, se reduce score de squat.
+
+11.5. Selección final
+- Se convierten scores ajustados a probabilidades softmax.
+- Si el mejor score es bajo o el margen con el segundo es pequeño, se aplica
+  desempate con reglas específicas (por ejemplo, profundidad de squat o
+  posición relativa barra‑cadera).
+- La confianza final es la probabilidad del ganador, pero puede caer a cero
+  si no supera umbral mínimo.
+
+
+12) INTEGRACIÓN CON LA VISTA Y CONFIDENCIA FINAL
+------------------------------------------------
+La confianza del ejercicio se ajusta con la fiabilidad de la vista:
+
+- Si la vista es conocida y fiable, la confianza se suaviza con
+  `confidence * (0.6 + 0.4 * view_confidence)`.
+- Si el ejercicio se decide como `unknown`, la vista también se marca `unknown`.
+
+
+13) DIAGNÓSTICOS Y AUDITORÍA
+----------------------------
+Cuando se usa `detect_exercise_with_diagnostics()` o el flujo incremental, se
+adjuntan diagnósticos completos:
+
+- Scores brutos, penalizaciones y ajustados.
+- Probabilidades por ejercicio.
+- Margen y regla de desempate.
+- Señales específicas: `bar_above_hip_norm`, `wrist_shoulder_diff_norm`,
+  `wrist_hip_diff_norm`, etc.
+- Resultados de la vista (score lateral, fiabilidad, dispersión).
+- Serie `arm_debug_timeseries` para inspección visual.
+
+Estos diagnósticos se propagan a la pipeline principal y pueden exportarse en
+reportes para auditoría.
+
+
+14) DETECCIÓN INCREMENTAL (STREAMING)
+-------------------------------------
+Módulo: `src/exercise_detection/incremental.py`
+
+El extractor incremental:
+
+- Calcula un stride para muestrear la señal según FPS de origen.
+- Acumula features en buffers dinámicos.
+- Puede recibir frames crudos o landmarks ya calculados.
+- Mantiene contadores de muestras totales y válidas.
+- En `finalize()` ejecuta la misma clasificación heurística.
+
+Se usa en el pipeline de streaming para ahorrar tiempo y poder actualizar la
+UI sin recálculos completos.
+
+
+15) INTEGRACIÓN EN LA PIPELINE Y LA UI
+--------------------------------------
+- En la UI hay un paso “Detect” que ejecuta `detect_exercise_with_diagnostics`
+  y guarda el resultado en el estado de sesión.
+- En la pipeline de análisis (`stream_pose_and_detection`), si ya existe un
+  resultado pre‑detectado se reutiliza para evitar doble ejecución.
+- El resultado final se guarda en `RunStats` junto con diagnósticos y aparece
+  en el reporte final y la tabla de resultados.
+
+
+16) PARÁMETROS Y AJUSTE
+-----------------------
+Todos los umbrales de detección están centralizados en
+`src/exercise_detection/constants.py`. Ahí se ajustan:
+
+- Ventanas de suavizado.
+- Umbrales de rodilla/cadera/codo.
+- Pesos de scoring y penalizaciones.
+- Reglas de vista y fiabilidad.
+
+Esto permite calibrar el comportamiento sin tocar el código lógico.
+
+
+17) RESUMEN CORTO (DE PRINCIPIO A FIN)
+--------------------------------------
+1. Se muestrean frames del vídeo.
+2. Se aplica MediaPipe Pose y se generan landmarks.
+3. Se derivan features geométricas por frame.
+4. Se corrige el eje Y y se suavizan señales clave.
+5. Se clasifica la vista y se selecciona el lado visible.
+6. Se segmentan repeticiones (histéresis + validación de barra).
+7. Se calculan métricas por rep y agregadas.
+8. Se puntúan squat/deadlift/bench con heurísticas.
+9. Se resuelve etiqueta, vista y confianza final.
+10. Se exportan diagnósticos y se integran en la UI/pipeline.
+
+
+18) CONSEJOS PARA AUDITAR Y MODIFICAR
+-------------------------------------
+- Revisa los logs INFO/DEBUG de clasificación: indican qué señales dominan.
+- Ajusta umbrales en `constants.py` antes de modificar la lógica.
+- Usa los diagnósticos y el CSV `arm_debug_timeseries` para validar proxies
+  de barra y brazo.
+- Valida que haya suficientes frames válidos (MIN_VALID_FRAMES), ya que si no
+  hay datos suficientes el resultado será `unknown`.
+
+FIN DEL DOCUMENTO

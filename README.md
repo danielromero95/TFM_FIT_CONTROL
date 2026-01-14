@@ -242,6 +242,8 @@ Es opcional: la generación de resultados sigue funcionando con la información 
 
 ## Notas para desarrolladores: ajuste del clasificador de ejercicios
 
+Consulta `Exercise_Detection.txt` para una explicación completa y end‑to‑end de la detección automática del ejercicio (extracción, segmentación, métricas, clasificación y diagnósticos).
+
 Las heurísticas implementadas en `src/exercise_detection` exponen todos los umbrales
 ajustables en `constants.py`, de modo que se pueden modificar sin tocar los módulos de
 lógica:
