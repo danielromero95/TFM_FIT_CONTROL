@@ -80,7 +80,7 @@ from .constants import (
     SQUAT_KNEE_FORWARD_WEIGHT,
     SQUAT_MIN_ROM_DEG,
     SQUAT_ROM_WEIGHT,
-    SQUAT_TIBIA_MAX_DEG,
+    SQUAT_TIBIA_MIN_DEG,
     SQUAT_TIBIA_PENALTY_WEIGHT,
     SQUAT_TORSO_TILT_MAX_DEG,
     SQUAT_TORSO_WEIGHT,
@@ -291,7 +291,9 @@ def _squat_score(agg: AggregateMetrics) -> Tuple[float, float]:
     arm_ok = np.isfinite(wrist_diff) and wrist_diff <= SQUAT_WRIST_SHOULDER_DIFF_MAX_NORM
 
     knee_forward = _margin_above(np.abs(agg.knee_forward_norm), SQUAT_KNEE_FORWARD_MIN_NORM)
-    tibia_penalty = _margin_above(agg.tibia_angle_deg, SQUAT_TIBIA_MAX_DEG)
+    # tibia_angle_deg se mide respecto a la vertical (0° = tibia vertical).
+    # Penalizamos la falta de dorsiflexión (tibia demasiado vertical).
+    tibia_penalty = _margin_below(agg.tibia_angle_deg, SQUAT_TIBIA_MIN_DEG)
     knee_rom_margin = _margin_above(agg.knee_rom, SQUAT_MIN_ROM_DEG)
     bench_like = np.isfinite(agg.torso_tilt_bottom) and agg.torso_tilt_bottom >= BENCH_TORSO_HORIZONTAL_DEG
     arms_above_hip = _arms_above_hip_fraction(agg)
